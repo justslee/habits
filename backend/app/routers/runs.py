@@ -270,8 +270,8 @@ def get_plan_week(plan_id: int, week_num: int, db: Session = Depends(get_db)):
 
 
 @router.get("/today-plan", response_model=TodayRunResponse)
-def get_today_plan(db: Session = Depends(get_db)):
-    """Get today's planned run (if any)."""
+async def get_today_plan(db: Session = Depends(get_db)):
+    """Get today's planned run (if any). Adjusts for Whoop recovery."""
     user = db.query(User).first()
     if not user:
         return TodayRunResponse(has_planned_run=False)
@@ -292,6 +292,31 @@ def get_today_plan(db: Session = Depends(get_db)):
 
     if not planned:
         return TodayRunResponse(has_planned_run=False)
+
+    # Check Whoop recovery — adjust plan if low
+    recovery_score = None  # type: Optional[float]
+    try:
+        from app.services.whoop import fetch_whoop_data
+        whoop_data = await fetch_whoop_data()
+        recovery_score = whoop_data.get("recovery_score")
+
+        if recovery_score is not None and recovery_score < 33:
+            # Very low recovery → suggest rest instead
+            planned.description = (
+                f"Recovery at {recovery_score:.0f}% — rest recommended. "
+                f"Original plan: {planned.description or planned.run_type}"
+            )
+            planned.run_type = "recovery"
+        elif recovery_score is not None and recovery_score < 50:
+            # Low recovery → downgrade to easy
+            if planned.run_type in ("tempo", "intervals", "fartlek", "progression"):
+                planned.description = (
+                    f"Recovery at {recovery_score:.0f}% — scaled to easy. "
+                    f"Original: {planned.run_type} run"
+                )
+                planned.run_type = "easy"
+    except Exception:
+        pass  # Whoop unavailable — use plan as-is
 
     return TodayRunResponse(
         has_planned_run=True,

@@ -126,6 +126,7 @@ class TodayRunResponse(BaseModel):
     plan_name: Optional[str] = None
     week_number: Optional[int] = None
     total_weeks: Optional[int] = None
+    recovery_score: Optional[float] = None
 
 
 class PostRunFeedbackResponse(BaseModel):

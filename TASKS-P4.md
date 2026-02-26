@@ -3,7 +3,7 @@
 ## UI Revamp (Pre-Requisite)
 
 ### TASK-P4-UI-1: Merge Progress + Dashboard into unified Progress tab
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] 4-tab navigation: Log, Train, Run, Progress
@@ -17,7 +17,7 @@
 - **Verify**: `npx expo export --platform web`
 
 ### TASK-P4-UI-2: Exercise-to-muscle-group mapping
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-UI-1
 - **Acceptance Criteria**:
   - [ ] Backend: muscle_group field on ExerciseProfile model (or mapping table)
@@ -31,7 +31,7 @@
 ## Training Plan System
 
 ### TASK-P4-010: Training plan data models & migrations
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] TrainingPlan model (goal_type, start/end date, current_week, total_weeks, weekly_plan JSON, status, fitness_level)
@@ -42,7 +42,7 @@
 - **Verify**: `pytest tests/test_run_models.py`
 
 ### TASK-P4-011: Training plan API endpoints
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-010
 - **Acceptance Criteria**:
   - [ ] POST /api/v1/runs/plans — create new plan (goal, fitness level, available days, race date)
@@ -54,7 +54,7 @@
 - **Verify**: `pytest tests/test_run_api.py`
 
 ### TASK-P4-012: AI training plan generator service
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-011
 - **Acceptance Criteria**:
   - [ ] Generate multi-week plan via Clawdbot based on goal, fitness level, schedule
@@ -74,7 +74,7 @@
 ## Live Run Tracking (Runna-Quality)
 
 ### TASK-P4-020: Run screen redesign — Runna-style UI
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-UI-1
 - **Acceptance Criteria**:
   - [ ] Pre-run screen: "Today's Run" card with type, distance, target pace, structure preview
@@ -89,7 +89,7 @@
   - [ ] Run type color coding (easy=blue, tempo=orange, intervals=red, long=green, recovery=gray)
 
 ### TASK-P4-021: Guided run audio coaching
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-020, TASK-P4-012
 - **Acceptance Criteria**:
   - [ ] Audio cues via expo-speech at segment transitions
@@ -103,7 +103,7 @@
   - [ ] Audio works with screen locked
 
 ### TASK-P4-022: Route pace coloring
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-020
 - **Acceptance Criteria**:
   - [ ] Route polyline colored by pace segments (green=on target, yellow=slow, red=too slow)
@@ -115,7 +115,7 @@
 ## Post-Run Experience
 
 ### TASK-P4-030: Post-run summary screen
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-020
 - **Acceptance Criteria**:
   - [ ] Celebration animation on PR
@@ -129,7 +129,7 @@
   - [ ] "Save & Close" button
 
 ### TASK-P4-031: PR detection engine
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-010
 - **Acceptance Criteria**:
   - [ ] Detect PRs for: fastest mile, 5K, 10K, half marathon, marathon
@@ -143,7 +143,7 @@
 ## History & Analytics
 
 ### TASK-P4-040: Run history screen (enhanced)
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-011
 - **Acceptance Criteria**:
   - [ ] Run list: route thumbnail, distance, pace, date, run type badge
