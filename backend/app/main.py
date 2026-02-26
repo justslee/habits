@@ -3,6 +3,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers import entries
+
 app = FastAPI(
     title="Mastery Tracker API",
     description="Personal progress tracking API for compounding skill development",
@@ -17,6 +19,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(entries.router)
 
 
 @app.get("/health")
