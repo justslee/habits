@@ -1,0 +1,36 @@
+# Expo
+.expo/
+dist/
+web-build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# iOS
+*.mobileprovision
+*.cer
+*.p8
+*.p12
+ios/
+
+# Android (not used but just in case)
+android/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Mac
+.DS_Store
+
+# Testing
+coverage/
+
+# EAS
+.eas/

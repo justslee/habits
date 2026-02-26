@@ -7,22 +7,24 @@
 
 ```bash
 # One-time setup (user runs these manually)
-brew install cloudflared node pnpm python@3.12
-pip install fastapi uvicorn sqlalchemy --break-system-packages
+brew install cloudflared node python@3.12
+npm install -g eas-cli expo-cli
 ```
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in values:
+### Backend
 ```bash
+cd backend
 cp .env.example .env
+# Edit .env with your values
 ```
 
-Required vars (see `.env.example` for full list):
-```
-DATABASE_URL=postgresql://localhost:5432/myapp
-VITE_API_URL=http://localhost:8000  # local dev
-# VITE_API_URL=https://api.yourdomain.com  # production (tunnel)
+### Mobile
+```bash
+cd mobile
+cp .env.example .env
+# Edit .env with your API URL
 ```
 
 ---
@@ -30,9 +32,14 @@ VITE_API_URL=http://localhost:8000  # local dev
 ## Backend (Local)
 
 ```bash
-# Start
+# First time setup
 cd backend
-pip install -r requirements.txt --break-system-packages
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Start server
+source venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 
 # Health check
@@ -40,49 +47,34 @@ curl http://localhost:8000/health
 # Expected: {"status": "ok"}
 ```
 
-## Frontend (Local Dev)
+## Mobile (Local Dev)
 
 ```bash
-# Start
-cd frontend
-pnpm install
-pnpm dev
+# First time setup
+cd mobile
+npm install
 
-# Verify
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5173
-# Expected: 200
+# Start Expo dev server
+npm start
+
+# Run on iOS Simulator (requires Xcode)
+npm run ios
+
+# Or scan QR code with Expo Go app on iPhone
 ```
-
-## Frontend (Deploy to Vercel)
-
-```bash
-# First time: link project
-cd frontend
-pnpm i -g vercel
-vercel link
-
-# Deploy (production)
-vercel --prod
-
-# Verify
-curl -s -o /dev/null -w "%{http_code}" https://<project>.vercel.app
-# Expected: 200
-```
-
-> **Note**: After first manual deploy, Vercel auto-deploys on push to `main` if GitHub integration is connected.
 
 ---
 
-## Cloudflare Tunnel (Expose Backend Securely)
+## Cloudflare Tunnel (Expose Backend to iPhone)
 
 ```bash
 # One-time setup
 cloudflared tunnel login
-cloudflared tunnel create my-app
-cloudflared tunnel route dns my-app api.yourdomain.com
+cloudflared tunnel create mastery-tracker
+cloudflared tunnel route dns mastery-tracker api.yourdomain.com
 
 # Run tunnel (connects localhost:8000 to your domain)
-cloudflared tunnel run --url http://localhost:8000 my-app
+cloudflared tunnel run --url http://localhost:8000 mastery-tracker
 
 # Quick tunnel (no domain needed, gives you a random URL)
 cloudflared tunnel --url http://localhost:8000
@@ -100,12 +92,12 @@ Open 3 terminals:
 
 ```bash
 # Terminal 1: Backend
-cd backend && uvicorn app.main:app --reload --port 8000
+cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
 
-# Terminal 2: Frontend
-cd frontend && pnpm dev
+# Terminal 2: Mobile
+cd mobile && npm start
 
-# Terminal 3: Tunnel (optional, for mobile access)
+# Terminal 3: Tunnel (optional, for iPhone access outside dev mode)
 cloudflared tunnel --url http://localhost:8000
 ```
 
@@ -115,13 +107,30 @@ cloudflared tunnel --url http://localhost:8000
 
 ```bash
 # Backend tests
-cd backend && pytest -v
+cd backend && source venv/bin/activate && pytest -v
 
-# Frontend tests
-cd frontend && pnpm test
+# Mobile tests
+cd mobile && npm test
 
 # All tests (from repo root)
-cd backend && pytest -v && cd ../frontend && pnpm test
+cd backend && source venv/bin/activate && pytest -v && cd ../mobile && npm test
+```
+
+---
+
+## EAS Build (TestFlight Deployment)
+
+```bash
+# One-time setup
+cd mobile
+eas login
+eas build:configure
+
+# Build for iOS
+eas build --platform ios --profile production
+
+# Submit to TestFlight
+eas submit --platform ios
 ```
 
 ---
@@ -132,14 +141,14 @@ cd backend && pytest -v && cd ../frontend && pnpm test
 # Backend alive
 curl -f http://localhost:8000/health || echo "FAIL: backend not running"
 
-# Frontend alive
-curl -sf http://localhost:5173 > /dev/null || echo "FAIL: frontend not running"
+# Backend returns valid JSON
+curl -sf http://localhost:8000/ | python3 -c "import sys,json; json.load(sys.stdin)" || echo "FAIL: API not returning valid JSON"
 
-# API returns valid JSON (update endpoints as features are added)
-curl -sf http://localhost:8000/api/v1/health | python3 -c "import sys,json; json.load(sys.stdin)" || echo "FAIL: API not returning valid JSON"
+# Mobile tests pass
+cd mobile && npm test || echo "FAIL: mobile tests failed"
 
-# PWA manifest exists
-curl -sf http://localhost:5173/manifest.json | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'name' in d" || echo "FAIL: PWA manifest missing or invalid"
+# Backend tests pass
+cd backend && source venv/bin/activate && pytest -v || echo "FAIL: backend tests failed"
 ```
 
 ---
@@ -149,7 +158,7 @@ curl -sf http://localhost:5173/manifest.json | python3 -c "import sys,json; d=js
 | Problem | Fix |
 |---------|-----|
 | Port 8000 in use | `lsof -ti:8000 \| xargs kill` |
-| Port 5173 in use | `lsof -ti:5173 \| xargs kill` |
 | Tunnel auth expired | `cloudflared tunnel login` (re-auth) |
-| Vercel deploy fails | Check `vercel logs` or Vercel dashboard |
-| DB connection refused | Start postgres: `brew services start postgresql@16` |
+| Expo not starting | `cd mobile && npx expo start --clear` |
+| iOS Simulator not found | `xcrun simctl list devices` |
+| Python venv not activated | `source backend/venv/bin/activate` |
