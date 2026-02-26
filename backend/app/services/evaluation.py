@@ -18,7 +18,7 @@ from app.models.pillar import Pillar
 logger = logging.getLogger(__name__)
 
 CLAWDBOT_URL = "http://localhost:18789/v1/chat/completions"
-CLAWDBOT_MODEL = "claude-sonnet-4-20250514"
+CLAWDBOT_MODEL = "claude-opus-4-6"
 
 SYSTEM_PROMPT = """You are the Honest Mirror — a brutally honest AI evaluator for a personal mastery tracking system.
 
