@@ -1,0 +1,17 @@
+{
+  "name": "Mastery Tracker",
+  "short_name": "Mastery",
+  "description": "Daily mastery, fitness, and run tracking",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090F",
+  "theme_color": "#6366F1",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

@@ -14,7 +14,16 @@ import {
   Platform, RefreshControl, KeyboardAvoidingView, Alert, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as ExpoHaptics from 'expo-haptics';
+
+// Safe haptics wrapper — no-ops on web
+const haptic = {
+  light: () => { if (Platform.OS !== 'web') ExpoHaptics.impactAsync(ExpoHaptics.ImpactFeedbackStyle.Light).catch(() => {}); },
+  medium: () => { if (Platform.OS !== 'web') ExpoHaptics.impactAsync(ExpoHaptics.ImpactFeedbackStyle.Medium).catch(() => {}); },
+  success: () => { if (Platform.OS !== 'web') ExpoHaptics.notificationAsync(ExpoHaptics.NotificationFeedbackType.Success).catch(() => {}); },
+  warning: () => { if (Platform.OS !== 'web') ExpoHaptics.notificationAsync(ExpoHaptics.NotificationFeedbackType.Warning).catch(() => {}); },
+  selection: () => { if (Platform.OS !== 'web') ExpoHaptics.selectionAsync().catch(() => {}); },
+};
 import { colors, spacing, typography, radius } from '../theme';
 
 const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
@@ -119,7 +128,7 @@ export default function DailyScreen() {
         const todo = await resp.json();
         setTodos(prev => [...prev, todo]);
         setNewTodoText('');
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        haptic.light();
       }
     } catch {}
     setAddingTodo(false);
@@ -131,11 +140,7 @@ export default function DailyScreen() {
       if (resp.ok) {
         const updated = await resp.json();
         setTodos(prev => prev.map(t => t.id === id ? updated : t));
-        Haptics.notificationAsync(
-          updated.completed
-            ? Haptics.NotificationFeedbackType.Success
-            : Haptics.NotificationFeedbackType.Warning
-        );
+        updated.completed ? haptic.success() : haptic.warning();
       }
     } catch {}
   };
@@ -162,11 +167,7 @@ export default function DailyScreen() {
       if (resp.ok) {
         const updated = await resp.json();
         setHabits(prev => prev.map(h => h.id === id ? updated : h));
-        Haptics.impactAsync(
-          updated.completed_today
-            ? Haptics.ImpactFeedbackStyle.Medium
-            : Haptics.ImpactFeedbackStyle.Light
-        );
+        updated.completed_today ? haptic.medium() : haptic.light();
       }
     } catch {}
   };
@@ -185,7 +186,7 @@ export default function DailyScreen() {
         setHabits(prev => [...prev, habit]);
         setNewHabitName('');
         setShowAddHabit(false);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        haptic.light();
       }
     } catch {}
   };
@@ -413,7 +414,7 @@ export default function DailyScreen() {
           <TouchableOpacity
             key={tab}
             style={[s.tab, activeTab === tab && s.tabActive]}
-            onPress={() => { setActiveTab(tab); Haptics.selectionAsync(); }}
+            onPress={() => { setActiveTab(tab); haptic.selection(); }}
           >
             <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
               {tab === 'today' ? 'Today' : 'Check-In'}
@@ -500,12 +501,15 @@ const s = StyleSheet.create({
   // Add row
   addRow: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card,
-    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: spacing.md, marginBottom: spacing.sm,
   },
   addInput: {
-    flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text,
-  },
+    flex: 1, paddingVertical: 14, fontSize: 15, color: colors.text,
+    // @ts-ignore — web-only property to remove blue focus ring
+    outlineStyle: 'none',
+    outlineWidth: 0,
+  } as any,
   addBtn: { marginLeft: spacing.sm },
 
   // Habits

@@ -13,8 +13,17 @@
  */
 
 import * as Speech from 'expo-speech';
-import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
+
+// Lazy-import haptics to avoid web crash
+const hapticNotify = async () => {
+  if (Platform.OS === 'web') return;
+  try { const H = await import('expo-haptics'); H.notificationAsync(H.NotificationFeedbackType.Success); } catch {}
+};
+const hapticHeavy = async () => {
+  if (Platform.OS === 'web') return;
+  try { const H = await import('expo-haptics'); H.impactAsync(H.ImpactFeedbackStyle.Heavy); } catch {}
+};
 import { RunState, SplitData, formatPace, formatDuration } from './gps';
 
 export interface PlannedSegment {
@@ -74,13 +83,13 @@ function speak(text: string): void {
 
 function hapticMile(): void {
   try {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    hapticNotify();
   } catch {}
 }
 
 function hapticSegment(): void {
   try {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    hapticHeavy();
   } catch {}
 }
 

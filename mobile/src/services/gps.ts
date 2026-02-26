@@ -5,6 +5,7 @@
  * and split detection.
  */
 
+import { Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
@@ -59,6 +60,7 @@ function haversineMeters(
  * Request location permissions.
  */
 export async function requestLocationPermissions(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
   const { status: fg } = await Location.requestForegroundPermissionsAsync();
   if (fg !== 'granted') return false;
 
@@ -178,29 +180,30 @@ export function formatDuration(ms: number): string {
 /**
  * Define background location task.
  */
-TaskManager.defineTask(LOCATION_TASK, ({ data, error }: any) => {
-  if (error) return;
-  if (data?.locations) {
-    // Background updates are handled via the global event emitter
-    // The RunScreen subscribes to these updates
-    const locations = data.locations as Location.LocationObject[];
-    // Store in a global for the foreground to pick up
-    (globalThis as any).__backgroundLocations = [
-      ...((globalThis as any).__backgroundLocations || []),
-      ...locations.map((l: Location.LocationObject) => ({
-        latitude: l.coords.latitude,
-        longitude: l.coords.longitude,
-        altitude: l.coords.altitude,
-        timestamp: l.timestamp,
-      })),
-    ];
-  }
-});
+// Only define background task on native (crashes on web)
+if (Platform.OS !== 'web') {
+  TaskManager.defineTask(LOCATION_TASK, ({ data, error }: any) => {
+    if (error) return;
+    if (data?.locations) {
+      const locations = data.locations as Location.LocationObject[];
+      (globalThis as any).__backgroundLocations = [
+        ...((globalThis as any).__backgroundLocations || []),
+        ...locations.map((l: Location.LocationObject) => ({
+          latitude: l.coords.latitude,
+          longitude: l.coords.longitude,
+          altitude: l.coords.altitude,
+          timestamp: l.timestamp,
+        })),
+      ];
+    }
+  });
+}
 
 /**
  * Start background location tracking.
  */
 export async function startBackgroundTracking(): Promise<void> {
+  if (Platform.OS === 'web') return;
   await Location.startLocationUpdatesAsync(LOCATION_TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 3000,
@@ -217,6 +220,7 @@ export async function startBackgroundTracking(): Promise<void> {
  * Stop background location tracking.
  */
 export async function stopBackgroundTracking(): Promise<void> {
+  if (Platform.OS === 'web') return;
   const isTracking = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK);
   if (isTracking) {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK);

@@ -15,7 +15,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.masterytracker.app",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification", "location"]
+        "UIBackgroundModes": [
+          "remote-notification",
+          "location"
+        ]
       }
     },
     "plugins": [
@@ -34,9 +37,20 @@
         }
       ]
     ],
-    "platforms": ["ios", "web"],
+    "platforms": [
+      "ios",
+      "web"
+    ],
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "backgroundColor": "#09090F",
+      "themeColor": "#6366F1",
+      "name": "Mastery Tracker",
+      "shortName": "Mastery",
+      "description": "Daily mastery, fitness, and run tracking",
+      "display": "standalone",
+      "orientation": "portrait"
     },
     "extra": {
       "eas": {
