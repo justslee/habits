@@ -938,3 +938,67 @@ Run type definitions:
 - Apple Watch companion (Phase 5?)
 - Music integration (plays alongside, no in-app controls)
 - Live tracking sharing (share location with others)
+
+---
+
+## Phase 5: Polish, Mastery Depth & Micro-Interactions
+
+### Feature P5-1: Robinhood-Level Charts & Haptic Scrubbing
+
+**Description**: All charts across the app should feel like Robinhood/Kalshi — interactive, animated, with haptic feedback on scrub. Numbers animate on load (count-up). Skeleton loading states instead of spinners.
+
+**Acceptance Criteria**:
+- [ ] AC-P5-1.1: Depth progression chart supports touch-scrubbing with haptic ticks per data point
+- [ ] AC-P5-1.2: Radar chart animates on mount (segments grow outward)
+- [ ] AC-P5-1.3: All numeric values animate on load (count-up from 0 to actual value)
+- [ ] AC-P5-1.4: Heatmap cells respond to long-press with tooltip (date + count)
+- [ ] AC-P5-1.5: Skeleton loading screens for all data-dependent views (shimmer effect, not spinners)
+- [ ] AC-P5-1.6: Pull-to-refresh triggers subtle haptic
+- [ ] AC-P5-1.7: Tab switches and button presses all have selection haptics
+- [ ] AC-P5-1.8: Chart value labels follow finger position during scrub (floating tooltip)
+- [ ] AC-P5-1.9: Victory-native charts with smooth gesture handler integration
+- [ ] AC-P5-1.10: Weekly mileage bar chart with haptic scrub in running analytics
+
+### Feature P5-2: Pillar Mastery Depth — Concept Trees
+
+**Description**: Each pillar is clickable from the Progress/Dashboard tab and expands into a mastery tree of sub-concepts. Concepts are ordered from foundational → advanced, forming a skill tree that gets deeper toward true mastery. Users can see which concepts they've covered and which are next.
+
+**Acceptance Criteria**:
+- [ ] AC-P5-2.1: Tapping a pillar on Progress screen navigates to PillarDetailScreen
+- [ ] AC-P5-2.2: PillarDetailScreen shows a concept tree / skill map for that pillar
+- [ ] AC-P5-2.3: Concepts ordered in suggested mastery sequence (foundational → intermediate → advanced)
+- [ ] AC-P5-2.4: Each concept has a status: not started / in progress / mastered (based on check-in data)
+- [ ] AC-P5-2.5: Concept status derived from DailyEntry descriptions + AI classification (LLM matches entries to concepts)
+- [ ] AC-P5-2.6: Concept tree is seeded via LLM: given a pillar name + description, generate ~20-40 sub-concepts in mastery order
+- [ ] AC-P5-2.7: User can add/remove/reorder concepts manually
+- [ ] AC-P5-2.8: Visual progress bar per pillar showing % of concepts at each status level
+- [ ] AC-P5-2.9: Tapping a concept shows related DailyEntries and suggested next resources
+- [ ] AC-P5-2.10: "Next to learn" recommendation surfaced on the Daily tab based on concept gaps
+
+### Feature P5-3: Activity Heatmap Fix & Enhancement
+
+**Description**: The GitHub-style activity heatmap on the Progress/Mastery tab is currently broken on web. Fix rendering, add interactivity, and make it responsive.
+
+**Acceptance Criteria**:
+- [ ] AC-P5-3.1: Heatmap renders correctly on both native and web
+- [ ] AC-P5-3.2: Cells are colored by intensity (0 = dark, 1 = light green, 2+ = bright green)
+- [ ] AC-P5-3.3: Long-press/hover on a cell shows tooltip with date and entry count
+- [ ] AC-P5-3.4: Heatmap scrolls horizontally to show 6 months of data
+- [ ] AC-P5-3.5: Month labels shown above columns
+- [ ] AC-P5-3.6: Current day highlighted with accent border
+- [ ] AC-P5-3.7: Empty state: "Start checking in to build your streak" message
+
+### Feature P5-4: Daily Tab — Habits & Todo Polish
+
+**Description**: Refine the Daily tab's todo and habit system with better UX: drag-to-reorder, swipe-to-delete, habit customization (icon picker, color picker), and smart suggestions.
+
+**Acceptance Criteria**:
+- [ ] AC-P5-4.1: Drag-to-reorder todos and habits (react-native-draggable-flatlist or gesture handler)
+- [ ] AC-P5-4.2: Swipe-left to delete (no alert confirmation needed)
+- [ ] AC-P5-4.3: Habit icon picker (grid of Ionicons to choose from)
+- [ ] AC-P5-4.4: Habit color picker (preset palette matching design system)
+- [ ] AC-P5-4.5: "Suggested todos" from AI based on incomplete concept tree areas
+- [ ] AC-P5-4.6: Todo estimated time picker (15/30/45/60 min quick select)
+- [ ] AC-P5-4.7: Completed todos animate out (strikethrough + fade, Things 3 style)
+- [ ] AC-P5-4.8: Habit streak visualization (mini calendar or ring fill)
+- [ ] AC-P5-4.9: Daily completion summary notification at 9pm ("You completed 4/6 tasks today")

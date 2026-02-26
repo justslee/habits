@@ -202,7 +202,7 @@ export default function ProgressScreen() {
                   <View key={wi} style={{ gap: 2 }}>
                     {week.map((day, di) => (
                       <View key={`${wi}-${di}`} style={[s.heatCell,
-                        { backgroundColor: day ? HEATMAP_COLORS[intensityLevel(day.count)] : 'transparent' }]} />
+                        { backgroundColor: day ? HEATMAP_COLORS[intensityLevel(day.count)] : colors.card }]} />
                     ))}
                   </View>
                 ))}
@@ -398,7 +398,7 @@ const s = StyleSheet.create({
   streakName: { ...typography.body, color: colors.text },
 
   heatmapGrid: { flexDirection: 'row', gap: 2, paddingVertical: spacing.sm },
-  heatCell: { width: 12, height: 12, borderRadius: 2 },
+  heatCell: { width: 12, height: 12, borderRadius: 2, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.03)' },
 
   groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   groupTitle: { ...typography.title3, color: colors.text },
