@@ -15,6 +15,7 @@ import {
 } from '../services/audioCoach';
 import { getTodayRun, TodayRunData, getPostRunFeedback } from '../api/client';
 import MapView from '../components/MapView';
+import PacePolyline from '../components/PacePolyline';
 import { colors, spacing, typography, radius } from '../theme';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
@@ -370,7 +371,13 @@ export default function RunScreen() {
       {lastPoint ? (
         <MapView style={s.map}
           region={{ latitude: lastPoint.latitude, longitude: lastPoint.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }}
-          showsUserLocation mapType="standard" />
+          showsUserLocation mapType="standard"
+        >
+          <PacePolyline
+            points={points}
+            targetPaceSeconds={planned?.target_pace_seconds || null}
+          />
+        </MapView>
       ) : (
         <View style={s.mapPlaceholder}>
           <Ionicons name="navigate" size={32} color={colors.accent} />

@@ -10,6 +10,7 @@ export default function MapView(props: any) {
 }
 
 export const Marker = (_props: any) => null;
+export const Polyline = (_props: any) => null;
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' },
