@@ -8,6 +8,7 @@ import CheckInScreen from './src/screens/CheckInScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
 import RunScreen from './src/screens/RunScreen';
 import RunHistoryScreen from './src/screens/RunHistoryScreen';
+import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import { colors } from './src/theme';
 
@@ -19,6 +20,7 @@ function RunStackScreen() {
     <RunStack.Navigator screenOptions={{ headerShown: false }}>
       <RunStack.Screen name="RunMain" component={RunScreen} />
       <RunStack.Screen name="RunHistory" component={RunHistoryScreen} />
+      <RunStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
     </RunStack.Navigator>
   );
 }

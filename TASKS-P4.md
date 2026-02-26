@@ -178,7 +178,7 @@
 ## Integration
 
 ### TASK-P4-050: Unified Progress tab — running section
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-041, TASK-P4-UI-1
 - **Acceptance Criteria**:
   - [ ] Running stats summary card in Progress tab
@@ -187,7 +187,7 @@
   - [ ] Running data feeds into 1% tracker
 
 ### TASK-P4-051: Whoop recovery for run coaching
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-012
 - **Acceptance Criteria**:
   - [ ] Recovery score shown on Today's Run card
@@ -201,7 +201,7 @@
 ## Route Creation & Planning
 
 ### TASK-P4-060: Route data model & API
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] SavedRoute model (name, waypoints JSON, polyline JSON, distance_miles, elevation_gain_ft, tags, route_type)
