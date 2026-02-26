@@ -3,7 +3,7 @@
 ## Data Layer
 
 ### TASK-P3-001: Run data models & migrations
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] RunSession model (date, distance, duration, avg_pace, elevation_gain, gps_polyline JSON, splits JSON, weather, rpe, whoop data, status)
@@ -16,7 +16,7 @@
 ## GPS & Tracking
 
 ### TASK-P3-002: GPS tracking service (mobile)
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P3-001
 - **Acceptance Criteria**:
   - [ ] expo-location background tracking (AC-P3-1.6)
@@ -27,7 +27,7 @@
   - [ ] expo-task-manager for background task
 
 ### TASK-P3-003: Live run tracking screen
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P3-002
 - **Acceptance Criteria**:
   - [ ] Start/pause/stop controls
@@ -39,7 +39,7 @@
 ## API Layer
 
 ### TASK-P3-004: Run session API endpoints
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P3-001
 - **Acceptance Criteria**:
   - [ ] POST /api/v1/runs — save completed run with GPS data + splits
@@ -50,7 +50,7 @@
   - [ ] POST /api/v1/runs/{id}/export-gpx — export to GPX
 
 ### TASK-P3-005: AI run coach service
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P3-004
 - **Acceptance Criteria**:
   - [ ] Generate weekly running plan via Clawdbot (AC-P3-3.1, AC-P3-3.2)
@@ -64,7 +64,7 @@
 ## Mobile UI
 
 ### TASK-P3-006: Run history & detail screens
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P3-004
 - **Acceptance Criteria**:
   - [ ] Run history list (date, distance, pace, route preview)
@@ -72,7 +72,7 @@
   - [ ] Tab navigation: add Run tab
 
 ### TASK-P3-007: Running stats & analytics screen
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P3-004
 - **Acceptance Criteria**:
   - [ ] Weekly/monthly mileage chart (AC-P3-4.1)
