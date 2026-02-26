@@ -73,3 +73,51 @@ export function suggestTags(description: string): Promise<SuggestTagsResponse> {
     body: JSON.stringify({ description }),
   });
 }
+
+// Dashboard types
+
+export interface HoursBreakdown {
+  all_time: number;
+  this_week: number;
+  this_month: number;
+}
+
+export interface PillarStats {
+  pillar_id: number;
+  pillar_name: string;
+  total_hours: number;
+  avg_depth_score: number | null;
+  entry_count: number;
+}
+
+export interface StreakData {
+  id: number;
+  pillar_id: number;
+  pillar_name: string;
+  current_streak: number;
+  longest_streak: number;
+  last_activity_date: string | null;
+  days_since_break: number | null;
+}
+
+export interface DashboardStats {
+  hours: HoursBreakdown;
+  pillar_breakdown: PillarStats[];
+  avg_depth_score: number | null;
+  trend: string;
+  streaks: StreakData[];
+}
+
+export interface HeatmapDay {
+  date: string;
+  count: number;
+  pillars: number[];
+}
+
+export function getDashboardStats(): Promise<DashboardStats> {
+  return request('/api/v1/dashboard/stats');
+}
+
+export function getHeatmap(days: number = 365): Promise<HeatmapDay[]> {
+  return request(`/api/v1/dashboard/heatmap?days=${days}`);
+}

@@ -7,6 +7,14 @@ from pydantic import BaseModel
 from app.schemas.streak import StreakResponse
 
 
+class HeatmapDay(BaseModel):
+    """Single day in heatmap data."""
+
+    date: str  # YYYY-MM-DD
+    count: int  # number of entries
+    pillars: List[int]  # pillar IDs active that day
+
+
 class PillarStats(BaseModel):
     """Stats for a single pillar."""
 

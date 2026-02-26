@@ -16,6 +16,7 @@ from app.models.streak import Streak
 from app.models.user import User
 from app.schemas.dashboard import (
     DashboardStatsResponse,
+    HeatmapDay,
     HoursBreakdown,
     PillarStats,
 )
@@ -178,3 +179,59 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         trend=trend,
         streaks=streak_responses,
     )
+
+
+@router.get("/heatmap", response_model=list[HeatmapDay])
+def get_heatmap(days: int = 365, db: Session = Depends(get_db)):
+    """Get daily entry counts for heatmap visualization."""
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    since = date.today() - timedelta(days=days)
+    entries = (
+        db.query(
+            DailyEntry.entry_date,
+            func.count(DailyEntry.id).label("count"),
+        )
+        .filter(DailyEntry.user_id == user.id, DailyEntry.entry_date >= since)
+        .group_by(DailyEntry.entry_date)
+        .all()
+    )
+
+    # Build lookup
+    entry_map: dict[date, int] = {row.entry_date: row.count for row in entries}
+
+    # Also get pillar tags per day for color coding
+    pillar_entries = (
+        db.query(DailyEntry.entry_date, DailyEntry.pillar_tags)
+        .filter(DailyEntry.user_id == user.id, DailyEntry.entry_date >= since)
+        .all()
+    )
+    pillar_map: dict[date, list[int]] = {}
+    for row in pillar_entries:
+        d = row.entry_date
+        if d not in pillar_map:
+            pillar_map[d] = []
+        if row.pillar_tags:
+            for tag in row.pillar_tags.split(","):
+                tag = tag.strip()
+                if tag.isdigit():
+                    pid = int(tag)
+                    if pid not in pillar_map[d]:
+                        pillar_map[d].append(pid)
+
+    result = []
+    current = since
+    today = date.today()
+    while current <= today:
+        result.append(
+            HeatmapDay(
+                date=current.isoformat(),
+                count=entry_map.get(current, 0),
+                pillars=sorted(pillar_map.get(current, [])),
+            )
+        )
+        current += timedelta(days=1)
+
+    return result

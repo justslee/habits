@@ -349,3 +349,49 @@ class TestDashboardStats:
         assert "all_time" in data["hours"]
         assert "this_week" in data["hours"]
         assert "this_month" in data["hours"]
+
+
+class TestHeatmap:
+    """Tests for GET /api/v1/dashboard/heatmap."""
+
+    def test_empty_heatmap(self, db_session):
+        """Heatmap returns days with zero counts when no entries."""
+        resp = client.get("/api/v1/dashboard/heatmap?days=7")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 8  # today + 7 days back
+        for day in data:
+            assert day["count"] == 0
+            assert day["pillars"] == []
+
+    def test_heatmap_with_entries(self, db_session):
+        """Heatmap shows correct counts for days with entries."""
+        user = db_session.query(User).first()
+        today = date.today()
+        entry = DailyEntry(
+            user_id=user.id,
+            entry_date=today,
+            description="Test entry",
+            time_invested_minutes=60,
+            pillar_tags="1,3",
+            difficulty_rating=7,
+            energy_level=8,
+            key_takeaway="Testing heatmap",
+        )
+        db_session.add(entry)
+        db_session.commit()
+
+        resp = client.get("/api/v1/dashboard/heatmap?days=7")
+        assert resp.status_code == 200
+        data = resp.json()
+        today_entry = [d for d in data if d["date"] == today.isoformat()][0]
+        assert today_entry["count"] == 1
+        assert 1 in today_entry["pillars"]
+        assert 3 in today_entry["pillars"]
+
+    def test_heatmap_default_365_days(self, db_session):
+        """Default heatmap returns ~366 days."""
+        resp = client.get("/api/v1/dashboard/heatmap")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 366  # 365 days back + today

@@ -74,7 +74,7 @@
 - **Verify**: Manual test: complete check-in flow on mobile viewport
 
 ### TASK-005: AI evaluation engine — Claude integration
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-003
 - **Acceptance Criteria**:
   - [ ] Claude API integration configured (AC-2.6)
@@ -88,7 +88,7 @@
 - **Notes**: Prompt must enforce honesty — "no participation trophies"
 
 ### TASK-006: AI context & adaptive calibration
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-005
 - **Acceptance Criteria**:
   - [ ] System maintains user level context per pillar (AC-2.7)
@@ -101,7 +101,7 @@
 - **Notes**: Track "current level" per pillar, update based on depth scores over time
 
 ### TASK-007: Auto-suggest pillar tags
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-005
 - **Acceptance Criteria**:
   - [ ] LLM analyzes entry text and suggests relevant pillars (AC-1.3)
@@ -174,7 +174,7 @@
 - **Verify**: Manual test: compound chart renders with actual vs theoretical
 
 ### TASK-014: Milestone tracking
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-003
 - **Acceptance Criteria**:
   - [ ] User can log milestones (AC-3.8)
