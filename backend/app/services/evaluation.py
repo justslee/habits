@@ -6,6 +6,7 @@ Engineered for brutal honesty (D-003 — no participation trophies).
 
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -19,7 +20,11 @@ from app.services.adaptive import build_adaptive_context_block, calculate_consis
 logger = logging.getLogger(__name__)
 
 CLAWDBOT_URL = "http://localhost:18789/v1/chat/completions"
-CLAWDBOT_MODEL = "claude-opus-4-6"
+CLAWDBOT_MODEL = "claude-sonnet-4-20250514"
+
+# IMPORTANT: Do not hardcode tokens in the repo.
+# Set CLAWDBOT_TOKEN (or OPENCLAW_GATEWAY_TOKEN) in the environment.
+CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN") or os.getenv("OPENCLAW_GATEWAY_TOKEN")
 
 SYSTEM_PROMPT = """You are the Honest Mirror — a brutally honest AI evaluator for a personal mastery tracking system.
 
@@ -97,8 +102,14 @@ async def call_clawdbot(system_prompt: str, user_prompt: str) -> dict[str, Any]:
         "temperature": 0.3,
     }
 
+    if not CLAWDBOT_TOKEN:
+        raise RuntimeError(
+            "Missing CLAWDBOT_TOKEN (or OPENCLAW_GATEWAY_TOKEN) env var for Clawdbot auth"
+        )
+
+    headers = {"Authorization": f"Bearer {CLAWDBOT_TOKEN}"}
     async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(CLAWDBOT_URL, json=payload)
+        response = await client.post(CLAWDBOT_URL, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()
 
