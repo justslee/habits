@@ -8,8 +8,13 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.database import get_db
 from app.models.daily_entry import DailyEntry
+from app.models.streak import Streak
 from app.models.user import User
+from app.models.evaluation import Evaluation
 from app.schemas.entry import EntryCreate, EntryResponse, EntryUpdate
+from app.services.evaluation import evaluate_entry
+
+logger = __import__("logging").getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/entries", tags=["entries"])
 
@@ -39,6 +44,26 @@ def create_entry(payload: EntryCreate, db: Session = Depends(get_db)):
     entry.pillar_tag_list = payload.pillar_tags
 
     db.add(entry)
+    db.flush()  # Get entry.id and pillar_tag_list before streak update
+
+    # Update streaks for each tagged pillar
+    for pillar_id in entry.pillar_tag_list:
+        streak = (
+            db.query(Streak)
+            .filter(Streak.user_id == user.id, Streak.pillar_id == pillar_id)
+            .first()
+        )
+        if not streak:
+            streak = Streak(
+                user_id=user.id,
+                pillar_id=pillar_id,
+                current_streak=0,
+                longest_streak=0,
+                days_since_break=0,
+            )
+            db.add(streak)
+        streak.update_streak(entry.entry_date)
+
     db.commit()
     db.refresh(entry)
     return EntryResponse.from_entry(entry)
@@ -94,5 +119,27 @@ def update_entry_tags(entry_id: int, payload: EntryUpdate, db: Session = Depends
 
     entry.pillar_tag_list = payload.pillar_tags
     db.commit()
+    db.refresh(entry)
+    return EntryResponse.from_entry(entry)
+
+
+@router.post("/{entry_id}/evaluate", response_model=EntryResponse)
+async def evaluate_entry_endpoint(entry_id: int, db: Session = Depends(get_db)):
+    """Trigger AI evaluation for an entry."""
+    entry = (
+        db.query(DailyEntry)
+        .options(joinedload(DailyEntry.evaluation))
+        .filter(DailyEntry.id == entry_id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    if entry.evaluation:
+        raise HTTPException(status_code=409, detail="Entry already evaluated")
+
+    evaluation = await evaluate_entry(entry, db)
+
+    # Refresh to load relationship
     db.refresh(entry)
     return EntryResponse.from_entry(entry)
