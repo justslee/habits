@@ -4,16 +4,16 @@
 
 ## Current Cycle
 
-| Field            | Value           |
-|------------------|-----------------|
-| Cycle #          | 0 (not started) |
-| Timestamp        | —               |
-| Tasks attempted  | —               |
-| Tasks completed  | —               |
-| Tasks blocked    | —               |
-| Next tasks       | TASK-001        |
-| Blockers         | None            |
-| Cycles remaining | —               |
+| Field            | Value                    |
+|------------------|--------------------------|
+| Cycle #          | 0 (spec complete, not started) |
+| Timestamp        | 2026-02-25               |
+| Tasks attempted  | —                        |
+| Tasks completed  | —                        |
+| Tasks blocked    | —                        |
+| Next tasks       | TASK-001                 |
+| Blockers         | None                     |
+| Cycles remaining | 15                       |
 
 ## Budget
 
@@ -23,13 +23,35 @@
 | Cycles used        | 0     |
 | Budget remaining   | 15    |
 
+## Phase 1 Progress
+
+| Feature | Status | Tasks |
+|---------|--------|-------|
+| Daily Check-In | Not started | TASK-003, TASK-004, TASK-007 |
+| AI Evaluation Engine | Not started | TASK-005, TASK-006 |
+| Progress Dashboard | Not started | TASK-009 through TASK-014 |
+| Weekly Review | Not started | TASK-015, TASK-016 |
+| Infrastructure | Not started | TASK-001, TASK-002, TASK-017, TASK-018, TASK-019 |
+
 ## Deployment Status
 
 | Component | Status  | URL | Last deployed |
 |-----------|---------|-----|---------------|
 | Backend   | Not started | — | — |
 | Frontend  | Not started | — | — |
-| Tunnel    | Not started | — | — |
+| Database  | Not started | — | — |
+
+## Key Milestones
+
+| Milestone | Target | Status |
+|-----------|--------|--------|
+| Scaffolding complete | Cycle 1 | ⬜ |
+| First check-in logged | Cycle 3 | ⬜ |
+| AI evaluation working | Cycle 5 | ⬜ |
+| Dashboard MVP | Cycle 8 | ⬜ |
+| Weekly review working | Cycle 10 | ⬜ |
+| PWA deployed | Cycle 12 | ⬜ |
+| Phase 1 complete | Cycle 15 | ⬜ |
 
 ---
 
@@ -37,21 +59,12 @@
 
 <!-- Manager appends a new entry after every cycle -->
 
-<!--
-### Cycle N — YYYY-MM-DD HH:MM
+### Cycle 0 — 2026-02-25
 
-**Tasks attempted**: TASK-XXX, TASK-YYY
-**Results**:
-- TASK-XXX: ✅ All AC met
-- TASK-YYY: ❌ Failed — Tester reported [reason]
+**Status**: Spec complete. Ready to begin development.
 
-**Builder output**: [summary]
-**Tester output**: [summary]
-**Reviewer output**: Approved / Requested changes — [details]
-**Deployer output**: [summary]
+**Tasks defined**: 19 tasks for Phase 1, 4 tasks deferred to Phase 2.
 
-**Decisions made**: [if any, also log in DECISIONS.md]
-**Dependencies added**: [if any, with justification]
-**Next tasks**: TASK-ZZZ
-**Blockers**: [none / description]
--->
+**Key decisions logged**: 8 architectural decisions in DECISIONS.md.
+
+**Next steps**: Begin TASK-001 (Project scaffolding).

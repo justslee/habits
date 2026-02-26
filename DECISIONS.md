@@ -1,46 +1,89 @@
-# DECISIONS.md — Architectural Decision Records
+# DECISIONS.md — Architectural Decision Log
 
-> **Purpose**: Prevents agents from relitigating the same choices across cycles.
-> When a non-trivial choice is made, log it here. Agents treat past decisions as final unless SPEC changes.
-
-## Format
-
-```
-### ADR-XXX: Title
-- **Date**: YYYY-MM-DD
-- **Status**: Accepted / Superseded by ADR-XXX
-- **Context**: Why did this decision come up?
-- **Decision**: What was chosen?
-- **Alternatives considered**: What else was on the table?
-- **Consequences**: What does this mean going forward?
-```
+> **Purpose**: Record significant technical and product decisions so agents don't relitigate them.
+> Format: Decision, rationale, date. Append-only.
 
 ---
 
-## Decisions
+## 2026-02-25: Initial Architecture Decisions
 
-### ADR-001: Frontend deployment via Vercel
-- **Date**: 2025-02-25
-- **Status**: Accepted
-- **Context**: Need a way to access the app from mobile without exposing local network IP.
-- **Decision**: Deploy frontend to Vercel free tier. Auto-deploy on push to main.
-- **Alternatives considered**: Cloudflare Pages (also good, slightly less React integration), Netlify (similar), self-hosted on EC2 (overkill, cost risk).
-- **Consequences**: Frontend must be a static/SSR build. API calls go to backend via Cloudflare Tunnel URL. Vercel free tier limits apply (100 deploys/day, 100GB bandwidth/month — more than enough for personal use).
+### D-001: Five Pillars as Core Data Model
+**Decision**: The five pillars (Quant Finance, Macro Investing, ML Math, AI Engineering, Public Speaking) are hardcoded as the identity framework.
 
-### ADR-002: Backend stays local, exposed via Cloudflare Tunnel
-- **Date**: 2025-02-25
-- **Status**: Accepted
-- **Context**: Want fast local iteration without cloud costs, but need mobile access.
-- **Decision**: Run backend on local machine, use Cloudflare Tunnel for secure external access.
-- **Alternatives considered**: EC2 (cost risk, slower iteration), Railway (good but adds dependency), Lambda (cold starts, complexity).
-- **Consequences**: Backend only available when your machine is running and tunnel is active. Acceptable for personal/dev use. If uptime matters later, migrate to Railway or Fly.io.
+**Rationale**: This is a personal tool for Justin. The pillars represent his target end-state identity and won't change. Hardcoding simplifies the data model and UI.
 
-### ADR-003: PWA-first, Capacitor later if needed
-- **Date**: 2025-02-25
-- **Status**: Accepted
-- **Context**: Want to "download" the app on phone.
-- **Decision**: Build as PWA initially. Wrap with Capacitor later only if App Store distribution is needed.
-- **Alternatives considered**: React Native / Expo (too much overhead for dashboards), native Swift/Kotlin (not feasible solo).
-- **Consequences**: Builder writes standard React. PWA manifest + service worker required from TASK-002 onward. No native-only APIs (camera, etc.) until Capacitor is added.
+**Status**: Accepted
 
-<!-- Agents: add new decisions below. Never modify accepted decisions — supersede them with a new ADR. -->
+---
+
+### D-002: Claude API for Evaluation Engine
+**Decision**: Use Claude API (Anthropic) for the AI evaluation engine, not OpenAI.
+
+**Rationale**: 
+- Justin already uses Claude extensively (Opus for reasoning tasks)
+- Better at nuanced, honest feedback vs. sycophantic responses
+- Existing integration patterns in other projects (scorecard, etc.)
+
+**Status**: Accepted
+
+---
+
+### D-003: Brutal Honesty as Core Product Value
+**Decision**: The AI must be brutally honest. No participation trophies. This is non-negotiable.
+
+**Rationale**: The app's entire value proposition is telling the truth. If the AI sugarcoats, the product fails. Prompt engineering must enforce this.
+
+**Status**: Accepted
+
+---
+
+### D-004: Mobile-First, Desktop Dashboard
+**Decision**: Daily logging optimized for mobile. Deep analytics/dashboard optimized for desktop.
+
+**Rationale**: 
+- Logging happens on-the-go throughout the day
+- Deep review/reflection happens at a desk
+- Both experiences must be excellent, but different priorities
+
+**Status**: Accepted
+
+---
+
+### D-005: Append-Only Entry History
+**Decision**: All entries are append-only. No deletions. Full history preserved forever.
+
+**Rationale**: Long-term trend data is the core product value. The compounding visualization requires complete history. Users should not be able to "hide" bad days.
+
+**Status**: Accepted
+
+---
+
+### D-006: Skill Trees Deferred to V2
+**Decision**: Feature 4 (Pillar Skill Trees with sub-topics) is out of scope for Phase 1.
+
+**Rationale**: Core loop is: log → evaluate → visualize → review. Skill trees add complexity without improving the core loop. Ship Phase 1 first.
+
+**Status**: Accepted
+
+---
+
+### D-007: Stack Confirmation
+**Decision**: Confirm stack from CONTEXT.md:
+- Backend: Python 3.12+ / FastAPI / PostgreSQL / SQLAlchemy 2.0
+- Frontend: React + Vite + pnpm
+- Deploy: Vercel (frontend) + Cloudflare Tunnel (backend)
+
+**Rationale**: Aligns with Justin's existing quant stack. Fast iteration. Free/cheap hosting.
+
+**Status**: Accepted
+
+---
+
+### D-008: Adaptive Expectations via Level Tracking
+**Decision**: Track "current level" per pillar based on rolling depth scores. Use this to calibrate expectations.
+
+**Rationale**: What counts as "1% better" must evolve. Beginner gains are easy; elite gains require proportionally more. The AI needs context on where the user currently is.
+
+**Implementation**: Store rolling average depth score per pillar. Include in evaluation prompt context.
+
+**Status**: Accepted

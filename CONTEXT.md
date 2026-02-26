@@ -19,6 +19,7 @@
 | Formatter  | ruff (BE), prettier (FE) | Non-negotiable, run before commit  |
 | Port (BE)  | 8000             | FastAPI default                          |
 | Port (FE)  | 5173             | Vite default                             |
+| AI Backend | Claude API (Anthropic) | Honest feedback, existing integration |
 
 ## Conventions
 
