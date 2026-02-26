@@ -9,6 +9,10 @@ import {
   RunState, GpsPoint, createRunState, processGpsPoint, formatPace, formatDuration,
   requestLocationPermissions, startBackgroundTracking, stopBackgroundTracking,
 } from '../services/gps';
+import {
+  CoachConfig, createCoachState, coachTick, getCurrentSegment,
+  announceStart, announceFinish, PlannedSegment,
+} from '../services/audioCoach';
 import { getTodayRun, TodayRunData, getPostRunFeedback } from '../api/client';
 import MapView from '../components/MapView';
 import { colors, spacing, typography, radius } from '../theme';
@@ -29,11 +33,16 @@ export default function RunScreen() {
   const [selectedRPE, setSelectedRPE] = useState(5);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [savedRunId, setSavedRunId] = useState<number | null>(null);
+  const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
   const countdownScale = useRef(new RNAnimated.Value(1)).current;
   const locationSub = useRef<Location.LocationSubscription | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stateRef = useRef(runState);
   stateRef.current = runState;
+  const coachStateRef = useRef(createCoachState());
+  const coachConfigRef = useRef<CoachConfig>({
+    enabled: true, targetPaceSeconds: null, runType: 'easy', segments: [], targetDistanceMiles: null,
+  });
 
   useEffect(() => {
     requestLocationPermissions().then(setPermissionGranted);
@@ -68,19 +77,41 @@ export default function RunScreen() {
     setRunState(s => ({ ...s, isTracking: true, isPaused: false, startTime: now, elapsedMs: 0 }));
     setPhase('active');
 
+    // Configure audio coach
+    coachStateRef.current = createCoachState();
+    coachConfigRef.current = {
+      enabled: audioCoachEnabled,
+      targetPaceSeconds: planned?.target_pace_seconds || null,
+      runType: planned?.run_type || 'easy',
+      segments: segments as PlannedSegment[],
+      targetDistanceMiles: planned?.target_distance_miles || null,
+    };
+    announceStart(coachConfigRef.current);
+
     locationSub.current = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
       loc => {
         const point: GpsPoint = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, altitude: loc.coords.altitude, timestamp: loc.timestamp };
-        setRunState(prev => processGpsPoint(prev, point));
+        setRunState(prev => {
+          const updated = processGpsPoint(prev, point);
+          // Run audio coach on each GPS tick
+          coachStateRef.current = coachTick(updated, coachConfigRef.current, coachStateRef.current);
+          return updated;
+        });
       },
     );
     try { await startBackgroundTracking(); } catch {}
 
     timerRef.current = setInterval(() => {
-      setRunState(prev => prev.isTracking && !prev.isPaused ? { ...prev, elapsedMs: Date.now() - prev.startTime } : prev);
+      setRunState(prev => {
+        if (!prev.isTracking || prev.isPaused) return prev;
+        const updated = { ...prev, elapsedMs: Date.now() - prev.startTime };
+        // Also tick coach on timer (for segment transitions based on time)
+        coachStateRef.current = coachTick(updated, coachConfigRef.current, coachStateRef.current);
+        return updated;
+      });
     }, 1000);
-  }, []);
+  }, [audioCoachEnabled, planned, segments]);
 
   const handlePause = () => {
     setRunState(s => ({ ...s, isPaused: !s.isPaused }));
@@ -92,6 +123,7 @@ export default function RunScreen() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     stopBackgroundTracking().catch(() => {});
     if (stateRef.current.distanceMiles < 0.1) { resetToPreRun(); return; }
+    announceFinish(stateRef.current);
     setPhase('rpe');
   };
 
@@ -213,6 +245,21 @@ export default function RunScreen() {
           </View>
         )}
 
+        {/* Audio Coach Toggle */}
+        <TouchableOpacity
+          style={s.coachToggle}
+          onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
+        >
+          <Ionicons
+            name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
+            size={20}
+            color={audioCoachEnabled ? colors.accent : colors.textTertiary}
+          />
+          <Text style={[s.coachToggleText, !audioCoachEnabled && { color: colors.textTertiary }]}>
+            Audio Coach {audioCoachEnabled ? 'On' : 'Off'}
+          </Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={[s.startBtn, { backgroundColor: runTypeColor }]} onPress={startCountdown}>
           <Ionicons name="play" size={28} color="#fff" />
           <Text style={s.startBtnText}>{planned ? 'Start Run' : 'Free Run'}</Text>
@@ -331,6 +378,46 @@ export default function RunScreen() {
         </View>
       )}
 
+      {/* Segment progress bar */}
+      {segments.length > 0 && phase === 'active' && (() => {
+        const totalMin = segments.reduce((sum: number, seg: any) => sum + (seg.minutes || 0), 0);
+        const { index: segIdx, segment: curSeg, segmentElapsedMs, segmentRemainingMs } = getCurrentSegment(
+          segments as PlannedSegment[], elapsedMs,
+        );
+        const segProgress = curSeg ? segmentElapsedMs / (curSeg.minutes * 60 * 1000) : 0;
+        return (
+          <View style={s.segProgressContainer}>
+            <View style={s.segProgressBar}>
+              {segments.map((seg: any, i: number) => {
+                const widthPct = totalMin > 0 ? (seg.minutes / totalMin) * 100 : 0;
+                const segColor = seg.type === 'warmup' || seg.type === 'cooldown' ? colors.textTertiary
+                  : seg.type === 'work' ? runTypeColor : colors.info;
+                const isActive = i === segIdx;
+                const isDone = i < segIdx;
+                return (
+                  <View key={i} style={[s.segBlock, { width: `${widthPct}%` as any }]}>
+                    <View style={[
+                      s.segFill,
+                      { backgroundColor: segColor, opacity: isDone ? 1 : isActive ? 0.8 : 0.25 },
+                      isActive && { width: `${Math.min(segProgress * 100, 100)}%` as any },
+                      isDone && { width: '100%' },
+                      !isDone && !isActive && { width: '100%' },
+                    ]} />
+                  </View>
+                );
+              })}
+            </View>
+            {curSeg && (
+              <Text style={s.segProgressLabel}>
+                {curSeg.type === 'warmup' ? 'WARM UP' : curSeg.type === 'cooldown' ? 'COOL DOWN' : curSeg.type.toUpperCase()}
+                {'  '}
+                {Math.ceil((segmentRemainingMs || 0) / 1000)}s left
+              </Text>
+            )}
+          </View>
+        );
+      })()}
+
       {/* Stats bottom sheet */}
       <View style={s.statsSheet}>
         <View style={s.mainMetric}>
@@ -414,9 +501,15 @@ const s = StyleSheet.create({
   noRunTitle: { ...typography.title3, color: colors.text, marginBottom: spacing.xs },
   noRunSub: { ...typography.body, color: colors.textTertiary },
 
+  coachToggle: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    paddingVertical: spacing.md, marginTop: spacing.sm,
+  },
+  coachToggleText: { ...typography.caption, color: colors.accent },
+
   startBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
-    paddingVertical: 18, borderRadius: radius.lg, marginTop: spacing.md,
+    paddingVertical: 18, borderRadius: radius.lg, marginTop: spacing.sm,
   },
   startBtnText: { ...typography.bodyBold, color: '#fff', fontSize: 17 },
 
@@ -429,6 +522,12 @@ const s = StyleSheet.create({
   map: { flex: 1 },
   mapPlaceholder: { flex: 1, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   mapPlaceholderText: { ...typography.caption, color: colors.textTertiary },
+
+  segProgressContainer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, backgroundColor: colors.bg },
+  segProgressBar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', gap: 2 },
+  segBlock: { height: '100%', borderRadius: 3, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.05)' },
+  segFill: { height: '100%', borderRadius: 3 },
+  segProgressLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 4, textAlign: 'center' },
 
   statsSheet: {
     backgroundColor: colors.bg, padding: spacing.lg,
