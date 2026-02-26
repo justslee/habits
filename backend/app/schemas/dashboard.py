@@ -7,6 +7,15 @@ from pydantic import BaseModel
 from app.schemas.streak import StreakResponse
 
 
+class DepthProgressionPoint(BaseModel):
+    """Single data point for depth progression chart."""
+
+    date: str  # YYYY-MM-DD
+    depth_score: float
+    pillar_id: int
+    pillar_name: str
+
+
 class HeatmapDay(BaseModel):
     """Single day in heatmap data."""
 

@@ -6,32 +6,32 @@
 
 | Field            | Value                    |
 |------------------|--------------------------|
-| Cycle #          | 1                        |
-| Timestamp        | 2026-02-25               |
-| Tasks attempted  | TASK-001                 |
-| Tasks completed  | TASK-001                 |
+| Cycle #          | 2                        |
+| Timestamp        | 2026-02-26               |
+| Tasks attempted  | TASK-009, TASK-010       |
+| Tasks completed  | TASK-009, TASK-010       |
 | Tasks blocked    | None                     |
-| Next tasks       | TASK-002                 |
+| Next tasks       | TASK-011, TASK-012       |
 | Blockers         | None                     |
-| Cycles remaining | 14                       |
+| Cycles remaining | 13                       |
 
 ## Budget
 
 | Field              | Value |
 |--------------------|-------|
 | Max cycles allowed | 15    |
-| Cycles used        | 1     |
-| Budget remaining   | 14    |
+| Cycles used        | 2     |
+| Budget remaining   | 13    |
 
 ## Phase 1 Progress
 
 | Feature | Status | Tasks |
 |---------|--------|-------|
-| Daily Check-In | Not started | TASK-003, TASK-004, TASK-007 |
-| AI Evaluation Engine | Not started | TASK-005, TASK-006 |
-| Progress Dashboard | Not started | TASK-009 through TASK-014 |
+| Daily Check-In | Complete | TASK-003 ✓, TASK-004 ✓, TASK-007 ✓ |
+| AI Evaluation Engine | Complete | TASK-005 ✓, TASK-006 ✓ |
+| Progress Dashboard | In progress | TASK-009 ✓, TASK-010 ✓, TASK-008 ✓, TASK-014 ✓, TASK-011, TASK-012, TASK-013 |
 | Weekly Review | Not started | TASK-015, TASK-016 |
-| Infrastructure | In progress | TASK-001 ✓, TASK-002, TASK-017, TASK-018, TASK-019 |
+| Infrastructure | In progress | TASK-001 ✓, TASK-002 ✓, TASK-017, TASK-018, TASK-019 |
 
 ## Deployment Status
 
@@ -56,6 +56,35 @@
 ---
 
 ## Cycle Log
+
+### Cycle 2 — 2026-02-26
+
+**Status**: TASK-009 + TASK-010 complete.
+
+**Tasks completed**:
+- TASK-009: Dashboard UI (frontend)
+  - DashboardScreen with hours summary (all time / week / month)
+  - Pillar breakdown cards (hours, avg depth, entry count)
+  - Trend indicator + average depth score
+  - Streak display per pillar (current + longest)
+  - Tab navigation added (@react-navigation/bottom-tabs)
+- TASK-010: Heatmap visualization
+  - GitHub-style heatmap (6 months, color-coded by intensity)
+  - New backend endpoint: GET /api/v1/dashboard/heatmap
+  - Horizontal scroll for the grid
+  - Less/More legend
+
+**New dependencies**: @react-navigation/native, @react-navigation/bottom-tabs, react-native-screens, react-native-safe-area-context
+
+**Verification**:
+- `cd backend && source venv/bin/activate && pytest -v` → 110 passed
+- `cd mobile && npm test` → 8 passed
+
+**Commit**: `47c3adf`
+
+**Next**: TASK-011 (Radar chart), TASK-012 (Depth progression curves)
+
+---
 
 ### Cycle 1 — 2026-02-25
 

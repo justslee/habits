@@ -17,9 +17,13 @@ import {
 import {
   getDashboardStats,
   getHeatmap,
+  getDepthProgression,
   DashboardStats,
   HeatmapDay,
+  DepthProgressionPoint,
 } from '../api/client';
+import RadarChart from '../components/RadarChart';
+import DepthChart from '../components/DepthChart';
 
 const TREND_ICONS: Record<string, string> = {
   improving: '📈',
@@ -48,6 +52,7 @@ function intensityLevel(count: number): number {
 export default function DashboardScreen() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
+  const [depthData, setDepthData] = useState<DepthProgressionPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,9 +60,14 @@ export default function DashboardScreen() {
   const fetchData = useCallback(async () => {
     try {
       setError(null);
-      const [s, h] = await Promise.all([getDashboardStats(), getHeatmap(182)]);
+      const [s, h, d] = await Promise.all([
+        getDashboardStats(),
+        getHeatmap(182),
+        getDepthProgression(90),
+      ]);
       setStats(s);
       setHeatmap(h);
+      setDepthData(d);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
@@ -128,6 +138,30 @@ export default function DashboardScreen() {
             {stats.avg_depth_score !== null ? stats.avg_depth_score : '—'}
           </Text>
         </View>
+      </View>
+
+      {/* Radar Chart */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Pillar Balance</Text>
+        <View style={{ alignItems: 'center' }}>
+          <RadarChart
+            data={stats.pillar_breakdown.map((p) => ({
+              pillar_id: p.pillar_id,
+              pillar_name: p.pillar_name,
+              // Normalize: combine hours + depth for composite score
+              score: Math.min(
+                100,
+                (p.total_hours * 2 + (p.avg_depth_score || 0)) / 3 * 1.5
+              ),
+            }))}
+          />
+        </View>
+      </View>
+
+      {/* Depth Progression */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Depth Progression (90 days)</Text>
+        <DepthChart data={depthData} />
       </View>
 
       {/* Pillar Breakdown */}

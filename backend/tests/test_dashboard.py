@@ -395,3 +395,84 @@ class TestHeatmap:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 366  # 365 days back + today
+
+
+class TestDepthProgression:
+    """Tests for GET /api/v1/dashboard/depth-progression."""
+
+    def test_empty_progression(self, db_session):
+        """Returns empty list when no evaluated entries."""
+        resp = client.get("/api/v1/dashboard/depth-progression")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_progression_with_data(self, db_session):
+        """Returns depth data points for entries with evaluations."""
+        user = db_session.query(User).first()
+        today = date.today()
+        entry = DailyEntry(
+            user_id=user.id,
+            entry_date=today,
+            description="Stochastic calculus proofs",
+            time_invested_minutes=120,
+            pillar_tags="1",
+            difficulty_rating=8,
+            energy_level=7,
+            key_takeaway="Ito's lemma",
+        )
+        db_session.add(entry)
+        db_session.flush()
+
+        evaluation = Evaluation(
+            entry_id=entry.id,
+            depth_score=75,
+            relevance_score=90,
+            consistency_multiplier=1.2,
+            one_percent_better=True,
+            verdict_explanation="Real work",
+            commentary="Solid",
+        )
+        db_session.add(evaluation)
+        db_session.commit()
+
+        resp = client.get("/api/v1/dashboard/depth-progression")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["depth_score"] == 75
+        assert data[0]["pillar_id"] == 1
+        assert data[0]["date"] == today.isoformat()
+
+    def test_filter_by_pillar(self, db_session):
+        """Can filter depth progression by pillar_id."""
+        user = db_session.query(User).first()
+        today = date.today()
+
+        for pid in [1, 3]:
+            entry = DailyEntry(
+                user_id=user.id,
+                entry_date=today,
+                description=f"Work on pillar {pid}",
+                time_invested_minutes=60,
+                pillar_tags=str(pid),
+                difficulty_rating=7,
+                energy_level=7,
+                key_takeaway="Stuff",
+            )
+            db_session.add(entry)
+            db_session.flush()
+            db_session.add(Evaluation(
+                entry_id=entry.id,
+                depth_score=50 + pid * 10,
+                relevance_score=80,
+                consistency_multiplier=1.0,
+                one_percent_better=True,
+                verdict_explanation="OK",
+                commentary="Fine",
+            ))
+        db_session.commit()
+
+        resp = client.get("/api/v1/dashboard/depth-progression?pillar_id=1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(d["pillar_id"] == 1 for d in data)

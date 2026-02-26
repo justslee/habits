@@ -121,3 +121,19 @@ export function getDashboardStats(): Promise<DashboardStats> {
 export function getHeatmap(days: number = 365): Promise<HeatmapDay[]> {
   return request(`/api/v1/dashboard/heatmap?days=${days}`);
 }
+
+export interface DepthProgressionPoint {
+  date: string;
+  depth_score: number;
+  pillar_id: number;
+  pillar_name: string;
+}
+
+export function getDepthProgression(
+  days: number = 90,
+  pillarId?: number,
+): Promise<DepthProgressionPoint[]> {
+  let url = `/api/v1/dashboard/depth-progression?days=${days}`;
+  if (pillarId !== undefined) url += `&pillar_id=${pillarId}`;
+  return request(url);
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -16,6 +17,7 @@ from app.models.streak import Streak
 from app.models.user import User
 from app.schemas.dashboard import (
     DashboardStatsResponse,
+    DepthProgressionPoint,
     HeatmapDay,
     HoursBreakdown,
     PillarStats,
@@ -25,7 +27,7 @@ from app.schemas.streak import StreakResponse
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
-def _hours(minutes: int | None) -> float:
+def _hours(minutes: Optional[int]) -> float:
     """Convert minutes to hours, rounded to 2 decimals."""
     return round((minutes or 0) / 60, 2)
 
@@ -235,3 +237,51 @@ def get_heatmap(days: int = 365, db: Session = Depends(get_db)):
         current += timedelta(days=1)
 
     return result
+
+
+@router.get("/depth-progression", response_model=list[DepthProgressionPoint])
+def get_depth_progression(
+    pillar_id: Optional[int] = None,
+    days: int = 90,
+    db: Session = Depends(get_db),
+):
+    """Get depth score progression over time, optionally filtered by pillar."""
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    since = date.today() - timedelta(days=days)
+
+    query = (
+        db.query(DailyEntry, Evaluation)
+        .join(Evaluation, Evaluation.entry_id == DailyEntry.id)
+        .filter(DailyEntry.user_id == user.id, DailyEntry.entry_date >= since)
+        .order_by(DailyEntry.entry_date)
+    )
+
+    # Get pillar lookup
+    pillars = {p.id: p.name for p in db.query(Pillar).all()}
+
+    results = []
+    for entry, evaluation in query.all():
+        if not entry.pillar_tags:
+            continue
+        tag_ids = [
+            int(t.strip())
+            for t in entry.pillar_tags.split(",")
+            if t.strip().isdigit()
+        ]
+        for pid in tag_ids:
+            if pillar_id is not None and pid != pillar_id:
+                continue
+            if pid in pillars:
+                results.append(
+                    DepthProgressionPoint(
+                        date=entry.entry_date.isoformat(),
+                        depth_score=evaluation.depth_score,
+                        pillar_id=pid,
+                        pillar_name=pillars[pid],
+                    )
+                )
+
+    return results

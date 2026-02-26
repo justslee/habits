@@ -122,7 +122,7 @@
 - **Verify**: `pytest tests/test_streaks.py`
 
 ### TASK-009: Progress dashboard — basic stats
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-003, TASK-008
 - **Acceptance Criteria**:
   - [ ] Dashboard page loads in < 3 seconds (AC-3.9)
@@ -133,7 +133,7 @@
 - **Verify**: Manual test: dashboard displays correct aggregations
 
 ### TASK-010: Heatmap visualization
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-009
 - **Acceptance Criteria**:
   - [ ] GitHub-style contribution heatmap (AC-3.2)
