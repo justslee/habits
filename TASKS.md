@@ -21,7 +21,7 @@
 ## Phase 1 Backlog
 
 ### TASK-001: Project scaffolding
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] Backend: FastAPI app runs on port 8000, `/health` returns `{"status": "ok"}`

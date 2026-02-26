@@ -15,5 +15,8 @@ pytest>=8.0.0
 pytest-asyncio>=0.23.0
 httpx>=0.26.0
 
+# Migrations
+alembic>=1.13.0
+
 # Dev tools
 ruff>=0.2.0
