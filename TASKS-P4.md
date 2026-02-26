@@ -152,7 +152,7 @@
   - [ ] Infinite scroll / pagination
 
 ### TASK-P4-041: Running analytics dashboard
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-040
 - **Acceptance Criteria**:
   - [ ] Weekly mileage bar chart (current week highlighted)
@@ -164,7 +164,7 @@
   - [ ] Heart rate zone distribution (if Whoop HR available)
 
 ### TASK-P4-042: Training plan calendar view
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-012
 - **Acceptance Criteria**:
   - [ ] Week calendar showing planned runs with type color dots
