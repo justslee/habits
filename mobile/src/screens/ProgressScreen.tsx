@@ -42,11 +42,38 @@ function intensityLevel(count: number): number {
 
 type Section = 'mastery' | 'strength' | 'running';
 
+const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+
+interface RunStats {
+  total_runs: number;
+  total_miles: number;
+  this_week_miles: number;
+  this_month_miles: number;
+  avg_pace_seconds: number | null;
+  fastest_pace_seconds: number | null;
+  longest_run_miles: number;
+}
+
+interface PRData {
+  id: number;
+  distance_label: string;
+  time_seconds: number;
+  time_formatted: string;
+  record_date: string;
+}
+
+function fmtPace(s: number | null): string {
+  if (!s || s <= 0) return '--:--';
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+}
+
 export default function ProgressScreen() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
   const [depthData, setDepthData] = useState<DepthProgressionPoint[]>([]);
   const [profiles, setProfiles] = useState<ExerciseProfileData[]>([]);
+  const [runStats, setRunStats] = useState<RunStats | null>(null);
+  const [prs, setPRs] = useState<PRData[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -58,6 +85,16 @@ export default function ProgressScreen() {
         getDashboardStats(), getHeatmap(182), getDepthProgression(90), getExerciseProfiles(),
       ]);
       setStats(s); setHeatmap(h); setDepthData(d); setProfiles(p);
+
+      // Fetch run data
+      try {
+        const [rsResp, prResp] = await Promise.all([
+          fetch(`${API}/api/v1/runs/stats`),
+          fetch(`${API}/api/v1/runs/prs`),
+        ]);
+        if (rsResp.ok) setRunStats(await rsResp.json());
+        if (prResp.ok) setPRs(await prResp.json());
+      } catch {}
     } catch {} finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -225,11 +262,78 @@ export default function ProgressScreen() {
 
       {/* RUNNING */}
       {activeSection === 'running' && (
-        <View style={s.empty}>
-          <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
-          <Text style={s.emptyTitle}>Running Analytics</Text>
-          <Text style={s.emptySubtitle}>Coming soon</Text>
-        </View>
+        <>
+          {runStats && runStats.total_runs > 0 ? (
+            <>
+              {/* Mileage overview */}
+              <View style={s.card}>
+                <Text style={s.sectionHeader}>MILEAGE</Text>
+                <View style={s.runStatsGrid}>
+                  <View style={s.runStatBox}>
+                    <Text style={s.runStatNum}>{runStats.total_miles.toFixed(1)}</Text>
+                    <Text style={s.runStatLabel}>TOTAL MI</Text>
+                  </View>
+                  <View style={s.runStatBox}>
+                    <Text style={s.runStatNum}>{runStats.this_week_miles.toFixed(1)}</Text>
+                    <Text style={s.runStatLabel}>THIS WEEK</Text>
+                  </View>
+                  <View style={s.runStatBox}>
+                    <Text style={s.runStatNum}>{runStats.this_month_miles.toFixed(1)}</Text>
+                    <Text style={s.runStatLabel}>THIS MONTH</Text>
+                  </View>
+                  <View style={s.runStatBox}>
+                    <Text style={s.runStatNum}>{runStats.total_runs}</Text>
+                    <Text style={s.runStatLabel}>RUNS</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Pace + Distance */}
+              <View style={s.card}>
+                <Text style={s.sectionHeader}>PERFORMANCE</Text>
+                <View style={s.runStatsGrid}>
+                  <View style={s.runStatBox}>
+                    <Text style={s.runStatNum}>{fmtPace(runStats.avg_pace_seconds)}</Text>
+                    <Text style={s.runStatLabel}>AVG PACE</Text>
+                  </View>
+                  <View style={s.runStatBox}>
+                    <Text style={[s.runStatNum, { color: colors.success }]}>{fmtPace(runStats.fastest_pace_seconds)}</Text>
+                    <Text style={s.runStatLabel}>FASTEST</Text>
+                  </View>
+                  <View style={s.runStatBox}>
+                    <Text style={s.runStatNum}>{runStats.longest_run_miles.toFixed(1)}</Text>
+                    <Text style={s.runStatLabel}>LONGEST MI</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* PR Board */}
+              {prs.length > 0 && (
+                <View style={s.card}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
+                    <Ionicons name="trophy" size={16} color="#F59E0B" />
+                    <Text style={s.sectionHeader}>PERSONAL RECORDS</Text>
+                  </View>
+                  {prs.map(pr => (
+                    <View key={pr.id} style={s.prRow}>
+                      <Text style={s.prLabel}>{pr.distance_label.replace('_', ' ').toUpperCase()}</Text>
+                      <Text style={s.prTime}>{pr.time_formatted}</Text>
+                      <Text style={s.prDate}>
+                        {new Date(pr.record_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={s.empty}>
+              <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
+              <Text style={s.emptyTitle}>No runs yet</Text>
+              <Text style={s.emptySubtitle}>Complete your first run to see stats here</Text>
+            </View>
+          )}
+        </>
       )}
 
       <View style={{ height: 40 }} />
@@ -311,4 +415,20 @@ const s = StyleSheet.create({
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.sm },
   emptyTitle: { ...typography.title3, color: colors.text },
   emptySubtitle: { ...typography.body, color: colors.textTertiary },
+
+  // Running section
+  runStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  runStatBox: {
+    flex: 1, minWidth: '28%' as any, alignItems: 'center', paddingVertical: spacing.md,
+    backgroundColor: colors.bg, borderRadius: radius.sm,
+  },
+  runStatNum: { fontSize: 22, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
+  runStatLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 2 },
+  prRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  prLabel: { ...typography.caption, color: colors.textSecondary, flex: 1 },
+  prTime: { fontSize: 16, fontWeight: '600', color: colors.accent, fontVariant: ['tabular-nums'], flex: 1, textAlign: 'center' },
+  prDate: { ...typography.micro, color: colors.textTertiary, flex: 1, textAlign: 'right' },
 });
