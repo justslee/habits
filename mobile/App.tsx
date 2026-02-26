@@ -5,6 +5,7 @@ import { Text } from 'react-native';
 import CheckInScreen from './src/screens/CheckInScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
+import HistoryScreen from './src/screens/HistoryScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -36,6 +37,14 @@ export default function App() {
           options={{
             tabBarLabel: 'Workout',
             tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏋️</Text>,
+          }}
+        />
+        <Tab.Screen
+          name="History"
+          component={HistoryScreen}
+          options={{
+            tabBarLabel: 'Progress',
+            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📈</Text>,
           }}
         />
         <Tab.Screen

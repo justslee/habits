@@ -82,6 +82,34 @@ export async function cancelWeeklyReviewReminder(): Promise<void> {
 }
 
 /**
+ * Schedule end-of-day check-in reminder (TASK-P2-012).
+ */
+export async function scheduleEODCheckIn(): Promise<string | null> {
+  // Cancel existing EOD notifications
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  for (const notif of scheduled) {
+    if (notif.content.data?.screen === 'CheckIn') {
+      await Notifications.cancelScheduledNotificationAsync(notif.identifier);
+    }
+  }
+
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title: '📝 Daily Check-In',
+      body: "Did you get 1% better today? Log your session.",
+      data: { screen: 'CheckIn' },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
+      hour: 21,
+      minute: 0,
+    },
+  });
+
+  return id;
+}
+
+/**
  * Send an immediate local notification (for testing or on-demand delivery).
  */
 export async function sendLocalNotification(

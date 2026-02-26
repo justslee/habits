@@ -3,7 +3,7 @@
 ## Data Layer
 
 ### TASK-P2-001: Workout data models & migrations
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] WorkoutSession model (date, day_type, whoop data, ai plan, coach notes, overall RPE)
@@ -14,7 +14,7 @@
 - **Verify**: `alembic upgrade head && pytest tests/test_workout_models.py`
 
 ### TASK-P2-002: Whoop integration service
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] Whoop API client with OAuth2 token refresh (AC-P2-5.1)
@@ -28,7 +28,7 @@
 ## AI Engine
 
 ### TASK-P2-003: Progressive overload engine
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-001
 - **Acceptance Criteria**:
   - [ ] Calculate next session targets from history (AC-P2-4.1)
@@ -42,7 +42,7 @@
 - **Verify**: `pytest tests/test_progressive_overload.py`
 
 ### TASK-P2-004: AI workout generator (Coach persona)
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-001, TASK-P2-002, TASK-P2-003
 - **Acceptance Criteria**:
   - [ ] Generate complete workout plan per day (AC-P2-2.1)
@@ -59,7 +59,7 @@
 ## API Layer
 
 ### TASK-P2-005: Workout session API endpoints
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-001
 - **Acceptance Criteria**:
   - [ ] POST /api/v1/workouts — create session with exercise logs
@@ -70,7 +70,7 @@
 - **Verify**: `pytest tests/test_workout_api.py`
 
 ### TASK-P2-006: Workout chat API (live coaching)
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-004, TASK-P2-005
 - **Acceptance Criteria**:
   - [ ] POST /api/v1/workouts/{id}/chat — send message, get coach response
@@ -81,7 +81,7 @@
 - **Verify**: `pytest tests/test_workout_chat.py`
 
 ### TASK-P2-007: Exercise profiles & progress API
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-003
 - **Acceptance Criteria**:
   - [ ] GET /api/v1/exercises — list all exercise profiles
@@ -93,7 +93,7 @@
 ## Mobile UI
 
 ### TASK-P2-008: Workout plan screen
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-005
 - **Acceptance Criteria**:
   - [ ] Shows today's workout plan (exercises, sets, reps, target weights)
@@ -103,7 +103,7 @@
   - [ ] Tab navigation: add Workout tab
 
 ### TASK-P2-009: Live workout chat screen
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-006
 - **Acceptance Criteria**:
   - [ ] Chat interface for logging sets
@@ -113,7 +113,7 @@
   - [ ] Voice input support (AC-P2-3.6)
 
 ### TASK-P2-010: Workout history & progress charts
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-007
 - **Acceptance Criteria**:
   - [ ] Per-exercise e1RM trend chart (AC-P2-7.1)
@@ -124,7 +124,7 @@
 ## Notifications
 
 ### TASK-P2-011: Morning briefing notification
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-004, TASK-P2-002
 - **Acceptance Criteria**:
   - [ ] Weekday morning push notification (AC-P2-1.1)
@@ -134,7 +134,7 @@
   - [ ] Adjusted if recovery low (AC-P2-1.5)
 
 ### TASK-P2-012: End-of-day check-in notification
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P2-005
 - **Acceptance Criteria**:
   - [ ] Evening push notification (AC-P2-6.1)

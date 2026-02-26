@@ -272,6 +272,65 @@ def list_exercise_profiles(db: Session = Depends(get_db)):
     return [ExerciseProfileResponse.model_validate(p) for p in profiles]
 
 
+@router.get("/exercises/{exercise_name}/history")
+def get_exercise_history(
+    exercise_name: str,
+    limit: int = 30,
+    db: Session = Depends(get_db),
+):
+    """Get workout history for a specific exercise."""
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    logs = (
+        db.query(ExerciseLog, WorkoutSession.session_date)
+        .join(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            ExerciseLog.exercise_name == exercise_name,
+            ExerciseLog.is_warmup == False,
+        )
+        .order_by(WorkoutSession.session_date.desc())
+        .limit(limit * 5)
+        .all()
+    )
+
+    # Group by session date
+    from collections import OrderedDict
+    from app.services.progressive_overload import estimate_1rm
+
+    sessions: dict = OrderedDict()
+    for log, session_date in logs:
+        d = session_date.isoformat()
+        if d not in sessions:
+            sessions[d] = {"date": d, "sets": [], "total_volume": 0, "best_e1rm": 0}
+        sessions[d]["sets"].append({
+            "set_number": log.set_number,
+            "weight": log.weight,
+            "reps": log.reps,
+            "rpe": log.rpe,
+        })
+        sessions[d]["total_volume"] += log.volume_load
+        e1rm = estimate_1rm(log.weight or 0, log.reps or 0)
+        if e1rm > sessions[d]["best_e1rm"]:
+            sessions[d]["best_e1rm"] = e1rm
+
+    return list(sessions.values())[:limit]
+
+
+@router.get("/exercises/volume-summary")
+def get_volume_summary(db: Session = Depends(get_db)):
+    """Get weekly volume by muscle group."""
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    from app.services.progressive_overload import get_weekly_volume
+    groups = ["push", "pull", "legs"]
+    return [get_weekly_volume(user.id, g, db) for g in groups]
+
+
 def _update_profiles_from_session(session: WorkoutSession, db: Session) -> None:
     """Update exercise profiles based on completed session data."""
     if not session.exercises:
