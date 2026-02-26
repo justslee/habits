@@ -189,7 +189,10 @@ export default function RunScreen({ navigation }: any) {
       <ScrollView style={s.container} contentContainerStyle={s.preContent}>
         <View style={s.preHeader}>
           <Text style={s.screenTitle}>Run</Text>
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+            <TouchableOpacity onPress={() => navigation?.navigate?.('RouteLibrary')} style={s.historyBtn}>
+              <Ionicons name="map-outline" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate?.('TrainingCalendar')} style={s.historyBtn}>
               <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
