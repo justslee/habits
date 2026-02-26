@@ -76,3 +76,59 @@ class PersonalRecordResponse(BaseModel):
     record_date: str
 
     model_config = {"from_attributes": True}
+
+
+# --- Phase 4: Training Plans ---
+
+class TrainingPlanCreate(BaseModel):
+    goal_type: str  # base_building, 5k, 10k, half_marathon, marathon, general
+    fitness_level: str = "intermediate"
+    available_days: Optional[str] = None  # JSON array of day ints
+    target_race_date: Optional[str] = None  # YYYY-MM-DD
+
+
+class PlannedRunResponse(BaseModel):
+    id: int
+    week_number: int
+    day_of_week: int
+    planned_date: Optional[str]
+    run_type: str
+    target_distance_miles: Optional[float]
+    target_pace_seconds: Optional[int]
+    target_duration_minutes: Optional[int]
+    description: Optional[str]
+    structure: Optional[str]
+    completed_run_id: Optional[int]
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class TrainingPlanResponse(BaseModel):
+    id: int
+    goal_type: str
+    fitness_level: str
+    start_date: str
+    end_date: Optional[str]
+    current_week: int
+    total_weeks: int
+    status: str
+    available_days: Optional[str]
+    target_race_date: Optional[str]
+    planned_runs: List[PlannedRunResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+class TodayRunResponse(BaseModel):
+    has_planned_run: bool
+    planned_run: Optional[PlannedRunResponse] = None
+    plan_name: Optional[str] = None
+    week_number: Optional[int] = None
+    total_weeks: Optional[int] = None
+
+
+class PostRunFeedbackResponse(BaseModel):
+    feedback: str
+    is_pr: bool
+    pr_type: Optional[str] = None

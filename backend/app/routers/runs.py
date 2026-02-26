@@ -10,14 +10,19 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.run import PersonalRecord, RunSession, RunSplit
+from app.models.run import PersonalRecord, PlannedRun, RunSession, RunSplit, TrainingPlan
 from app.models.user import User
 from app.schemas.run import (
     PersonalRecordResponse,
+    PlannedRunResponse,
+    PostRunFeedbackResponse,
     RunSessionCreate,
     RunSessionResponse,
     RunSplitResponse,
     RunStatsResponse,
+    TodayRunResponse,
+    TrainingPlanCreate,
+    TrainingPlanResponse,
 )
 
 router = APIRouter(prefix="/api/v1/runs", tags=["runs"])
@@ -202,6 +207,149 @@ def get_prs(db: Session = Depends(get_db)):
         )
         for pr in prs
     ]
+
+
+# --- Training Plan Endpoints (Phase 4) ---
+
+@router.post("/plans", response_model=TrainingPlanResponse)
+async def create_training_plan(
+    payload: TrainingPlanCreate, db: Session = Depends(get_db)
+):
+    """Create a new training plan via AI coach."""
+    user = db.query(User).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No user found")
+
+    # Deactivate existing plans
+    existing = db.query(TrainingPlan).filter(
+        TrainingPlan.user_id == user.id, TrainingPlan.status == "active"
+    ).all()
+    for p in existing:
+        p.status = "abandoned"
+
+    from app.services.run_coach import generate_training_plan, create_plan_from_ai
+
+    target_date = date.fromisoformat(payload.target_race_date) if payload.target_race_date else None
+    available = [int(d) for d in payload.available_days.split(",")] if payload.available_days else [1, 4, 6]
+
+    plan_data = await generate_training_plan(
+        user.id, payload.goal_type, payload.fitness_level, available, target_date, db
+    )
+
+    plan = create_plan_from_ai(
+        user.id, plan_data, payload.goal_type, payload.fitness_level,
+        payload.available_days, target_date, db
+    )
+
+    return _plan_to_response(plan)
+
+
+@router.get("/plans/active", response_model=Optional[TrainingPlanResponse])
+def get_active_plan(db: Session = Depends(get_db)):
+    """Get the active training plan."""
+    user = db.query(User).first()
+    if not user:
+        return None
+
+    plan = db.query(TrainingPlan).filter(
+        TrainingPlan.user_id == user.id, TrainingPlan.status == "active"
+    ).first()
+
+    if not plan:
+        return None
+    return _plan_to_response(plan)
+
+
+@router.get("/plans/{plan_id}/week/{week_num}", response_model=list[PlannedRunResponse])
+def get_plan_week(plan_id: int, week_num: int, db: Session = Depends(get_db)):
+    """Get planned runs for a specific week."""
+    runs = db.query(PlannedRun).filter(
+        PlannedRun.plan_id == plan_id, PlannedRun.week_number == week_num
+    ).order_by(PlannedRun.day_of_week).all()
+    return [_planned_run_to_response(r) for r in runs]
+
+
+@router.get("/today-plan", response_model=TodayRunResponse)
+def get_today_plan(db: Session = Depends(get_db)):
+    """Get today's planned run (if any)."""
+    user = db.query(User).first()
+    if not user:
+        return TodayRunResponse(has_planned_run=False)
+
+    today = date.today()
+    plan = db.query(TrainingPlan).filter(
+        TrainingPlan.user_id == user.id, TrainingPlan.status == "active"
+    ).first()
+
+    if not plan:
+        return TodayRunResponse(has_planned_run=False)
+
+    planned = db.query(PlannedRun).filter(
+        PlannedRun.plan_id == plan.id,
+        PlannedRun.planned_date == today,
+        PlannedRun.status == "upcoming",
+    ).first()
+
+    if not planned:
+        return TodayRunResponse(has_planned_run=False)
+
+    return TodayRunResponse(
+        has_planned_run=True,
+        planned_run=_planned_run_to_response(planned),
+        plan_name=f"{plan.goal_type.replace('_', ' ').title()} Plan",
+        week_number=plan.current_week,
+        total_weeks=plan.total_weeks,
+    )
+
+
+@router.post("/{run_id}/feedback", response_model=PostRunFeedbackResponse)
+async def generate_feedback(run_id: int, db: Session = Depends(get_db)):
+    """Generate AI post-run feedback."""
+    run = db.query(RunSession).filter(RunSession.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    planned = None
+    if run.planned_run_id:
+        planned = db.query(PlannedRun).filter(PlannedRun.id == run.planned_run_id).first()
+
+    from app.services.run_coach import generate_post_run_feedback, detect_personal_records
+
+    feedback = await generate_post_run_feedback(run, planned, db)
+    run.ai_feedback = feedback
+    db.commit()
+
+    prs = detect_personal_records(run, run.user_id, db)
+
+    return PostRunFeedbackResponse(
+        feedback=feedback,
+        is_pr=len(prs) > 0,
+        pr_type=prs[0]["distance_label"] if prs else None,
+    )
+
+
+def _plan_to_response(plan: TrainingPlan) -> TrainingPlanResponse:
+    return TrainingPlanResponse(
+        id=plan.id, goal_type=plan.goal_type, fitness_level=plan.fitness_level,
+        start_date=plan.start_date.isoformat(),
+        end_date=plan.end_date.isoformat() if plan.end_date else None,
+        current_week=plan.current_week, total_weeks=plan.total_weeks,
+        status=plan.status, available_days=plan.available_days,
+        target_race_date=plan.target_race_date.isoformat() if plan.target_race_date else None,
+        planned_runs=[_planned_run_to_response(r) for r in plan.planned_runs],
+    )
+
+
+def _planned_run_to_response(r: PlannedRun) -> PlannedRunResponse:
+    return PlannedRunResponse(
+        id=r.id, week_number=r.week_number, day_of_week=r.day_of_week,
+        planned_date=r.planned_date.isoformat() if r.planned_date else None,
+        run_type=r.run_type, target_distance_miles=r.target_distance_miles,
+        target_pace_seconds=r.target_pace_seconds,
+        target_duration_minutes=r.target_duration_minutes,
+        description=r.description, structure=r.structure,
+        completed_run_id=r.completed_run_id, status=r.status,
+    )
 
 
 @router.get("/{run_id}", response_model=RunSessionResponse)

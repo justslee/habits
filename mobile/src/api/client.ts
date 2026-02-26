@@ -275,6 +275,68 @@ export function getRunPRs(): Promise<PRData[]> {
   return request('/api/v1/runs/prs');
 }
 
+// --- Training Plans (Phase 4) ---
+
+export interface PlannedRunData {
+  id: number;
+  week_number: number;
+  day_of_week: number;
+  planned_date: string | null;
+  run_type: string;
+  target_distance_miles: number | null;
+  target_pace_seconds: number | null;
+  target_duration_minutes: number | null;
+  description: string | null;
+  structure: string | null;
+  completed_run_id: number | null;
+  status: string;
+}
+
+export interface TodayRunData {
+  has_planned_run: boolean;
+  planned_run: PlannedRunData | null;
+  plan_name: string | null;
+  week_number: number | null;
+  total_weeks: number | null;
+}
+
+export interface TrainingPlanData {
+  id: number;
+  goal_type: string;
+  fitness_level: string;
+  start_date: string;
+  end_date: string | null;
+  current_week: number;
+  total_weeks: number;
+  status: string;
+  planned_runs: PlannedRunData[];
+}
+
+export function getTodayRun(): Promise<TodayRunData> {
+  return request('/api/v1/runs/today-plan');
+}
+
+export function getActivePlan(): Promise<TrainingPlanData | null> {
+  return request('/api/v1/runs/plans/active');
+}
+
+export function createTrainingPlan(data: {
+  goal_type: string;
+  fitness_level?: string;
+  available_days?: string;
+  target_race_date?: string;
+}): Promise<TrainingPlanData> {
+  return request('/api/v1/runs/plans', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function getPostRunFeedback(runId: number): Promise<{ feedback: string; is_pr: boolean; pr_type: string | null }> {
+  return request(`/api/v1/runs/${runId}/feedback`, { method: 'POST' });
+}
+
 export function getDepthProgression(
   days: number = 90,
   pillarId?: number,
