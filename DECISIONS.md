@@ -87,3 +87,82 @@
 **Implementation**: Store rolling average depth score per pillar. Include in evaluation prompt context.
 
 **Status**: Accepted
+
+---
+
+## 2026-02-25: Architecture Overhaul
+
+### D-009: React Native + Expo (Not PWA)
+**Decision**: Use React Native with Expo instead of React + Vite PWA.
+
+**Rationale**:
+- Need push notifications (PWA support is inconsistent)
+- Need background GPS tracking (PWA cannot do this)
+- Need native performance for live GPS display
+- TestFlight distribution via Expo EAS Build
+
+**Status**: Accepted — applies to all phases
+
+---
+
+### D-010: iPhone Only
+**Decision**: No Android support. iPhone only.
+
+**Rationale**: Single user (Justin). No need to maintain two platforms. TestFlight distribution is simple.
+
+**Status**: Accepted
+
+---
+
+### D-011: SQLite (Not PostgreSQL)
+**Decision**: Use SQLite for both device and backend databases.
+
+**Rationale**: Single user, no concurrency requirements. SQLite is simpler, no server process, file-based backup. Works on both device (React Native) and backend (Python/SQLAlchemy).
+
+**Status**: Accepted
+
+---
+
+### D-012: LLM Calls Through Clawdbot Only
+**Decision**: All LLM calls route through Clawdbot at localhost:18789. Never call Claude API directly.
+
+**Rationale**: 
+- Clawdbot is already authenticated with Claude
+- Avoids duplicate API costs
+- Centralized LLM management
+- Can leverage Clawdbot's context/memory if needed
+
+**Implementation**: Backend calls `http://localhost:18789/v1/chat/completions` with OpenAI-compatible format.
+
+**Status**: Accepted
+
+---
+
+### D-013: Cloudflare Tunnel for Backend Access
+**Decision**: FastAPI backend runs locally on MacBook, exposed to iPhone via Cloudflare Tunnel.
+
+**Rationale**:
+- No cloud hosting costs
+- Backend can access local resources (Clawdbot, SQLite files)
+- HTTPS automatically provided by Cloudflare
+- Simple setup, reliable
+
+**Status**: Accepted
+
+---
+
+### D-014: Whoop API Read-Only
+**Decision**: Whoop API is read-only. Never write/modify Whoop data.
+
+**Rationale**: Whoop's API is primarily for reading recovery/sleep/strain data. We consume it to inform recommendations but don't attempt to push data back.
+
+**Status**: Accepted
+
+---
+
+### D-015: No Secrets in Git
+**Decision**: NEVER commit secrets, API keys, or tokens to Git. Use .env files only, always gitignored, with .env.example checked in.
+
+**Rationale**: Security best practice. Even for personal projects, habits matter.
+
+**Status**: Accepted — non-negotiable

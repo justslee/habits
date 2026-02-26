@@ -7,34 +7,84 @@
 
 | Layer      | Choice           | Why                                      |
 |------------|------------------|------------------------------------------|
-| Language   | Python 3.12+     | Your existing Polars/quant stack          |
+| Language (BE) | Python 3.12+  | Existing Polars/quant stack              |
 | Backend    | FastAPI          | Async, fast, great for APIs              |
-| Frontend   | React + Vite     | Fast builds, PWA-ready, Capacitor-ready  |
-| Database   | PostgreSQL       | Default. Override in SPEC if needed      |
-| ORM        | SQLAlchemy 2.0   | Async support, well-documented           |
+| Frontend   | React Native + Expo | Push notifications, background GPS, native performance |
+| Platform   | iPhone only      | Single user, TestFlight via EAS Build    |
+| Database   | SQLite           | Single user, no need for Postgres. Both device and backend |
+| ORM        | SQLAlchemy 2.0   | Async support, SQLite compatible         |
 | Test (BE)  | pytest           | Standard, fast                           |
-| Test (FE)  | Vitest           | Vite-native, fast                        |
+| Test (FE)  | Jest + React Native Testing Library | Expo default |
 | Pkg (BE)   | pip + requirements.txt | Simple. Use pyproject.toml if complex |
-| Pkg (FE)   | pnpm             | Fast, strict                             |
+| Pkg (FE)   | npm (Expo default) | Expo compatibility                     |
 | Formatter  | ruff (BE), prettier (FE) | Non-negotiable, run before commit  |
 | Port (BE)  | 8000             | FastAPI default                          |
-| Port (FE)  | 5173             | Vite default                             |
-| AI Backend | Claude API (Anthropic) | Honest feedback, existing integration |
+| AI Backend | Clawdbot @ localhost:18789 | Route through Clawdbot, never call Claude API directly |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     iPhone (React Native)                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ Daily Log   │  │ Dashboard   │  │ GPS Run Tracker     │  │
+│  │ (Phase 1)   │  │ (Phase 1)   │  │ (Phase 3)           │  │
+│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
+│         │                │                     │             │
+│         └────────────────┼─────────────────────┘             │
+│                          │                                   │
+│                    SQLite (device)                           │
+└──────────────────────────┼───────────────────────────────────┘
+                           │ HTTPS
+                           ▼
+              ┌────────────────────────┐
+              │   Cloudflare Tunnel    │
+              └────────────┬───────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    MacBook (Local)                            │
+│  ┌─────────────────┐     ┌─────────────────┐                 │
+│  │   FastAPI :8000 │────▶│  SQLite (backend)│                │
+│  └────────┬────────┘     └─────────────────┘                 │
+│           │                                                   │
+│           │ LLM calls                                         │
+│           ▼                                                   │
+│  ┌─────────────────┐     ┌─────────────────┐                 │
+│  │ Clawdbot :18789 │────▶│  Claude (Opus)  │                 │
+│  └─────────────────┘     └─────────────────┘                 │
+│                                                               │
+│  ┌─────────────────┐                                         │
+│  │   Whoop API     │ (read-only)                             │
+│  └─────────────────┘                                         │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ## Conventions
 
 - All env vars go in `.env` (gitignored) with a `.env.example` checked in.
+- **NEVER commit secrets, API keys, or tokens to Git.**
 - API routes: `/api/v1/<resource>` (RESTful, plural nouns).
 - Branch strategy: `main` is always deployable. Feature branches: `feat/<task-id>-<short-name>`.
 - Commits: conventional commits (`feat:`, `fix:`, `test:`, `chore:`).
-- No secrets or credentials in code. Ever. Use env vars.
+- LLM calls go through Clawdbot at `localhost:18789`. Never call Claude API directly.
+- Whoop API is read-only.
 
 ## Deployment Targets
 
-| Component | Target                  | URL Pattern                        |
+| Component | Target                  | Access Method                      |
 |-----------|-------------------------|------------------------------------|
-| Frontend  | Vercel (free tier)      | `https://<project>.vercel.app`     |
-| Backend   | Local + Cloudflare Tunnel | `https://<app>.<your-domain>.com` |
+| Frontend  | iPhone via TestFlight   | Expo EAS Build                     |
+| Backend   | Local MacBook :8000     | Cloudflare Tunnel (HTTPS)          |
+| Clawdbot  | Local MacBook :18789    | localhost only (backend calls)     |
+
+## Expo / React Native Notes
+
+- Use `expo-location` for GPS (background location support)
+- Use `expo-notifications` for push notifications
+- Use `expo-secure-store` for sensitive data on device
+- Background tasks via `expo-task-manager`
+- EAS Build for TestFlight distribution
 
 ## Overrides
 

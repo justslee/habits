@@ -203,3 +203,112 @@ The app is working if:
 ## Open Questions
 
 - None currently — spec is defined for Phase 1
+
+---
+
+# Phase 3: GPS Run Tracking — Strava + Runna Clone
+
+> **Note**: Requires thorough research on Strava and Runna before implementation. 
+> Target: feature parity for personal use, not a stripped-down version.
+> Running progress feeds into the 1% tracker (Pillar 6: Physical Fitness implied).
+
+## Phase 3 One-Liner
+
+Live GPS run tracking with AI coaching that adapts progressive running plans based on my actual performance and recovery.
+
+## Phase 3 Core Features
+
+### Feature P3-1: Live GPS Run Tracking
+
+**Description**: Real-time GPS tracking during runs with live pace, distance, elevation display. Must work with screen locked (background location).
+
+**Acceptance Criteria**:
+- [ ] AC-P3-1.1: Live GPS tracking displays current pace (min/mile)
+- [ ] AC-P3-1.2: Live GPS tracking displays total distance (miles)
+- [ ] AC-P3-1.3: Live GPS tracking displays elapsed time
+- [ ] AC-P3-1.4: Live GPS tracking displays current elevation and elevation gain
+- [ ] AC-P3-1.5: Map shows real-time position on route
+- [ ] AC-P3-1.6: Tracking continues with screen locked (background location)
+- [ ] AC-P3-1.7: Audio cues for mile splits (pace announcement)
+- [ ] AC-P3-1.8: GPS accuracy within 10 meters under normal conditions
+- [ ] AC-P3-1.9: Battery-efficient background tracking (< 10% battery/hour)
+
+### Feature P3-2: Route Recording & History
+
+**Description**: All runs saved with full GPS trace, splits, and metadata. Queryable history.
+
+**Acceptance Criteria**:
+- [ ] AC-P3-2.1: Route recorded as GPS polyline with timestamps
+- [ ] AC-P3-2.2: Per-mile splits stored with pace, elevation change, heart rate (if available)
+- [ ] AC-P3-2.3: Run metadata: date, time, weather conditions, perceived effort (RPE)
+- [ ] AC-P3-2.4: Run history browsable by date, distance, route
+- [ ] AC-P3-2.5: Individual run detail view with map, splits table, charts
+- [ ] AC-P3-2.6: Export to GPX format
+- [ ] AC-P3-2.7: Sync runs to backend database via Cloudflare Tunnel
+
+### Feature P3-3: AI Run Coach — Progressive Training Plans
+
+**Description**: AI generates progressive running plans, suggests routes, adapts if I miss runs. Pulls Whoop recovery data to adjust intensity.
+
+**Research Required**: Study Runna's training plan methodology before designing.
+
+**Acceptance Criteria**:
+- [ ] AC-P3-3.1: AI generates weekly running plan based on goals (e.g., 10K, half marathon, base building)
+- [ ] AC-P3-3.2: Plan includes variety: easy runs, tempo, intervals, long runs, recovery
+- [ ] AC-P3-3.3: Plan adapts if I miss a run (reschedules, adjusts load)
+- [ ] AC-P3-3.4: Plan adapts based on Whoop recovery score (easy day if recovery < 50%)
+- [ ] AC-P3-3.5: AI suggests routes based on target distance and terrain preferences
+- [ ] AC-P3-3.6: Post-run AI feedback: what went well, what to improve
+- [ ] AC-P3-3.7: Progressive overload: mileage increases ~10% per week (standard rule)
+- [ ] AC-P3-3.8: Deload weeks automatically scheduled every 4th week
+- [ ] AC-P3-3.9: LLM calls via Clawdbot at localhost:18789 (never direct Claude API)
+
+### Feature P3-4: Running Stats & Analytics
+
+**Description**: Comprehensive running analytics matching Strava feature parity.
+
+**Research Required**: Study Strava's analytics features before designing.
+
+**Acceptance Criteria**:
+- [ ] AC-P3-4.1: Weekly/monthly mileage totals and trends
+- [ ] AC-P3-4.2: Pace trends over time (are runs getting faster?)
+- [ ] AC-P3-4.3: Elevation gain totals
+- [ ] AC-P3-4.4: Personal records (PRs) tracked: fastest mile, 5K, 10K, etc.
+- [ ] AC-P3-4.5: Training load visualization (similar to Strava Fitness/Freshness)
+- [ ] AC-P3-4.6: Heart rate zone distribution (if HR data available)
+- [ ] AC-P3-4.7: Segment tracking: compare same route over time
+- [ ] AC-P3-4.8: Running feeds into 1% tracker as physical fitness pillar
+
+### Feature P3-5: Whoop Integration for Running
+
+**Description**: Pull Whoop data to inform running recommendations.
+
+**Acceptance Criteria**:
+- [ ] AC-P3-5.1: Display recovery score before suggested run
+- [ ] AC-P3-5.2: Adjust run intensity recommendation based on recovery
+- [ ] AC-P3-5.3: Show strain impact post-run (if Whoop API provides)
+- [ ] AC-P3-5.4: Warn if attempting hard run on low recovery day
+- [ ] AC-P3-5.5: Whoop API calls are read-only
+
+## Phase 3 Non-Functional Requirements
+
+- [ ] Background GPS tracking works reliably with screen locked
+- [ ] App does not drain battery excessively (< 10% per hour of active tracking)
+- [ ] GPS data syncs to backend when connectivity available
+- [ ] Offline-first: runs can complete without network, sync later
+- [ ] Push notifications for scheduled runs
+
+## Phase 3 Research Tasks (Pre-Implementation)
+
+Before designing detailed tasks:
+1. **Strava deep-dive**: Document all features, UX patterns, data models
+2. **Runna deep-dive**: Document training plan logic, adaptation rules, coaching UX
+3. **Expo location capabilities**: Confirm background GPS, battery impact, accuracy
+4. **Whoop API capabilities**: What run-related data is available?
+
+## Phase 3 Out of Scope
+
+- Social features (sharing, followers, kudos)
+- Cycling, swimming, or other activities
+- Apple Watch companion app (Phase 4?)
+- Route planning/creation (use existing routes or freeform)

@@ -25,22 +25,23 @@
 - **Depends on**: none
 - **Acceptance Criteria**:
   - [ ] Backend: FastAPI app runs on port 8000, `/health` returns `{"status": "ok"}`
-  - [ ] Frontend: Vite React app runs on port 5173, renders default page
-  - [ ] `.env.example` exists with all required vars documented
+  - [ ] Frontend: Expo React Native app initializes and runs on iOS Simulator
+  - [ ] `.env.example` exists with all required vars documented (both backend and mobile)
   - [ ] `pytest` passes (even if no real tests yet)
-  - [ ] `pnpm test` passes (even if no real tests yet)
-  - [ ] Project structure follows conventions in CONTEXT.md
-- **Verify**: `curl http://localhost:8000/health && cd frontend && pnpm build`
+  - [ ] `npm test` passes in mobile app (even if no real tests yet)
+  - [ ] Project structure: `/backend` (FastAPI) + `/mobile` (Expo)
+- **Verify**: `curl http://localhost:8000/health && cd mobile && npx expo start`
 
 ### TASK-002: Database schema & models
 - **Status**: [ ] todo
 - **Depends on**: TASK-001
 - **Acceptance Criteria**:
-  - [ ] PostgreSQL database configured and running
+  - [ ] SQLite database configured (backend: `data/mastery.db`)
   - [ ] SQLAlchemy models for: User, DailyEntry, PillarScore, Streak, Milestone
   - [ ] Alembic migrations set up and initial migration created
   - [ ] Five pillars seeded as reference data
   - [ ] Models support full history queries (no soft deletes, append-only entries)
+  - [ ] SQLite on mobile device for offline-first support
 - **Verify**: `alembic upgrade head && pytest tests/test_models.py`
 - **Notes**: Core entities: entries (daily logs), evaluations (AI scores), streaks, milestones
 
@@ -204,33 +205,35 @@
   - [ ] Delivery happens Sunday evening (configurable time)
 - **Verify**: Manual test: receive weekly review notification
 
-### TASK-017: PWA configuration
+### TASK-017: Expo EAS Build setup
 - **Status**: [ ] todo
 - **Depends on**: TASK-004
 - **Acceptance Criteria**:
-  - [ ] `manifest.json` present with name, icons, start_url, display: standalone
-  - [ ] Service worker registered
-  - [ ] Lighthouse PWA audit passes (score > 80)
-  - [ ] Installable on iOS and Android
-- **Verify**: `npx lighthouse http://localhost:5173 --only-categories=pwa --output=json | jq '.categories.pwa.score'`
+  - [ ] EAS CLI configured with Expo account
+  - [ ] `eas.json` configured for development, preview, and production profiles
+  - [ ] App icons and splash screen configured
+  - [ ] Bundle identifier set for iOS
+- **Verify**: `cd mobile && eas build:configure`
 
-### TASK-018: Vercel deployment (frontend)
+### TASK-018: TestFlight deployment
 - **Status**: [ ] todo
 - **Depends on**: TASK-017
 - **Acceptance Criteria**:
-  - [ ] Frontend deploys to Vercel on push to `main`
-  - [ ] Production URL accessible and PWA installable
-  - [ ] Environment variables configured in Vercel dashboard
-- **Verify**: `curl -s -o /dev/null -w "%{http_code}" https://mastery-tracker.vercel.app`
+  - [ ] EAS Build produces iOS build
+  - [ ] Build submitted to TestFlight
+  - [ ] App installable on iPhone via TestFlight
+  - [ ] Push notifications configured (Expo Push)
+- **Verify**: `eas build --platform ios --profile production && eas submit --platform ios`
 
 ### TASK-019: Backend deployment (Cloudflare Tunnel)
 - **Status**: [ ] todo
 - **Depends on**: TASK-015
 - **Acceptance Criteria**:
   - [ ] FastAPI backend accessible via Cloudflare Tunnel
-  - [ ] HTTPS configured
-  - [ ] Health endpoint accessible from public URL
-  - [ ] Database persistence configured
+  - [ ] HTTPS configured automatically by Cloudflare
+  - [ ] Health endpoint accessible from iPhone
+  - [ ] SQLite database persisted locally
+  - [ ] Mobile app can reach backend via tunnel URL
 - **Verify**: `curl https://mastery-api.<domain>/health`
 
 ---
