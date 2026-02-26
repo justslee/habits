@@ -38,6 +38,12 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
+# Run database migrations (creates data/mastery.db)
+alembic upgrade head
+
+# Seed reference data (pillars + default user)
+python -c "from app.db.database import SessionLocal; from app.db.seed import seed_all; db = SessionLocal(); seed_all(db); db.close(); print('Seeded OK')"
+
 # Start server
 source venv/bin/activate
 uvicorn app.main:app --reload --port 8000
