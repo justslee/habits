@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text } from 'react-native';
 import CheckInScreen from './src/screens/CheckInScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
+import WorkoutScreen from './src/screens/WorkoutScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -27,6 +28,14 @@ export default function App() {
           options={{
             tabBarLabel: 'Log',
             tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>✏️</Text>,
+          }}
+        />
+        <Tab.Screen
+          name="Workout"
+          component={WorkoutScreen}
+          options={{
+            tabBarLabel: 'Workout',
+            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏋️</Text>,
           }}
         />
         <Tab.Screen

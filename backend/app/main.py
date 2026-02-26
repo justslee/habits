@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import dashboard, entries, milestones, streaks, weekly_reviews
+from app.routers import dashboard, entries, milestones, streaks, weekly_reviews, workouts
 
 app = FastAPI(
     title="Mastery Tracker API",
@@ -26,6 +26,7 @@ app.include_router(entries.router)
 app.include_router(milestones.router)
 app.include_router(streaks.router)
 app.include_router(weekly_reviews.router)
+app.include_router(workouts.router)
 
 
 @app.get("/health")

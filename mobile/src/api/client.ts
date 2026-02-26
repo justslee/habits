@@ -129,6 +129,97 @@ export interface DepthProgressionPoint {
   pillar_name: string;
 }
 
+// Workout types
+
+export interface ExerciseLogData {
+  exercise_name: string;
+  set_number: number;
+  weight?: number;
+  reps?: number;
+  rpe?: number;
+  is_warmup?: boolean;
+  notes?: string;
+  duration_minutes?: number;
+  distance_miles?: number;
+}
+
+export interface WorkoutSession {
+  id: number;
+  session_date: string;
+  day_type: string;
+  status: string;
+  whoop_recovery_score: number | null;
+  whoop_hrv: number | null;
+  whoop_resting_hr: number | null;
+  whoop_sleep_score: number | null;
+  ai_plan: string | null;
+  coach_notes: string | null;
+  overall_rpe: number | null;
+  exercises: ExerciseLogData[];
+}
+
+export interface ExerciseProfileData {
+  id: number;
+  exercise_name: string;
+  muscle_group: string;
+  current_working_weight: number | null;
+  current_rep_target: number | null;
+  current_set_target: number | null;
+  estimated_1rm: number | null;
+  progression_status: string;
+  stall_count: number;
+  mesocycle_phase: string;
+  mesocycle_week: number;
+}
+
+export interface ChatResponseData {
+  coach_response: string;
+  parsed_sets: ExerciseLogData[];
+  session_summary: string | null;
+}
+
+export function getTodayWorkout(): Promise<WorkoutSession> {
+  return request('/api/v1/workouts/today');
+}
+
+export function getWorkoutSessions(limit: number = 20): Promise<WorkoutSession[]> {
+  return request(`/api/v1/workouts/?limit=${limit}`);
+}
+
+export function createWorkoutSession(data: {
+  day_type: string;
+  exercises?: ExerciseLogData[];
+}): Promise<WorkoutSession> {
+  return request('/api/v1/workouts/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function addExerciseLog(
+  sessionId: number,
+  data: ExerciseLogData,
+): Promise<ExerciseLogData> {
+  return request(`/api/v1/workouts/${sessionId}/exercises`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function chatWithCoach(
+  sessionId: number,
+  message: string,
+): Promise<ChatResponseData> {
+  return request(`/api/v1/workouts/${sessionId}/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+}
+
+export function getExerciseProfiles(): Promise<ExerciseProfileData[]> {
+  return request('/api/v1/workouts/exercises/profiles');
+}
+
 export function getDepthProgression(
   days: number = 90,
   pillarId?: number,
