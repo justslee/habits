@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx expo export --platform web",
+  "buildCommand": "npx expo export --platform web && node scripts/fix-web.js",
   "outputDirectory": "dist",
   "framework": null,
   "rewrites": [

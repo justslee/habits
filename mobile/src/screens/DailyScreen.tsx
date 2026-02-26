@@ -25,6 +25,7 @@ const haptic = {
   selection: () => { if (Platform.OS !== 'web') ExpoHaptics.selectionAsync().catch(() => {}); },
 };
 import { colors, spacing, typography, radius } from '../theme';
+import CheckInContent from './CheckInScreen';
 
 const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -398,10 +399,6 @@ export default function DailyScreen() {
       <View style={{ height: 40 }} />
     </ScrollView>
   );
-
-  // ===== CHECK-IN TAB (import existing) =====
-  // We'll lazy-load the CheckInScreen content
-  const CheckInContent = require('./CheckInScreen').default;
 
   return (
     <KeyboardAvoidingView
