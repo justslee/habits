@@ -12,7 +12,9 @@ from app.models.streak import Streak
 from app.models.user import User
 from app.models.evaluation import Evaluation
 from app.schemas.entry import EntryCreate, EntryResponse, EntryUpdate
+from app.schemas.suggest_tags import SuggestTagsRequest, SuggestTagsResponse
 from app.services.evaluation import evaluate_entry
+from app.services.suggest_tags import suggest_tags
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -106,7 +108,9 @@ def get_entry(entry_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{entry_id}", response_model=EntryResponse)
-def update_entry_tags(entry_id: int, payload: EntryUpdate, db: Session = Depends(get_db)):
+def update_entry_tags(
+    entry_id: int, payload: EntryUpdate, db: Session = Depends(get_db)
+):
     """Update pillar tags on an existing entry."""
     entry = (
         db.query(DailyEntry)
@@ -121,6 +125,15 @@ def update_entry_tags(entry_id: int, payload: EntryUpdate, db: Session = Depends
     db.commit()
     db.refresh(entry)
     return EntryResponse.from_entry(entry)
+
+
+@router.post("/suggest-tags", response_model=SuggestTagsResponse)
+async def suggest_pillar_tags(
+    payload: SuggestTagsRequest, db: Session = Depends(get_db)
+):
+    """Suggest pillar tags for entry text using LLM analysis."""
+    suggestions = await suggest_tags(payload.description, db)
+    return SuggestTagsResponse(suggestions=suggestions)
 
 
 @router.post("/{entry_id}/evaluate", response_model=EntryResponse)
