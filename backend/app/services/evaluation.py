@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.daily_entry import DailyEntry
 from app.models.evaluation import Evaluation
 from app.models.pillar import Pillar
+from app.services.adaptive import build_adaptive_context_block, calculate_consistency_multiplier
 
 logger = logging.getLogger(__name__)
 
@@ -143,14 +144,28 @@ async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
     pillars = db.query(Pillar).all()
 
     user_prompt = _build_user_prompt(entry, pillars)
-    raw_response = await call_clawdbot(SYSTEM_PROMPT, user_prompt)
+
+    # TASK-006: Adaptive calibration — inject user level context
+    adaptive_block = build_adaptive_context_block(
+        entry.user_id, entry.pillar_tag_list, db
+    )
+    system_prompt = SYSTEM_PROMPT
+    if adaptive_block:
+        system_prompt = SYSTEM_PROMPT + "\n" + adaptive_block
+
+    # TASK-006: Calculate consistency multiplier from streak data
+    consistency_mult = calculate_consistency_multiplier(
+        entry.user_id, entry.pillar_tag_list, db
+    )
+
+    raw_response = await call_clawdbot(system_prompt, user_prompt)
     parsed = parse_llm_response(raw_response)
 
     evaluation = Evaluation(
         entry_id=entry.id,
         depth_score=parsed["depth_score"],
         relevance_score=parsed["relevance_score"],
-        consistency_multiplier=1.0,  # TASK-006 will implement adaptive calibration
+        consistency_multiplier=consistency_mult,
         one_percent_better=parsed["one_percent_better"],
         verdict_explanation=parsed["verdict_explanation"],
         commentary=parsed["commentary"],
