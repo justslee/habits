@@ -63,7 +63,8 @@ class TestGetNextSessionTargets:
 
         result = get_next_session_targets(profile, db_session)
         assert result["weight"] is None
-        assert "Enter your current" in result["rationale"]
+        assert "BASELINE DISCOVERY" in result["rationale"]
+        assert result.get("is_baseline") is True
 
     def test_no_history(self, db_session):
         user = db_session.query(User).first()

@@ -79,7 +79,8 @@ def get_next_session_targets(
             "reps": profile.current_rep_target or 5,
             "sets": profile.current_set_target or 4,
             "warmup_sets": [],
-            "rationale": "No working weight set. Enter your current working weight.",
+            "rationale": "BASELINE DISCOVERY: Work up in moderate jumps to find a weight where you hit RPE 7-8. That becomes your working weight.",
+            "is_baseline": True,
         }
 
     # Check if deload is due
@@ -202,6 +203,17 @@ def update_profile_after_session(
 
     if not working_sets:
         return profile
+
+    # Baseline discovery: set working weight from first real session
+    if not profile.current_working_weight:
+        heaviest = max(working_sets, key=lambda s: s.weight or 0)
+        if heaviest.weight:
+            profile.current_working_weight = heaviest.weight
+            profile.progression_status = "progressing"
+            profile.sessions_at_current_weight = 1
+            profile.estimated_1rm = estimate_1rm(heaviest.weight, heaviest.reps or 1)
+            db.commit()
+            return profile
 
     # Update e1RM from best set
     best_set = max(working_sets, key=lambda s: estimate_1rm(s.weight or 0, s.reps or 0))
