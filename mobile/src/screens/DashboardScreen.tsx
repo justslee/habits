@@ -24,6 +24,7 @@ import {
 } from '../api/client';
 import RadarChart from '../components/RadarChart';
 import DepthChart from '../components/DepthChart';
+import CompoundingChart from '../components/CompoundingChart';
 
 const TREND_ICONS: Record<string, string> = {
   improving: '📈',
@@ -162,6 +163,12 @@ export default function DashboardScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Depth Progression (90 days)</Text>
         <DepthChart data={depthData} />
+      </View>
+
+      {/* Compounding Progress */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>1% Daily Compound</Text>
+        <CompoundingChart stats={stats} />
       </View>
 
       {/* Pillar Breakdown */}

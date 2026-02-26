@@ -8,6 +8,7 @@ from app.models.evaluation import Evaluation
 from app.models.pillar_score import PillarScore
 from app.models.streak import Streak
 from app.models.milestone import Milestone
+from app.models.weekly_review import WeeklyReview
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "PillarScore",
     "Streak",
     "Milestone",
+    "WeeklyReview",
 ]

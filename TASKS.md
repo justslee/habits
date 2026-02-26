@@ -144,7 +144,7 @@
 - **Verify**: Manual test: heatmap renders with real entry data
 
 ### TASK-011: Radar chart visualization
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-009
 - **Acceptance Criteria**:
   - [ ] Five-axis spider chart for all pillars (AC-3.1)
@@ -154,7 +154,7 @@
 - **Verify**: Manual test: radar chart renders with relative pillar scores
 
 ### TASK-012: Depth progression curves
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-009
 - **Acceptance Criteria**:
   - [ ] Line chart per pillar showing depth score over time (AC-3.4)
