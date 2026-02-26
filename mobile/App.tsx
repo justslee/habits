@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View } from 'react-native';
 import CheckInScreen from './src/screens/CheckInScreen';
+import DailyScreen from './src/screens/DailyScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
 import RunScreen from './src/screens/RunScreen';
 import RunHistoryScreen from './src/screens/RunHistoryScreen';
@@ -28,6 +29,7 @@ function RunStackScreen() {
 }
 
 const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
+  Daily: { active: 'today', inactive: 'today-outline' },
   CheckIn: { active: 'add-circle', inactive: 'add-circle-outline' },
   Train: { active: 'barbell', inactive: 'barbell-outline' },
   Run: { active: 'footsteps', inactive: 'footsteps-outline' },
@@ -73,7 +75,7 @@ export default function App() {
           },
         })}
       >
-        <Tab.Screen name="CheckIn" component={CheckInScreen} options={{ tabBarLabel: 'Log' }} />
+        <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
         <Tab.Screen name="Train" component={WorkoutScreen} options={{ tabBarLabel: 'Train' }} />
         <Tab.Screen name="Run" component={RunStackScreen} options={{ tabBarLabel: 'Run' }} />
         <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />

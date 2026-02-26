@@ -227,7 +227,7 @@
   - [ ] Save route with name and tags (flat, hilly, trail, track, neighborhood)
 
 ### TASK-P4-062: Route library & selection
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-P4-061
 - **Acceptance Criteria**:
   - [ ] Route library screen: list of saved routes with map thumbnail, distance, elevation, last run date
