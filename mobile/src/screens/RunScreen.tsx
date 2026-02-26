@@ -34,6 +34,8 @@ export default function RunScreen() {
   const [selectedRPE, setSelectedRPE] = useState(5);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [savedRunId, setSavedRunId] = useState<number | null>(null);
+  const [isPR, setIsPR] = useState(false);
+  const [prType, setPRType] = useState<string | null>(null);
   const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
   const countdownScale = useRef(new RNAnimated.Value(1)).current;
   const locationSub = useRef<Location.LocationSubscription | null>(null);
@@ -151,6 +153,8 @@ export default function RunScreen() {
         try {
           const fb = await getPostRunFeedback(data.id);
           setFeedback(fb.feedback);
+          setIsPR(fb.is_pr);
+          setPRType(fb.pr_type || null);
         } catch { setFeedback(null); }
       }
     } catch {}
@@ -163,6 +167,8 @@ export default function RunScreen() {
     setFeedback(null);
     setSavedRunId(null);
     setSelectedRPE(5);
+    setIsPR(false);
+    setPRType(null);
     getTodayRun().then(setTodayRun).catch(() => {});
   };
 
@@ -312,15 +318,36 @@ export default function RunScreen() {
   // === POST-RUN SUMMARY ===
   if (phase === 'summary') {
     const state = stateRef.current;
+    const avgPace = state.distanceMiles > 0 ? Math.round(state.elapsedMs / 1000 / state.distanceMiles) : 0;
+    const firstPoint = state.points.length > 0 ? state.points[0] : null;
+    const bestSplit = state.splits.length > 0
+      ? state.splits.reduce((best, sp) => sp.paceSeconds < best.paceSeconds ? sp : best, state.splits[0])
+      : null;
+
     return (
       <ScrollView style={s.container} contentContainerStyle={s.summaryContent}>
-        <Text style={s.summaryTitle}>Run Complete</Text>
+        {/* PR Badge */}
+        {isPR && (
+          <View style={s.prBanner}>
+            <Ionicons name="trophy" size={20} color="#F59E0B" />
+            <Text style={s.prBannerText}>
+              New {prType?.replace('_', ' ').toUpperCase()} PR!
+            </Text>
+            <Ionicons name="trophy" size={20} color="#F59E0B" />
+          </View>
+        )}
 
+        <Text style={s.summaryTitle}>
+          {isPR ? 'PERSONAL RECORD' : 'RUN COMPLETE'}
+        </Text>
+
+        {/* Hero distance */}
         <View style={s.summaryHero}>
           <Text style={s.heroDistance}>{state.distanceMiles.toFixed(2)}</Text>
           <Text style={s.heroUnit}>miles</Text>
         </View>
 
+        {/* Stat trio */}
         <View style={s.summaryStats}>
           <View style={s.summaryStat}>
             <Text style={s.summaryStatValue}>{formatDuration(state.elapsedMs)}</Text>
@@ -328,34 +355,79 @@ export default function RunScreen() {
           </View>
           <View style={s.summaryStatDivider} />
           <View style={s.summaryStat}>
-            <Text style={s.summaryStatValue}>{formatPace(state.distanceMiles > 0 ? Math.round(state.elapsedMs / 1000 / state.distanceMiles) : 0)}</Text>
+            <Text style={s.summaryStatValue}>{formatPace(avgPace)}</Text>
             <Text style={s.summaryStatLabel}>AVG PACE</Text>
           </View>
           <View style={s.summaryStatDivider} />
           <View style={s.summaryStat}>
-            <Text style={s.summaryStatValue}>{Math.round(state.elevationGainFt)}</Text>
-            <Text style={s.summaryStatLabel}>ELEV</Text>
+            <Text style={s.summaryStatValue}>{Math.round(state.elevationGainFt)}'</Text>
+            <Text style={s.summaryStatLabel}>ELEV GAIN</Text>
           </View>
         </View>
 
-        {state.splits.length > 0 && (
-          <View style={s.card}>
-            <Text style={s.cardLabel}>SPLITS</Text>
-            {state.splits.map(sp => (
-              <View key={sp.mileNumber} style={s.splitRow}>
-                <Text style={s.splitMile}>Mile {sp.mileNumber}</Text>
-                <Text style={s.splitPace}>{formatPace(sp.paceSeconds)}</Text>
-              </View>
-            ))}
+        {/* Route map with pace coloring */}
+        {firstPoint && state.points.length > 2 && Platform.OS !== 'web' && (
+          <View style={s.summaryMapContainer}>
+            <MapView
+              style={s.summaryMap}
+              region={{
+                latitude: firstPoint.latitude, longitude: firstPoint.longitude,
+                latitudeDelta: 0.02, longitudeDelta: 0.02,
+              }}
+              scrollEnabled={false} zoomEnabled={false}
+              pitchEnabled={false} rotateEnabled={false}
+              mapType="standard"
+            >
+              <PacePolyline
+                points={state.points}
+                targetPaceSeconds={planned?.target_pace_seconds || null}
+                strokeWidth={5}
+              />
+            </MapView>
           </View>
         )}
 
+        {/* Splits table */}
+        {state.splits.length > 0 && (
+          <View style={[s.card, { width: '100%' }]}>
+            <Text style={s.cardLabel}>SPLITS</Text>
+            {state.splits.map(sp => {
+              const isBest = bestSplit && sp.mileNumber === bestSplit.mileNumber;
+              const paceDeviation = avgPace > 0 ? sp.paceSeconds - avgPace : 0;
+              return (
+                <View key={sp.mileNumber} style={s.splitRow}>
+                  <Text style={s.splitMile}>Mile {sp.mileNumber}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {isBest && <Ionicons name="flash" size={14} color="#F59E0B" />}
+                    <Text style={[
+                      s.splitPace,
+                      paceDeviation < -5 && { color: '#10B981' },
+                      paceDeviation > 10 && { color: '#EF4444' },
+                    ]}>
+                      {formatPace(sp.paceSeconds)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Coach feedback */}
         {feedback && (
-          <View style={s.card}>
-            <Text style={s.cardLabel}>COACH FEEDBACK</Text>
+          <View style={[s.card, { width: '100%' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
+              <Ionicons name="chatbubble-ellipses" size={16} color={colors.accent} />
+              <Text style={s.cardLabel}>COACH</Text>
+            </View>
             <Text style={s.feedbackText}>{feedback}</Text>
           </View>
         )}
+
+        {/* RPE pill */}
+        <View style={s.rpeSummaryPill}>
+          <Text style={s.rpeSummaryText}>RPE {selectedRPE}/10</Text>
+        </View>
 
         <TouchableOpacity style={s.doneBtn} onPress={resetToPreRun}>
           <Text style={s.doneBtnText}>Done</Text>
@@ -583,6 +655,13 @@ const s = StyleSheet.create({
 
   // Summary
   summaryContent: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48, alignItems: 'center' },
+  prBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)', borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, marginBottom: spacing.md,
+    borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  prBannerText: { fontSize: 14, fontWeight: '700', color: '#F59E0B', letterSpacing: 1 },
   summaryTitle: { ...typography.micro, color: colors.success, letterSpacing: 2, textTransform: 'uppercase', marginBottom: spacing.lg },
   summaryHero: { flexDirection: 'row', alignItems: 'baseline', marginBottom: spacing.xl },
   heroDistance: { fontSize: 72, fontWeight: '200', color: colors.text, fontVariant: ['tabular-nums'] },
@@ -592,6 +671,16 @@ const s = StyleSheet.create({
   summaryStatValue: { fontSize: 20, fontWeight: '600', color: colors.text, fontVariant: ['tabular-nums'] },
   summaryStatLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 4 },
   summaryStatDivider: { width: 1, height: 28, backgroundColor: colors.border },
+  summaryMapContainer: {
+    width: '100%', height: 200, borderRadius: radius.lg, overflow: 'hidden',
+    marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.border,
+  },
+  summaryMap: { width: '100%', height: '100%' },
+  rpeSummaryPill: {
+    backgroundColor: colors.card, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, marginBottom: spacing.md,
+  },
+  rpeSummaryText: { ...typography.caption, color: colors.textSecondary },
 
   splitRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   splitMile: { ...typography.body, color: colors.textSecondary },
