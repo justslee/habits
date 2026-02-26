@@ -33,7 +33,7 @@
 - **Verify**: `curl http://localhost:8000/health && cd mobile && npx expo start`
 
 ### TASK-002: Database schema & models
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-001
 - **Acceptance Criteria**:
   - [ ] SQLite database configured (backend: `data/mastery.db`)
@@ -46,7 +46,7 @@
 - **Notes**: Core entities: entries (daily logs), evaluations (AI scores), streaks, milestones
 
 ### TASK-003: Daily check-in API endpoints
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-002
 - **Acceptance Criteria**:
   - [ ] `POST /api/v1/entries` — create daily entry (AC-1.1 through AC-1.7)
@@ -111,7 +111,7 @@
 - **Verify**: Manual test: enter "studied stochastic calculus proofs" → should suggest Quant Finance
 
 ### TASK-008: Streak tracking system
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-003
 - **Acceptance Criteria**:
   - [ ] Track current streak per pillar (AC-3.3)
