@@ -13,8 +13,20 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.masterytracker.app"
+      "bundleIdentifier": "com.masterytracker.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563eb"
+        }
+      ]
+    ],
     "platforms": ["ios"],
     "web": {
       "favicon": "./assets/favicon.png"

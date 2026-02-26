@@ -19,6 +19,7 @@ class User(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=True)
+    push_token: Mapped[str] = mapped_column(String(255), nullable=True)
 
     # Relationships
     entries = relationship("DailyEntry", back_populates="user")

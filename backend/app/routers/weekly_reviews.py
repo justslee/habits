@@ -82,6 +82,18 @@ def list_reviews(limit: int = 10, db: Session = Depends(get_db)):
     ]
 
 
+@router.post("/register-push-token")
+def register_push_token(token: str, db: Session = Depends(get_db)):
+    """Register Expo push token for weekly review delivery."""
+    user = db.query(User).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No user found")
+    # Store token on user (simple approach for single-user app)
+    user.push_token = token
+    db.commit()
+    return {"status": "registered"}
+
+
 @router.get("/latest", response_model=Optional[WeeklyReviewResponse])
 def get_latest_review(db: Session = Depends(get_db)):
     """Get the most recent weekly review."""

@@ -164,7 +164,7 @@
 - **Verify**: Manual test: depth chart shows progression for pillar with 10+ entries
 
 ### TASK-013: Compounding progress view
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-009
 - **Acceptance Criteria**:
   - [ ] Shows theoretical 1% daily compound curve (AC-3.7)
@@ -184,7 +184,7 @@
 - **Verify**: `pytest tests/test_milestones.py`
 
 ### TASK-015: Weekly review — automated generation
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-005, TASK-008, TASK-009
 - **Acceptance Criteria**:
   - [ ] Automated weekly summary generated Sunday (AC-5.1)
