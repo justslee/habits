@@ -25,7 +25,7 @@ const RUN_TYPE_COLORS: Record<string, string> = {
 
 type Phase = 'pre' | 'countdown' | 'active' | 'paused' | 'rpe' | 'summary';
 
-export default function RunScreen() {
+export default function RunScreen({ navigation }: any) {
   const [phase, setPhase] = useState<Phase>('pre');
   const [runState, setRunState] = useState<RunState>(createRunState);
   const [permissionGranted, setPermissionGranted] = useState(false);
@@ -187,7 +187,12 @@ export default function RunScreen() {
   if (phase === 'pre') {
     return (
       <ScrollView style={s.container} contentContainerStyle={s.preContent}>
-        <Text style={s.screenTitle}>Run</Text>
+        <View style={s.preHeader}>
+          <Text style={s.screenTitle}>Run</Text>
+          <TouchableOpacity onPress={() => navigation?.navigate?.('RunHistory')} style={s.historyBtn}>
+            <Ionicons name="time-outline" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
 
         {planned ? (
           <View style={[s.card, { borderColor: runTypeColor + '40' }]}>
@@ -551,7 +556,9 @@ const s = StyleSheet.create({
 
   // Pre-run
   preContent: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48 },
-  screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
+  preHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
+  screenTitle: { ...typography.title1, color: colors.text },
+  historyBtn: { padding: spacing.sm },
 
   card: {
     backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1,
