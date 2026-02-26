@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View } from 'react-native';
 import CheckInScreen from './src/screens/CheckInScreen';
@@ -15,7 +15,7 @@ import ProgressScreen from './src/screens/ProgressScreen';
 import { colors } from './src/theme';
 
 const Tab = createBottomTabNavigator();
-const RunStack = createNativeStackNavigator();
+const RunStack = createStackNavigator();
 
 function RunStackScreen() {
   return (
