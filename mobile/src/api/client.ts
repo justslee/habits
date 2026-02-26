@@ -220,6 +220,61 @@ export function getExerciseProfiles(): Promise<ExerciseProfileData[]> {
   return request('/api/v1/workouts/exercises/profiles');
 }
 
+// Run types
+
+export interface RunSplitData {
+  mile_number: number;
+  pace_seconds: number;
+  pace_formatted?: string;
+  elevation_change_ft?: number;
+}
+
+export interface RunSessionData {
+  id: number;
+  run_date: string;
+  distance_miles: number;
+  duration_seconds: number;
+  avg_pace_seconds: number | null;
+  avg_pace_formatted: string;
+  duration_formatted: string;
+  elevation_gain_ft: number | null;
+  run_type: string | null;
+  rpe: number | null;
+  ai_feedback: string | null;
+  status: string;
+  splits: RunSplitData[];
+}
+
+export interface RunStatsData {
+  total_runs: number;
+  total_miles: number;
+  total_time_seconds: number;
+  avg_pace_seconds: number | null;
+  this_week_miles: number;
+  this_month_miles: number;
+  longest_run_miles: number;
+  fastest_pace_seconds: number | null;
+}
+
+export interface PRData {
+  distance_label: string;
+  time_seconds: number;
+  time_formatted: string;
+  record_date: string;
+}
+
+export function getRuns(limit: number = 20): Promise<RunSessionData[]> {
+  return request(`/api/v1/runs/?limit=${limit}`);
+}
+
+export function getRunStats(): Promise<RunStatsData> {
+  return request('/api/v1/runs/stats');
+}
+
+export function getRunPRs(): Promise<PRData[]> {
+  return request('/api/v1/runs/prs');
+}
+
 export function getDepthProgression(
   days: number = 90,
   pillarId?: number,

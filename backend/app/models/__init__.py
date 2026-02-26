@@ -9,6 +9,7 @@ from app.models.pillar_score import PillarScore
 from app.models.streak import Streak
 from app.models.milestone import Milestone
 from app.models.weekly_review import WeeklyReview
+from app.models.run import PersonalRecord, RunningProfile, RunSession, RunSplit
 from app.models.workout import ExerciseLog, ExerciseProfile, WhoopSnapshot, WorkoutSession
 
 __all__ = [
@@ -25,4 +26,8 @@ __all__ = [
     "ExerciseLog",
     "ExerciseProfile",
     "WhoopSnapshot",
+    "RunSession",
+    "RunSplit",
+    "RunningProfile",
+    "PersonalRecord",
 ]

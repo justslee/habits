@@ -6,6 +6,7 @@ import CheckInScreen from './src/screens/CheckInScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import RunScreen from './src/screens/RunScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -37,6 +38,14 @@ export default function App() {
           options={{
             tabBarLabel: 'Workout',
             tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏋️</Text>,
+          }}
+        />
+        <Tab.Screen
+          name="Run"
+          component={RunScreen}
+          options={{
+            tabBarLabel: 'Run',
+            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏃</Text>,
           }}
         />
         <Tab.Screen
