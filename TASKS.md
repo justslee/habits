@@ -197,7 +197,7 @@
 - **Verify**: `pytest tests/test_weekly_review.py`
 
 ### TASK-016: Weekly review — notification delivery
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-015
 - **Acceptance Criteria**:
   - [ ] Weekly review delivered via push notification or email (AC-5.7)
@@ -206,7 +206,7 @@
 - **Verify**: Manual test: receive weekly review notification
 
 ### TASK-017: Expo EAS Build setup
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-004
 - **Acceptance Criteria**:
   - [ ] EAS CLI configured with Expo account
@@ -216,7 +216,7 @@
 - **Verify**: `cd mobile && eas build:configure`
 
 ### TASK-018: TestFlight deployment
-- **Status**: [ ] todo
+- **Status**: [~] in-progress
 - **Depends on**: TASK-017
 - **Acceptance Criteria**:
   - [ ] EAS Build produces iOS build
@@ -226,7 +226,7 @@
 - **Verify**: `eas build --platform ios --profile production && eas submit --platform ios`
 
 ### TASK-019: Backend deployment (Cloudflare Tunnel)
-- **Status**: [ ] todo
+- **Status**: [x] done
 - **Depends on**: TASK-015
 - **Acceptance Criteria**:
   - [ ] FastAPI backend accessible via Cloudflare Tunnel
