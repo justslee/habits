@@ -655,3 +655,286 @@ Before designing detailed tasks:
 - Cycling, swimming, or other activities
 - Apple Watch companion app (Phase 4?)
 - Route planning/creation (use existing routes or freeform)
+
+---
+
+# Phase 4: UI Revamp + Runna-Quality Running Experience
+
+> **Builds on Phase 3's foundation** (GPS tracking, run models, basic run screen).
+> Elevates the entire app UI and transforms the basic run tracker into a Runna-quality experience
+> with guided runs, AI training plans, and rich post-run analytics.
+
+## Phase 4 One-Liner
+
+Transform the app from functional prototype into a polished, Runna-quality running experience with AI training plans, guided audio coaching, and a unified design system.
+
+---
+
+## Phase 4A: UI Revamp (Pre-Requisite)
+
+### Feature P4-UI-1: 4-Tab Navigation + Unified Progress
+
+**Description**: Merge Progress and Dashboard into a single unified view. Reduce from 5 tabs to 4: Log, Train, Run, Progress. The Train tab covers strength workouts. The Progress tab shows both mastery pillars and fitness progress grouped by muscle group.
+
+**Acceptance Criteria**:
+- [ ] AC-P4-UI-1.1: 4-tab navigation: Log, Train, Run, Progress
+- [ ] AC-P4-UI-1.2: Progress tab shows mastery pillar stats (radar, heatmap, depth, compounding) at top
+- [ ] AC-P4-UI-1.3: Progress tab shows strength progress grouped by muscle group (Chest, Shoulders, Back, Arms, Legs, Core)
+- [ ] AC-P4-UI-1.4: Each muscle group collapsible, shows exercises with current weight, e1RM trend, progression status
+- [ ] AC-P4-UI-1.5: Running stats section in Progress tab (weekly mileage, pace trends, PRs)
+- [ ] AC-P4-UI-1.6: Ionicons throughout, no emoji in UI
+- [ ] AC-P4-UI-1.7: Consistent design system (theme.ts: colors, typography, spacing, radius)
+
+### Feature P4-UI-2: Design System Cleanup
+
+**Description**: All screens use a shared theme with Apple HIG-inspired typography, consistent card styles, and proper icon usage.
+
+**Acceptance Criteria**:
+- [ ] AC-P4-UI-2.1: theme.ts defines colors, spacing, typography, radius constants
+- [ ] AC-P4-UI-2.2: All screens import and use theme constants
+- [ ] AC-P4-UI-2.3: Uppercase section labels (caption weight, 0.5 letter spacing)
+- [ ] AC-P4-UI-2.4: Cards: #111 bg, 12px radius, 1px #1c1c1e border
+- [ ] AC-P4-UI-2.5: Status indicators use colored pills/dots, not emoji
+- [ ] AC-P4-UI-2.6: Web build (expo export --platform web) succeeds
+
+---
+
+## Phase 4B: Runna-Quality Run Experience
+
+### Feature P4-1: Live GPS Run Tracking (Runna-Quality)
+
+**Description**: Full-screen run tracking experience inspired by Runna. Full-bleed map with route trace, bottom sheet with swipeable metric cards, works with screen locked. Upgrades Phase 3's basic run screen.
+
+**Technical Stack**:
+- GPS: expo-location (foreground + background via expo-task-manager) — already implemented
+- Maps: react-native-maps (Apple Maps on iOS) — already implemented
+- Audio: expo-speech or expo-av for pace announcements — NEW
+- Background: expo-task-manager for lock-screen tracking — already implemented
+
+**Acceptance Criteria**:
+- [ ] AC-P4-1.1: Full-bleed map with real-time position dot and route polyline
+- [ ] AC-P4-1.2: Bottom sheet overlay with large metrics: distance (huge), pace, time, elevation
+- [ ] AC-P4-1.3: Swipeable metric cards (current split, avg pace, heart rate if available)
+- [ ] AC-P4-1.4: Start → 3-2-1 countdown → tracking begins
+- [ ] AC-P4-1.5: Pause/resume with lap marker
+- [ ] AC-P4-1.6: Stop → "How did it feel?" RPE prompt → save
+- [ ] AC-P4-1.7: Tracking continues with screen locked (background location)
+- [ ] AC-P4-1.8: Audio cues: mile split announcement (pace + total time), halfway alert, pace drift warnings
+- [ ] AC-P4-1.9: GPS accuracy within 10 meters, battery < 10%/hour
+- [ ] AC-P4-1.10: Route colored by pace (green = target, yellow = slow, red = too slow)
+- [ ] AC-P4-1.11: Haptic feedback on mile completions
+
+### Feature P4-2: Guided Runs & Interval Coaching
+
+**Description**: Runna's killer feature — structured run guidance with real-time audio coaching. Intervals, tempo segments, warm-up/cool-down phases all coached live.
+
+**Run Types**:
+| Type | Description | Coaching Style |
+|------|-------------|---------------|
+| Easy | Conversational pace, recovery | "Keep it easy, you should be able to talk" |
+| Tempo | Sustained effort, comfortably hard | "Hold this pace — 7:30/mi target" |
+| Intervals | Repeats with recovery | "400m hard in 1:45... 200m jog recovery... 3 of 6 done" |
+| Long Run | Endurance building | "Settle in. First 3 miles easy, then pick it up" |
+| Recovery | Very easy, active recovery | "Slow it down. This is about blood flow, not fitness" |
+| Fartlek | Unstructured speed play | "Next 90 seconds, pick it up. Then recover until you're ready" |
+| Progression | Start easy, finish fast | "Each mile should be 15-20 seconds faster than the last" |
+
+**Acceptance Criteria**:
+- [ ] AC-P4-2.1: Pre-run screen shows run structure (warm-up → work → cool-down segments)
+- [ ] AC-P4-2.2: Live coaching audio cues at segment transitions ("Speed up — tempo pace now")
+- [ ] AC-P4-2.3: Interval timer with work/rest countdown visible on screen
+- [ ] AC-P4-2.4: Pace zone alerts: audio warning when drifting outside target zone
+- [ ] AC-P4-2.5: Warm-up and cool-down segments auto-included in structured runs
+- [ ] AC-P4-2.6: Visual segment timeline showing current position in run structure
+- [ ] AC-P4-2.7: Audio cues work with screen locked and music playing (mix with audio)
+- [ ] AC-P4-2.8: "Free run" mode available (no structure, just track)
+
+### Feature P4-3: AI Training Plan Generator
+
+**Description**: AI generates multi-week progressive running plans adapted from Runna's methodology. Plans adjust based on completed runs, missed sessions, and Whoop recovery.
+
+**Plan Structure (Runna-style)**:
+- Plans are goal-based: Base Building, 5K, 10K, Half Marathon, Marathon, General Fitness
+- Each week has 3-5 runs with specific types (easy, tempo, intervals, long)
+- Weekly mileage increases ~10% per week for 3 weeks, then deload week 4
+- Plans are 4-16 weeks depending on goal
+- Running fits around strength schedule: primarily Tue evening, Fri, Sun long run
+
+**Acceptance Criteria**:
+- [ ] AC-P4-3.1: Plan setup flow: select goal, current fitness level, available days, target race date (optional)
+- [ ] AC-P4-3.2: AI generates full multi-week plan with specific run types and target paces per session
+- [ ] AC-P4-3.3: Plan respects existing weekly schedule (Mon/Tue/Wed = strength, Sat = basketball)
+- [ ] AC-P4-3.4: Adaptive replanning when a run is missed (redistributes load, doesn't just skip)
+- [ ] AC-P4-3.5: Recovery-aware: Whoop recovery < 50% → easy run or rest substitution
+- [ ] AC-P4-3.6: Progressive overload: weekly mileage ramp with deload every 4th week
+- [ ] AC-P4-3.7: Plan view: calendar showing upcoming runs with type, distance, target pace
+- [ ] AC-P4-3.8: "Today's Run" card on Run tab showing what's planned with tap-to-start
+- [ ] AC-P4-3.9: Post-run AI feedback: pace analysis, effort assessment, next-run preview
+- [ ] AC-P4-3.10: LLM calls via Clawdbot at localhost:18789
+
+### Feature P4-4: Post-Run Summary & Detail
+
+**Description**: Rich post-run screen matching Strava quality. Route visualization, pace-colored segments, splits analysis, effort metrics.
+
+**Acceptance Criteria**:
+- [ ] AC-P4-4.1: Post-run summary screen immediately after stopping
+- [ ] AC-P4-4.2: Route on map with pace-colored polyline (green/yellow/red gradient)
+- [ ] AC-P4-4.3: Splits table with per-mile pace, elevation change, avg HR
+- [ ] AC-P4-4.4: Pace chart (line graph of pace per minute/quarter-mile)
+- [ ] AC-P4-4.5: Elevation profile chart
+- [ ] AC-P4-4.6: RPE selection ("How did it feel?" 1-10 scale)
+- [ ] AC-P4-4.7: AI coach post-run feedback (what went well, what to improve)
+- [ ] AC-P4-4.8: PR detection and celebration (new fastest mile, 5K, etc.)
+- [ ] AC-P4-4.9: Share card generation (image with route + stats for screenshots)
+
+### Feature P4-5: Running History & Analytics
+
+**Description**: Comprehensive running analytics. Weekly/monthly views, pace trends, PR board, training load. Extends Phase 3's basic history.
+
+**Acceptance Criteria**:
+- [ ] AC-P4-5.1: Run history list with route thumbnail, distance, pace, date, run type badge
+- [ ] AC-P4-5.2: Weekly mileage bar chart (current week highlighted)
+- [ ] AC-P4-5.3: Monthly mileage trend line
+- [ ] AC-P4-5.4: Average pace trend over time (getting faster?)
+- [ ] AC-P4-5.5: PR board: fastest mile, 5K, 10K, half marathon, marathon
+- [ ] AC-P4-5.6: Training load chart (Strava-style fitness/fatigue/form)
+- [ ] AC-P4-5.7: Elevation gain totals (weekly/monthly/all-time)
+- [ ] AC-P4-5.8: Segment comparison: same route over time (faster or slower?)
+- [ ] AC-P4-5.9: Heart rate zone distribution chart (if HR data from Whoop)
+- [ ] AC-P4-5.10: Running data feeds into unified Progress tab
+
+### Feature P4-6: Whoop Integration for Running
+
+**Description**: Whoop recovery and strain data integrated into run coaching decisions. Extends Phase 2's Whoop service.
+
+**Acceptance Criteria**:
+- [ ] AC-P4-6.1: Recovery score displayed on "Today's Run" card
+- [ ] AC-P4-6.2: Low recovery (< 50%) triggers plan adjustment (easy run or rest)
+- [ ] AC-P4-6.3: Declining recovery trend (3+ days) triggers coach alert
+- [ ] AC-P4-6.4: Post-run strain data shown in run summary (if API provides)
+- [ ] AC-P4-6.5: Sleep quality factors into next-day run intensity
+- [ ] AC-P4-6.6: Whoop API calls are read-only, cached with existing whoop service
+
+---
+
+## Phase 4 Run Coach Persona (System Prompt)
+
+```
+You are an elite running coach building progressive training plans for a hybrid 
+athlete. Your client does strength training (Push/Pull/Legs Mon-Wed), rests 
+Thursday, and plays competitive basketball on Saturday. Running fits around this 
+schedule — primarily Tuesday evening, Friday, and Sunday for long runs.
+
+Your coaching philosophy:
+- 80/20 rule: 80% of miles at easy/conversational pace, 20% at tempo or faster.
+- Build aerobic base before adding speed work. First 4 weeks are base building 
+  unless client already has a mileage base.
+- Weekly mileage increases max 10% per week. Every 4th week is a deload (reduce 
+  volume 30-40%).
+- Recovery is non-negotiable. If Whoop shows red recovery, prescribe rest or very 
+  easy running only.
+- Basketball on Saturday counts as cross-training intensity. Sunday long runs 
+  should account for Saturday's load.
+- Progressive overload for running: first increase distance, then add speed work, 
+  then increase speed work intensity. Never both at once.
+
+Your communication style:
+- Direct, encouraging but honest. Like a running club coach who knows your name.
+- Give specific pace targets, not vague "run easy." Easy = specific min/mile range.
+- Explain why each run type matters for the goal.
+- Celebrate PRs and consistency. Call out when effort doesn't match the plan.
+- Post-run: analyze splits, note positive trends, flag areas for improvement.
+
+Run type definitions:
+- Easy: 60-70% max HR, conversational, typically 9:00-10:30/mi for intermediate
+- Tempo: 80-85% max HR, "comfortably hard," typically 7:30-8:30/mi  
+- Intervals: 90-95% max HR with recovery, specific pace targets per rep
+- Long Run: Easy pace, focus on time on feet, last miles can pick up
+- Recovery: Slower than easy, genuinely slow, 10:00-11:00+/mi
+```
+
+## Phase 4 Data Model Additions
+
+### TrainingPlan
+- goal_type (base_building / 5k / 10k / half_marathon / marathon / general)
+- start_date, end_date
+- current_week
+- total_weeks
+- weekly_plan (JSON: array of weeks, each with array of planned runs)
+- status (active / completed / abandoned)
+- fitness_level (beginner / intermediate / advanced)
+
+### PlannedRun
+- plan_id (FK → TrainingPlan)
+- week_number, day_of_week
+- run_type (easy / tempo / intervals / long / recovery / fartlek / progression)
+- target_distance_miles
+- target_pace_seconds (per mile)
+- structure (JSON: segments with type, duration/distance, target pace)
+- completed_run_id (FK → RunSession, nullable)
+- status (upcoming / completed / missed / swapped)
+
+### RunSegmentLog
+- run_id (FK → RunSession)
+- segment_index
+- segment_type (warmup / work / recovery / cooldown)
+- target_pace_seconds, actual_pace_seconds
+- target_duration_seconds, actual_duration_seconds
+- distance_miles
+
+### Updates to RunSession (from Phase 3)
+- Add: planned_run_id (FK → PlannedRun, nullable)
+- Add: ai_feedback (text — post-run coach analysis)
+- Add: feel_rating (1-10 RPE selected post-run)
+- Add: is_pr (boolean)
+- Add: pr_type (text — "fastest_mile", "5k", etc.)
+
+## Phase 4 Non-Functional Requirements
+
+- [ ] Background GPS tracking works reliably with screen locked
+- [ ] Battery < 10% per hour of active tracking
+- [ ] Audio cues mix with music playback (don't interrupt)
+- [ ] Push notifications for scheduled runs (morning of)
+- [ ] Web build succeeds (maps/GPS gracefully degrade)
+- [ ] Offline-first: runs complete without network, sync later
+
+## Phase 4 Design Reference
+
+**Runna UX patterns to replicate**:
+- "Today's Run" card: run type, distance, estimated time, tap to start
+- Pre-run structure view: visual timeline of warmup → segments → cooldown
+- During run: large distance number, secondary metrics below, segment progress bar
+- Post-run: celebration screen → detailed summary → coach feedback
+- Plan view: week calendar with run dots, this week highlighted
+- Run type colors: Easy = blue, Tempo = orange, Intervals = red, Long = green, Recovery = gray
+
+**Strava UX patterns to replicate**:
+- Route map with pace-colored polyline
+- Splits table with alternating row colors
+- Elevation profile below map
+- PR badges on run cards
+- Weekly mileage chart in analytics
+
+### Feature P4-7: Route Creation & Planning
+
+**Description**: Create, save, and reuse running routes. Draw routes on a map, get distance estimates, and select saved routes when starting a run. Compare performance on the same route over time.
+
+**Acceptance Criteria**:
+- [ ] AC-P4-7.1: Draw a route on the map by tapping waypoints (start → waypoints → finish)
+- [ ] AC-P4-7.2: Auto-snap to roads/paths using a routing API (OpenRouteService or Mapbox)
+- [ ] AC-P4-7.3: Real-time distance and estimated elevation shown as route is drawn
+- [ ] AC-P4-7.4: Save route with name and tags (flat, hilly, trail, track, neighborhood)
+- [ ] AC-P4-7.5: Route library: browse saved routes, see distance, elevation, last run date
+- [ ] AC-P4-7.6: Select a saved route before starting a run (shows route on map during tracking)
+- [ ] AC-P4-7.7: Auto-detect repeated routes from GPS history (fuzzy match within ~50m)
+- [ ] AC-P4-7.8: Route comparison: overlay multiple runs on the same route, compare splits
+- [ ] AC-P4-7.9: "Out and back" and "Loop" route generation from a target distance
+- [ ] AC-P4-7.10: AI coach can suggest routes based on planned run type and distance
+
+## Phase 4 Out of Scope
+
+- Social features (sharing, followers, kudos)
+- Cycling, swimming, or other activities
+- Apple Watch companion (Phase 5?)
+- Music integration (plays alongside, no in-app controls)
+- Live tracking sharing (share location with others)

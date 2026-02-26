@@ -151,13 +151,26 @@ async def get_today_plan(db: Session = Depends(get_db)):
     if existing:
         return _session_to_response(existing)
 
-    # Generate plan
-    plan = await generate_workout_plan(user.id, day_type, None, db)
+    # Fetch Whoop data
+    whoop_data = {}
+    try:
+        from app.services.whoop import fetch_whoop_data, cache_whoop_snapshot
+        whoop_data = await fetch_whoop_data()
+        cache_whoop_snapshot(user.id, db, whoop_data)
+    except Exception:
+        pass  # Whoop unavailable — continue without it
+
+    # Generate plan (with Whoop recovery context)
+    plan = await generate_workout_plan(user.id, day_type, whoop_data or None, db)
 
     session = WorkoutSession(
         user_id=user.id,
         session_date=today,
         day_type=day_type,
+        whoop_recovery_score=whoop_data.get("recovery_score"),
+        whoop_hrv=whoop_data.get("hrv"),
+        whoop_resting_hr=whoop_data.get("resting_hr"),
+        whoop_sleep_score=whoop_data.get("sleep_score"),
         ai_plan=json.dumps(plan),
         coach_notes=plan.get("coach_notes"),
         status="planned",

@@ -39,10 +39,14 @@ def _save_tokens(tokens: dict[str, Any]) -> None:
     TOKEN_PATH.write_text(json.dumps(tokens, indent=2))
 
 
+WHOOP_CLIENT_ID = "1e8ae741-dd42-4119-ad04-30c9f259b28d"
+WHOOP_CLIENT_SECRET = "f9ae26fe8c23a2b2ebced854b071e15fc329736b5e7b3b8748a5f5a81d75512a"
+
+
 async def _refresh_token(tokens: dict[str, Any]) -> dict[str, Any]:
     """Attempt to refresh the access token."""
-    if not tokens.get("client_id") or not tokens.get("client_secret"):
-        raise WhoopUnavailableError("No client_id/client_secret in token file — re-auth needed")
+    client_id = tokens.get("client_id", WHOOP_CLIENT_ID)
+    client_secret = tokens.get("client_secret", WHOOP_CLIENT_SECRET)
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
@@ -50,8 +54,8 @@ async def _refresh_token(tokens: dict[str, Any]) -> dict[str, Any]:
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": tokens["refresh_token"],
-                "client_id": tokens["client_id"],
-                "client_secret": tokens["client_secret"],
+                "client_id": client_id,
+                "client_secret": client_secret,
             },
         )
         if resp.status_code != 200:

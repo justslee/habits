@@ -1,69 +1,66 @@
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Platform, View } from 'react-native';
 import CheckInScreen from './src/screens/CheckInScreen';
-import DashboardScreen from './src/screens/DashboardScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
-import HistoryScreen from './src/screens/HistoryScreen';
 import RunScreen from './src/screens/RunScreen';
+import ProgressScreen from './src/screens/ProgressScreen';
+import { colors } from './src/theme';
 
 const Tab = createBottomTabNavigator();
+
+const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
+  CheckIn: { active: 'add-circle', inactive: 'add-circle-outline' },
+  Train: { active: 'barbell', inactive: 'barbell-outline' },
+  Run: { active: 'footsteps', inactive: 'footsteps-outline' },
+  Progress: { active: 'stats-chart', inactive: 'stats-chart-outline' },
+};
 
 export default function App() {
   return (
     <NavigationContainer>
       <Tab.Navigator
-        screenOptions={{
+        screenOptions={({ route }) => ({
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: '#111',
-            borderTopColor: '#333',
+            backgroundColor: colors.bg,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            elevation: 0,
+            height: Platform.OS === 'ios' ? 88 : 64,
+            paddingBottom: Platform.OS === 'ios' ? 28 : 8,
+            paddingTop: 8,
           },
-          tabBarActiveTintColor: '#2563eb',
-          tabBarInactiveTintColor: '#666',
-        }}
+          tabBarActiveTintColor: colors.accent,
+          tabBarInactiveTintColor: colors.textTertiary,
+          tabBarLabelStyle: {
+            fontSize: 10,
+            fontWeight: '600',
+            marginTop: 2,
+            letterSpacing: 0.3,
+          },
+          tabBarIcon: ({ focused, color }) => {
+            const icons = TAB_ICONS[route.name];
+            const iconName = focused ? icons.active : icons.inactive;
+            return (
+              <View style={focused ? {
+                backgroundColor: colors.accentMuted,
+                borderRadius: 12,
+                paddingHorizontal: 14,
+                paddingVertical: 4,
+              } : undefined}>
+                <Ionicons name={iconName} size={22} color={color} />
+              </View>
+            );
+          },
+        })}
       >
-        <Tab.Screen
-          name="CheckIn"
-          component={CheckInScreen}
-          options={{
-            tabBarLabel: 'Log',
-            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>✏️</Text>,
-          }}
-        />
-        <Tab.Screen
-          name="Workout"
-          component={WorkoutScreen}
-          options={{
-            tabBarLabel: 'Workout',
-            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏋️</Text>,
-          }}
-        />
-        <Tab.Screen
-          name="Run"
-          component={RunScreen}
-          options={{
-            tabBarLabel: 'Run',
-            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏃</Text>,
-          }}
-        />
-        <Tab.Screen
-          name="History"
-          component={HistoryScreen}
-          options={{
-            tabBarLabel: 'Progress',
-            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📈</Text>,
-          }}
-        />
-        <Tab.Screen
-          name="Dashboard"
-          component={DashboardScreen}
-          options={{
-            tabBarLabel: 'Dashboard',
-            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📊</Text>,
-          }}
-        />
+        <Tab.Screen name="CheckIn" component={CheckInScreen} options={{ tabBarLabel: 'Log' }} />
+        <Tab.Screen name="Train" component={WorkoutScreen} options={{ tabBarLabel: 'Train' }} />
+        <Tab.Screen name="Run" component={RunScreen} options={{ tabBarLabel: 'Run' }} />
+        <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
       </Tab.Navigator>
       <StatusBar style="light" />
     </NavigationContainer>

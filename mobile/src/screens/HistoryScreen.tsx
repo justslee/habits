@@ -1,42 +1,25 @@
-/**
- * Workout History & Progress Screen — TASK-P2-010
- *
- * Shows exercise history, e1RM trends, volume charts, and progression status.
- */
-
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-  Platform,
-  RefreshControl,
-  TouchableOpacity,
+  View, Text, ScrollView, StyleSheet, ActivityIndicator, Platform, RefreshControl,
 } from 'react-native';
-import Svg, { Path, Line, Circle, Text as SvgText } from 'react-native-svg';
-import {
-  getExerciseProfiles,
-  getWorkoutSessions,
-  ExerciseProfileData,
-  WorkoutSession,
-} from '../api/client';
+import { Ionicons } from '@expo/vector-icons';
+import { getExerciseProfiles, getWorkoutSessions, ExerciseProfileData, WorkoutSession } from '../api/client';
+import { colors, spacing, typography, radius } from '../theme';
 
 const STATUS_COLORS: Record<string, string> = {
-  progressing: '#10b981',
-  maintaining: '#f59e0b',
-  stalled: '#ef4444',
-  deloading: '#8b5cf6',
-  regressing: '#ef4444',
+  progressing: colors.success,
+  maintaining: colors.warning,
+  stalled: colors.error,
+  deloading: '#bf5af2',
+  regressing: colors.error,
 };
 
-const STATUS_ICONS: Record<string, string> = {
-  progressing: '📈',
-  maintaining: '➡️',
-  stalled: '⚠️',
-  deloading: '🔄',
-  regressing: '📉',
+const STATUS_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  progressing: 'arrow-up',
+  maintaining: 'arrow-forward',
+  stalled: 'alert-circle',
+  deloading: 'refresh',
+  regressing: 'arrow-down',
 };
 
 export default function HistoryScreen() {
@@ -47,64 +30,40 @@ export default function HistoryScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [p, s] = await Promise.all([
-        getExerciseProfiles(),
-        getWorkoutSessions(20),
-      ]);
-      setProfiles(p);
-      setSessions(s);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      const [p, s] = await Promise.all([getExerciseProfiles(), getWorkoutSessions(20)]);
+      setProfiles(p); setSessions(s);
+    } catch {} finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2563eb" />
-      </View>
-    );
+    return <View style={s.center}><ActivityIndicator size="large" color={colors.accent} /></View>;
   }
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor="#666" />
-      }
-    >
-      <Text style={styles.title}>Progress</Text>
+    <ScrollView style={s.scroll} contentContainerStyle={s.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
-      {/* Exercise Profiles */}
+      <Text style={s.screenTitle}>Progress</Text>
+
       {profiles.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Exercise Profiles</Text>
-          {profiles.map((p) => (
-            <View key={p.id} style={styles.profileRow}>
-              <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>{p.exercise_name}</Text>
-                <Text style={styles.profileMeta}>
-                  {p.current_working_weight ? `${p.current_working_weight} lbs` : 'No weight'}
-                  {p.estimated_1rm ? ` · e1RM ${p.estimated_1rm}` : ''}
-                  {` · ${p.current_set_target || 4}×${p.current_rep_target || 5}`}
+        <View style={s.card}>
+          <Text style={s.cardLabel}>EXERCISE PROFILES</Text>
+          {profiles.map((p, i) => (
+            <View key={p.id} style={[s.profileRow, i < profiles.length - 1 && s.divider]}>
+              <View style={s.profileInfo}>
+                <Text style={s.profileName}>{p.exercise_name}</Text>
+                <Text style={s.profileMeta}>
+                  {p.current_working_weight ? `${p.current_working_weight} lb` : 'No weight'}
+                  {p.estimated_1rm ? `  ·  e1RM ${p.estimated_1rm}` : ''}
+                  {`  ·  ${p.current_set_target || 4}x${p.current_rep_target || 5}`}
                 </Text>
               </View>
-              <View style={styles.profileStatus}>
-                <Text style={{ fontSize: 16 }}>
-                  {STATUS_ICONS[p.progression_status] || '—'}
-                </Text>
-                <Text
-                  style={[
-                    styles.statusText,
-                    { color: STATUS_COLORS[p.progression_status] || '#666' },
-                  ]}
-                >
+              <View style={[s.statusPill, { backgroundColor: (STATUS_COLORS[p.progression_status] || colors.textTertiary) + '1a' }]}>
+                <Ionicons name={STATUS_ICONS[p.progression_status] || 'ellipse'} size={12}
+                  color={STATUS_COLORS[p.progression_status] || colors.textTertiary} />
+                <Text style={[s.statusText, { color: STATUS_COLORS[p.progression_status] || colors.textTertiary }]}>
                   {p.progression_status}
                 </Text>
               </View>
@@ -113,46 +72,36 @@ export default function HistoryScreen() {
         </View>
       )}
 
-      {/* Mesocycle Info */}
       {profiles.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Mesocycle</Text>
-          <View style={styles.mesoRow}>
-            <Text style={styles.mesoLabel}>Phase</Text>
-            <Text style={styles.mesoValue}>
-              {profiles[0]?.mesocycle_phase || 'accumulation'}
-            </Text>
+        <View style={s.card}>
+          <Text style={s.cardLabel}>MESOCYCLE</Text>
+          <View style={s.mesoRow}>
+            <Text style={s.mesoLabel}>Phase</Text>
+            <Text style={s.mesoValue}>{profiles[0]?.mesocycle_phase || 'accumulation'}</Text>
           </View>
-          <View style={styles.mesoRow}>
-            <Text style={styles.mesoLabel}>Week</Text>
-            <Text style={styles.mesoValue}>
-              {profiles[0]?.mesocycle_week || 1} / 4
-            </Text>
+          <View style={s.mesoRow}>
+            <Text style={s.mesoLabel}>Week</Text>
+            <Text style={s.mesoValue}>{profiles[0]?.mesocycle_week || 1} / 4</Text>
           </View>
         </View>
       )}
 
-      {/* Recent Sessions */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Recent Sessions</Text>
+      <View style={s.card}>
+        <Text style={s.cardLabel}>RECENT SESSIONS</Text>
         {sessions.length === 0 ? (
-          <Text style={styles.emptyText}>No sessions logged yet</Text>
+          <Text style={s.emptyText}>No sessions logged yet</Text>
         ) : (
-          sessions.slice(0, 10).map((s) => (
-            <View key={s.id} style={styles.sessionRow}>
+          sessions.slice(0, 10).map((sess, i) => (
+            <View key={sess.id} style={[s.sessionRow, i < Math.min(sessions.length, 10) - 1 && s.divider]}>
               <View>
-                <Text style={styles.sessionType}>
-                  {s.day_type.toUpperCase()} — {s.session_date}
-                </Text>
-                <Text style={styles.sessionMeta}>
-                  {s.exercises.length} sets · {s.status}
-                  {s.overall_rpe ? ` · RPE ${s.overall_rpe}` : ''}
+                <Text style={s.sessionType}>{sess.day_type.toUpperCase()}</Text>
+                <Text style={s.sessionMeta}>
+                  {sess.session_date}  ·  {sess.exercises.length} sets  ·  {sess.status}
+                  {sess.overall_rpe ? `  ·  RPE ${sess.overall_rpe}` : ''}
                 </Text>
               </View>
-              {s.whoop_recovery_score && (
-                <Text style={styles.sessionRecovery}>
-                  {s.whoop_recovery_score}%
-                </Text>
+              {sess.whoop_recovery_score && (
+                <Text style={s.sessionRecovery}>{sess.whoop_recovery_score}%</Text>
               )}
             </View>
           ))
@@ -160,69 +109,51 @@ export default function HistoryScreen() {
       </View>
 
       {profiles.length === 0 && sessions.length === 0 && (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyEmoji}>🏋️</Text>
-          <Text style={styles.emptyTitle}>No workout data yet</Text>
-          <Text style={styles.emptyText}>
-            Start logging workouts from the Workout tab to see your progress here.
-          </Text>
+        <View style={s.emptyContainer}>
+          <Ionicons name="barbell-outline" size={48} color={colors.textTertiary} />
+          <Text style={s.emptyTitle}>No workout data yet</Text>
+          <Text style={s.emptyText}>Start logging from the Workout tab</Text>
         </View>
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#000' },
-  container: { padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 40 },
-  center: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 28, fontWeight: '700', color: '#fff', marginBottom: 24 },
+const s = StyleSheet.create({
+  scroll: { flex: 1, backgroundColor: colors.bg },
+  container: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 64 : 44, paddingBottom: 40 },
+  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  screenTitle: { ...typography.largeTitle, color: colors.text, marginBottom: spacing.lg },
 
   card: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#333',
+    backgroundColor: colors.card, borderRadius: radius.md,
+    padding: spacing.md, marginBottom: spacing.md,
+    borderWidth: 1, borderColor: colors.cardBorder,
   },
-  cardTitle: { fontSize: 14, fontWeight: '600', color: '#aaa', marginBottom: 12 },
+  cardLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '600', letterSpacing: 0.5, marginBottom: spacing.md },
+  divider: { borderBottomWidth: 1, borderBottomColor: colors.cardBorder, paddingBottom: spacing.md, marginBottom: spacing.md },
 
-  profileRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
+  profileRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  profileInfo: { flex: 1, marginRight: spacing.md },
+  profileName: { color: colors.text, ...typography.subhead, fontWeight: '600' },
+  profileMeta: { ...typography.caption, color: colors.textTertiary, marginTop: 2 },
+
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill,
   },
-  profileInfo: { flex: 1 },
-  profileName: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  profileMeta: { color: '#666', fontSize: 12, marginTop: 2 },
-  profileStatus: { alignItems: 'center' },
-  statusText: { fontSize: 10, fontWeight: '600', marginTop: 2 },
+  statusText: { ...typography.caption2, fontWeight: '600', textTransform: 'capitalize' },
 
-  mesoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  mesoLabel: { color: '#aaa', fontSize: 14 },
-  mesoValue: { color: '#fff', fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
+  mesoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm },
+  mesoLabel: { ...typography.subhead, color: colors.textSecondary },
+  mesoValue: { ...typography.subhead, color: colors.text, fontWeight: '600', textTransform: 'capitalize' },
 
-  sessionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#222',
-  },
-  sessionType: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  sessionMeta: { color: '#666', fontSize: 12, marginTop: 2 },
-  sessionRecovery: { color: '#4ade80', fontSize: 14, fontWeight: '600' },
+  sessionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sessionType: { color: colors.text, ...typography.subhead, fontWeight: '600' },
+  sessionMeta: { ...typography.caption, color: colors.textTertiary, marginTop: 2 },
+  sessionRecovery: { ...typography.subhead, color: colors.success, fontWeight: '600' },
 
-  emptyContainer: { alignItems: 'center', paddingVertical: 40 },
-  emptyEmoji: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { color: '#fff', fontSize: 18, fontWeight: '600', marginBottom: 8 },
-  emptyText: { color: '#666', fontSize: 14, textAlign: 'center' },
+  emptyContainer: { alignItems: 'center', paddingVertical: 48, gap: spacing.sm },
+  emptyTitle: { ...typography.headline, color: colors.text },
+  emptyText: { ...typography.subhead, color: colors.textTertiary, textAlign: 'center' },
 });

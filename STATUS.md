@@ -11,7 +11,7 @@
 | Tasks attempted  | TASK-018, TASK-019       |
 | Tasks completed  | TASK-019                 |
 | Tasks blocked    | TASK-018 (needs Apple Dev acct + EAS login) |
-| Next tasks       | TASK-018 (user action)   |
+| Next tasks       | TASK-P4-UI-1, TASK-P4-UI-2, TASK-P4-010 |
 | Blockers         | Apple Developer credentials needed |
 | Cycles remaining | 9                        |
 

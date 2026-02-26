@@ -43,6 +43,12 @@ class RunSession(Base, TimestampMixin):
     # AI feedback
     ai_feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Phase 4: link to training plan
+    planned_run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # logical FK to planned_runs.id (no DB FK to avoid circular dep)
+    feel_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-10 post-run RPE
+    is_pr: Mapped[bool] = mapped_column(default=False)
+    pr_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # fastest_mile, 5k, etc.
+
     # Status: in_progress, completed, discarded
     status: Mapped[str] = mapped_column(String(20), default="completed")
 
@@ -138,3 +144,95 @@ class PersonalRecord(Base, TimestampMixin):
         if h:
             return f"{h}:{m:02d}:{s:02d}"
         return f"{m}:{s:02d}"
+
+
+class TrainingPlan(Base, TimestampMixin):
+    """Multi-week progressive running plan (Runna-style)."""
+
+    __tablename__ = "training_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    goal_type: Mapped[str] = mapped_column(String(30), nullable=False)  # base_building, 5k, 10k, half_marathon, marathon, general
+    fitness_level: Mapped[str] = mapped_column(String(20), default="intermediate")  # beginner, intermediate, advanced
+    start_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
+    current_week: Mapped[int] = mapped_column(Integer, default=1)
+    total_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Full plan structure (JSON: array of weeks)
+    weekly_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Status: active, completed, abandoned
+    status: Mapped[str] = mapped_column(String(20), default="active")
+
+    # Available run days (JSON array of day-of-week ints, 0=Mon)
+    available_days: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Target race date (optional)
+    target_race_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
+
+    # Relationships
+    planned_runs: Mapped[list["PlannedRun"]] = relationship(
+        "PlannedRun", back_populates="plan", cascade="all, delete-orphan",
+        order_by="PlannedRun.week_number, PlannedRun.day_of_week"
+    )
+
+    def __repr__(self) -> str:
+        return f"<TrainingPlan(id={self.id}, goal={self.goal_type}, week {self.current_week}/{self.total_weeks})>"
+
+
+class PlannedRun(Base, TimestampMixin):
+    """A single planned run within a training plan."""
+
+    __tablename__ = "planned_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("training_plans.id"), nullable=False)
+
+    week_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)  # 0=Mon, 6=Sun
+    planned_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
+
+    # Run spec
+    run_type: Mapped[str] = mapped_column(String(20), nullable=False)  # easy, tempo, intervals, long, recovery, fartlek, progression
+    target_distance_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    target_pace_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # per mile
+    target_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Structure: JSON array of segments [{type, duration_minutes, distance_miles, target_pace}]
+    structure: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Link to completed run
+    completed_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("run_sessions.id"), nullable=True)
+
+    # Status: upcoming, completed, missed, swapped
+    status: Mapped[str] = mapped_column(String(20), default="upcoming")
+
+    # Relationships
+    plan: Mapped["TrainingPlan"] = relationship("TrainingPlan", back_populates="planned_runs")
+
+    def __repr__(self) -> str:
+        return f"<PlannedRun(week={self.week_number}, day={self.day_of_week}, type={self.run_type})>"
+
+
+class RunSegmentLog(Base, TimestampMixin):
+    """Logged segment within a structured run (intervals, tempo blocks, etc.)."""
+
+    __tablename__ = "run_segment_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("run_sessions.id"), nullable=False)
+    segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    segment_type: Mapped[str] = mapped_column(String(20), nullable=False)  # warmup, work, recovery, cooldown
+    target_pace_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_pace_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    target_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    distance_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<RunSegmentLog(run={self.run_id}, seg={self.segment_index}, type={self.segment_type})>"

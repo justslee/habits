@@ -34,7 +34,7 @@
         }
       ]
     ],
-    "platforms": ["ios"],
+    "platforms": ["ios", "web"],
     "web": {
       "favicon": "./assets/favicon.png"
     },

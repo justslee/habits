@@ -1,51 +1,37 @@
-/**
- * Daily Check-In Screen — TASK-004
- *
- * Minimal, speed-focused form for logging daily mastery activities.
- * Designed to be completed in under 3 minutes.
- */
-
 import React, { useState, useCallback, useRef } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  Platform,
+  View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
+  Alert, ActivityIndicator, Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { createEntry, suggestTags, PillarSuggestion } from '../api/client';
+import { colors, spacing, typography, radius, cardStyle } from '../theme';
 
 const PILLARS = [
-  { id: 1, name: 'Quant Finance', short: 'QF' },
-  { id: 2, name: 'Macro Investing', short: 'MI' },
-  { id: 3, name: 'ML Math', short: 'ML' },
-  { id: 4, name: 'AI Engineering', short: 'AI' },
-  { id: 5, name: 'Public Speaking', short: 'PS' },
+  { id: 1, name: 'Quant Finance', short: 'QF', color: colors.pillarQuant },
+  { id: 2, name: 'Macro Investing', short: 'MI', color: colors.pillarMacro },
+  { id: 3, name: 'ML Math', short: 'ML', color: colors.pillarML },
+  { id: 4, name: 'AI Engineering', short: 'AI', color: colors.pillarAI },
+  { id: 5, name: 'Public Speaking', short: 'PS', color: colors.pillarSpeaking },
 ] as const;
 
+const TIME_PRESETS = ['15m', '30m', '1h', '1.5h', '2h', '3h', '4h+'];
+const TIME_MINUTES: Record<string, number> = { '15m': 15, '30m': 30, '1h': 60, '1.5h': 90, '2h': 120, '3h': 180, '4h+': 240 };
+
 export default function CheckInScreen() {
-  // Form state
   const [description, setDescription] = useState('');
-  const [hours, setHours] = useState('');
-  const [minutes, setMinutes] = useState('');
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [customMinutes, setCustomMinutes] = useState('');
   const [selectedPillars, setSelectedPillars] = useState<number[]>([]);
   const [difficulty, setDifficulty] = useState(5);
   const [energy, setEnergy] = useState(5);
   const [takeaway, setTakeaway] = useState('');
-
-  // UI state
   const [submitting, setSubmitting] = useState(false);
   const [suggestingTags, setSuggestingTags] = useState(false);
   const [suggestions, setSuggestions] = useState<PillarSuggestion[]>([]);
   const [submitted, setSubmitted] = useState(false);
-
   const descriptionTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto-suggest tags when description changes (debounced)
   const handleDescriptionChange = useCallback((text: string) => {
     setDescription(text);
     if (descriptionTimeout.current) clearTimeout(descriptionTimeout.current);
@@ -55,287 +41,197 @@ export default function CheckInScreen() {
         try {
           const res = await suggestTags(text);
           setSuggestions(res.suggestions);
-          // Auto-select high-confidence suggestions if user hasn't manually selected
           if (selectedPillars.length === 0) {
-            const autoIds = res.suggestions
-              .filter((s) => s.confidence >= 0.6)
-              .map((s) => s.pillar_id);
+            const autoIds = res.suggestions.filter((s) => s.confidence >= 0.6).map((s) => s.pillar_id);
             if (autoIds.length > 0) setSelectedPillars(autoIds);
           }
-        } catch {
-          // Silent fail on suggestion — not critical
-        } finally {
-          setSuggestingTags(false);
-        }
+        } catch {} finally { setSuggestingTags(false); }
       }, 1000);
     }
   }, [selectedPillars.length]);
 
   const togglePillar = (id: number) => {
-    setSelectedPillars((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
-    );
+    setSelectedPillars(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
   };
 
-  const totalMinutes = (parseInt(hours, 10) || 0) * 60 + (parseInt(minutes, 10) || 0);
+  const totalMinutes = selectedTime ? TIME_MINUTES[selectedTime] || parseInt(customMinutes, 10) || 0 : parseInt(customMinutes, 10) || 0;
 
   const handleSubmit = async () => {
-    // Validation
     if (!description.trim()) return Alert.alert('Required', 'Describe what you worked on.');
-    if (totalMinutes <= 0) return Alert.alert('Required', 'Enter time invested.');
+    if (totalMinutes <= 0) return Alert.alert('Required', 'Select time invested.');
     if (!takeaway.trim()) return Alert.alert('Required', 'Add a key takeaway.');
-
     setSubmitting(true);
     try {
       await createEntry({
-        description: description.trim(),
-        time_invested_minutes: totalMinutes,
-        pillar_tags: selectedPillars,
-        difficulty_rating: difficulty,
-        energy_level: energy,
-        key_takeaway: takeaway.trim(),
+        description: description.trim(), time_invested_minutes: totalMinutes,
+        pillar_tags: selectedPillars, difficulty_rating: difficulty,
+        energy_level: energy, key_takeaway: takeaway.trim(),
       });
       setSubmitted(true);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      Alert.alert('Submission Failed', message);
-    } finally {
-      setSubmitting(false);
-    }
+      Alert.alert('Failed', err instanceof Error ? err.message : 'Unknown error');
+    } finally { setSubmitting(false); }
   };
 
   const resetForm = () => {
-    setDescription('');
-    setHours('');
-    setMinutes('');
-    setSelectedPillars([]);
-    setDifficulty(5);
-    setEnergy(5);
-    setTakeaway('');
-    setSuggestions([]);
-    setSubmitted(false);
+    setDescription(''); setSelectedTime(null); setCustomMinutes('');
+    setSelectedPillars([]); setDifficulty(5); setEnergy(5);
+    setTakeaway(''); setSuggestions([]); setSubmitted(false);
   };
 
   if (submitted) {
     return (
-      <View style={styles.successContainer}>
-        <Text style={styles.successEmoji}>✅</Text>
-        <Text style={styles.successTitle}>Logged!</Text>
-        <Text style={styles.successSub}>Entry submitted for evaluation.</Text>
-        <TouchableOpacity style={styles.submitBtn} onPress={resetForm}>
-          <Text style={styles.submitBtnText}>Log Another</Text>
+      <View style={s.successContainer}>
+        <View style={s.successRing}>
+          <Ionicons name="checkmark" size={40} color={colors.success} />
+        </View>
+        <Text style={s.successTitle}>Logged</Text>
+        <Text style={s.successSub}>Entry submitted for evaluation</Text>
+        <TouchableOpacity style={s.primaryBtn} onPress={resetForm}>
+          <Text style={s.primaryBtnText}>Log Another</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={styles.title}>Daily Check-In</Text>
+    <ScrollView style={s.scroll} contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
+      <Text style={s.greeting}>Check-In</Text>
 
       {/* Description */}
-      <Text style={styles.label}>What did you work on?</Text>
+      <Text style={s.label}>WHAT DID YOU WORK ON</Text>
       <TextInput
-        style={[styles.input, styles.multiline]}
-        placeholder="Studied stochastic calculus proofs, built a vol surface model..."
-        placeholderTextColor="#999"
-        multiline
-        numberOfLines={4}
-        value={description}
-        onChangeText={handleDescriptionChange}
-        testID="description-input"
+        style={s.textArea} placeholder="Studied stochastic calculus, built a vol surface model..."
+        placeholderTextColor={colors.textTertiary} multiline numberOfLines={4}
+        value={description} onChangeText={handleDescriptionChange} testID="description-input"
       />
 
       {/* Time */}
-      <Text style={styles.label}>Time invested</Text>
-      <View style={styles.timeRow}>
-        <TextInput
-          style={[styles.input, styles.timeInput]}
-          placeholder="0"
-          placeholderTextColor="#999"
-          keyboardType="number-pad"
-          value={hours}
-          onChangeText={setHours}
-          testID="hours-input"
-        />
-        <Text style={styles.timeLabel}>h</Text>
-        <TextInput
-          style={[styles.input, styles.timeInput]}
-          placeholder="0"
-          placeholderTextColor="#999"
-          keyboardType="number-pad"
-          value={minutes}
-          onChangeText={setMinutes}
-          testID="minutes-input"
-        />
-        <Text style={styles.timeLabel}>m</Text>
-      </View>
+      <Text style={s.label}>TIME INVESTED</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.presetsScroll}>
+        {TIME_PRESETS.map(t => (
+          <TouchableOpacity key={t}
+            style={[s.presetPill, selectedTime === t && s.presetPillActive]}
+            onPress={() => { setSelectedTime(t); setCustomMinutes(''); }}>
+            <Text style={[s.presetText, selectedTime === t && s.presetTextActive]}>{t}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
 
-      {/* Pillar Tags */}
-      <Text style={styles.label}>
-        Pillars{' '}
-        {suggestingTags && <ActivityIndicator size="small" color="#666" />}
+      {/* Pillars */}
+      <Text style={s.label}>
+        PILLARS{suggestingTags ? '  ...' : ''}
       </Text>
-      {suggestions.length > 0 && selectedPillars.length === 0 && (
-        <Text style={styles.hint}>
-          Suggested:{' '}
-          {suggestions
-            .filter((s) => s.confidence >= 0.4)
-            .map((s) => s.pillar_name)
-            .join(', ')}
-        </Text>
-      )}
-      <View style={styles.pillarRow}>
-        {PILLARS.map((p) => (
-          <TouchableOpacity
-            key={p.id}
-            style={[
-              styles.pillarChip,
-              selectedPillars.includes(p.id) && styles.pillarChipActive,
-            ]}
-            onPress={() => togglePillar(p.id)}
-            testID={`pillar-${p.id}`}
-          >
-            <Text
-              style={[
-                styles.pillarChipText,
-                selectedPillars.includes(p.id) && styles.pillarChipTextActive,
-              ]}
-            >
-              {p.short}
-            </Text>
+      <View style={s.pillarRow}>
+        {PILLARS.map(p => (
+          <TouchableOpacity key={p.id}
+            style={[s.pillarChip, selectedPillars.includes(p.id) && { backgroundColor: p.color + '20', borderColor: p.color }]}
+            onPress={() => togglePillar(p.id)} testID={`pillar-${p.id}`}>
+            <View style={[s.pillarDot, { backgroundColor: selectedPillars.includes(p.id) ? p.color : colors.textTertiary }]} />
+            <Text style={[s.pillarText, selectedPillars.includes(p.id) && { color: colors.text }]}>{p.short}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Difficulty Slider */}
-      <Text style={styles.label}>Difficulty / Depth: {difficulty}</Text>
-      <View style={styles.sliderRow}>
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-          <TouchableOpacity
-            key={n}
-            style={[styles.sliderDot, difficulty >= n && styles.sliderDotActive]}
-            onPress={() => setDifficulty(n)}
-            testID={`difficulty-${n}`}
-          >
-            <Text style={[styles.sliderNum, difficulty >= n && styles.sliderNumActive]}>
-              {n}
-            </Text>
-          </TouchableOpacity>
+      {/* Difficulty */}
+      <Text style={s.label}>DIFFICULTY  <Text style={{ color: colors.accent }}>{difficulty}</Text>/10</Text>
+      <View style={s.sliderTrack}>
+        {[1,2,3,4,5,6,7,8,9,10].map(n => (
+          <TouchableOpacity key={n} style={[s.sliderSegment,
+            difficulty >= n && { backgroundColor: colors.accent },
+            n === 1 && { borderTopLeftRadius: 6, borderBottomLeftRadius: 6 },
+            n === 10 && { borderTopRightRadius: 6, borderBottomRightRadius: 6 },
+          ]} onPress={() => setDifficulty(n)} testID={`difficulty-${n}`} />
         ))}
       </View>
 
-      {/* Energy Slider */}
-      <Text style={styles.label}>Energy / Focus: {energy}</Text>
-      <View style={styles.sliderRow}>
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-          <TouchableOpacity
-            key={n}
-            style={[styles.sliderDot, energy >= n && styles.sliderDotActive]}
-            onPress={() => setEnergy(n)}
-            testID={`energy-${n}`}
-          >
-            <Text style={[styles.sliderNum, energy >= n && styles.sliderNumActive]}>
-              {n}
-            </Text>
-          </TouchableOpacity>
+      {/* Energy */}
+      <Text style={s.label}>ENERGY  <Text style={{ color: colors.success }}>{energy}</Text>/10</Text>
+      <View style={s.sliderTrack}>
+        {[1,2,3,4,5,6,7,8,9,10].map(n => (
+          <TouchableOpacity key={n} style={[s.sliderSegment,
+            energy >= n && { backgroundColor: colors.success },
+            n === 1 && { borderTopLeftRadius: 6, borderBottomLeftRadius: 6 },
+            n === 10 && { borderTopRightRadius: 6, borderBottomRightRadius: 6 },
+          ]} onPress={() => setEnergy(n)} testID={`energy-${n}`} />
         ))}
       </View>
 
-      {/* Key Takeaway */}
-      <Text style={styles.label}>Key takeaway</Text>
-      <TextInput
-        style={styles.input}
+      {/* Takeaway */}
+      <Text style={s.label}>KEY TAKEAWAY</Text>
+      <TextInput style={s.input}
         placeholder="One sentence — most important thing learned"
-        placeholderTextColor="#999"
-        value={takeaway}
-        onChangeText={setTakeaway}
-        testID="takeaway-input"
-      />
+        placeholderTextColor={colors.textTertiary}
+        value={takeaway} onChangeText={setTakeaway} testID="takeaway-input" />
 
       {/* Submit */}
-      <TouchableOpacity
-        style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
-        onPress={handleSubmit}
-        disabled={submitting}
-        testID="submit-btn"
-      >
-        {submitting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.submitBtnText}>Log Entry</Text>
-        )}
+      <TouchableOpacity style={[s.primaryBtn, submitting && { opacity: 0.5 }]}
+        onPress={handleSubmit} disabled={submitting} testID="submit-btn">
+        {submitting ? <ActivityIndicator color={colors.text} /> : <Text style={s.primaryBtnText}>Log Entry</Text>}
       </TouchableOpacity>
+
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#000' },
-  container: { padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: '700', color: '#fff', marginBottom: 24 },
-  label: { fontSize: 14, fontWeight: '600', color: '#aaa', marginBottom: 8, marginTop: 16 },
-  hint: { fontSize: 12, color: '#666', marginBottom: 4 },
+const s = StyleSheet.create({
+  scroll: { flex: 1, backgroundColor: colors.bg },
+  container: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48 },
+  greeting: { ...typography.title1, color: colors.text, marginBottom: spacing.xl },
+
+  label: {
+    ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase',
+    marginBottom: spacing.sm, marginTop: spacing.lg,
+  },
+
+  textArea: {
+    backgroundColor: colors.input, color: colors.text, borderRadius: radius.lg,
+    padding: spacing.lg, fontSize: 15, minHeight: 120, textAlignVertical: 'top',
+    borderWidth: 1, borderColor: colors.border,
+  },
   input: {
-    backgroundColor: '#1a1a1a',
-    color: '#fff',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#333',
+    backgroundColor: colors.input, color: colors.text, borderRadius: radius.md,
+    padding: spacing.md, fontSize: 15, borderWidth: 1, borderColor: colors.border,
   },
-  multiline: { minHeight: 100, textAlignVertical: 'top' },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  timeInput: { width: 60, textAlign: 'center' },
-  timeLabel: { fontSize: 16, color: '#aaa' },
-  pillarRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+
+  presetsScroll: { marginBottom: spacing.xs },
+  presetPill: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2,
+    borderRadius: radius.pill, backgroundColor: colors.input,
+    marginRight: spacing.sm, borderWidth: 1, borderColor: colors.border,
+  },
+  presetPillActive: { backgroundColor: colors.accentMuted, borderColor: colors.accent },
+  presetText: { ...typography.bodyBold, color: colors.textTertiary },
+  presetTextActive: { color: colors.accent },
+
+  pillarRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   pillarChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 1,
-    borderColor: '#333',
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderRadius: radius.pill, backgroundColor: colors.input,
+    borderWidth: 1, borderColor: colors.border,
   },
-  pillarChipActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
-  pillarChipText: { color: '#aaa', fontSize: 14, fontWeight: '600' },
-  pillarChipTextActive: { color: '#fff' },
-  sliderRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  sliderDot: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#1a1a1a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#333',
+  pillarDot: { width: 8, height: 8, borderRadius: 4 },
+  pillarText: { ...typography.caption, color: colors.textTertiary },
+
+  sliderTrack: { flexDirection: 'row', gap: 3, marginBottom: spacing.xs },
+  sliderSegment: { flex: 1, height: 28, backgroundColor: colors.input },
+
+  primaryBtn: {
+    backgroundColor: colors.accent, borderRadius: radius.lg,
+    paddingVertical: 18, alignItems: 'center', marginTop: spacing.xl,
   },
-  sliderDotActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
-  sliderNum: { color: '#666', fontSize: 12, fontWeight: '600' },
-  sliderNumActive: { color: '#fff' },
-  submitBtn: {
-    backgroundColor: '#2563eb',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  submitBtnDisabled: { opacity: 0.6 },
-  submitBtnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  primaryBtnText: { ...typography.bodyBold, color: colors.text },
+
   successContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
+    flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl,
   },
-  successEmoji: { fontSize: 64, marginBottom: 16 },
-  successTitle: { fontSize: 32, fontWeight: '700', color: '#fff', marginBottom: 8 },
-  successSub: { fontSize: 16, color: '#aaa', marginBottom: 32 },
+  successRing: {
+    width: 88, height: 88, borderRadius: 44, backgroundColor: colors.success + '15',
+    borderWidth: 2, borderColor: colors.success + '40',
+    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
+  },
+  successTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.sm },
+  successSub: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.xl },
 });

@@ -1,41 +1,17 @@
-/**
- * Workout Screen — Phase 2
- *
- * Shows today's workout plan and provides live chat interface for logging sets.
- */
-
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Platform,
-  KeyboardAvoidingView,
-  RefreshControl,
+  View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Platform, KeyboardAvoidingView, RefreshControl,
 } from 'react-native';
-import {
-  getTodayWorkout,
-  chatWithCoach,
-  WorkoutSession,
-  ChatResponseData,
-} from '../api/client';
+import { Ionicons } from '@expo/vector-icons';
+import { getTodayWorkout, chatWithCoach, WorkoutSession } from '../api/client';
+import { colors, spacing, typography, radius, cardStyle } from '../theme';
 
-interface ChatMessage {
-  role: 'user' | 'coach';
-  text: string;
-}
+interface ChatMessage { role: 'user' | 'coach'; text: string; }
 
 const DAY_LABELS: Record<string, string> = {
-  push: '💪 Push Day',
-  pull: '🏋️ Pull Day',
-  legs: '🦵 Legs Day',
-  cardio: '🏃 Cardio',
-  basketball: '🏀 Basketball',
-  rest: '🛌 Rest Day',
+  push: 'Push Day', pull: 'Pull Day', legs: 'Legs + Core',
+  cardio: 'Cardio', basketball: 'Basketball', rest: 'Rest Day',
 };
 
 export default function WorkoutScreen() {
@@ -53,50 +29,29 @@ export default function WorkoutScreen() {
       setError(null);
       const data = await getTodayWorkout();
       setSession(data);
-
-      // Parse AI plan for initial coach message
       if (data.coach_notes && chatMessages.length === 0) {
         setChatMessages([{ role: 'coach', text: data.coach_notes }]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => {
-    fetchWorkout();
-  }, [fetchWorkout]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchWorkout();
-  }, [fetchWorkout]);
+  useEffect(() => { fetchWorkout(); }, [fetchWorkout]);
 
   const sendMessage = async () => {
     if (!chatInput.trim() || !session) return;
-
     const msg = chatInput.trim();
     setChatInput('');
-    setChatMessages((prev) => [...prev, { role: 'user', text: msg }]);
+    setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setSending(true);
-
     try {
       const response = await chatWithCoach(session.id, msg);
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'coach', text: response.coach_response },
-      ]);
-      // Refresh session to get updated exercises
+      setChatMessages(prev => [...prev, { role: 'coach', text: response.coach_response }]);
       const updated = await getTodayWorkout();
       setSession(updated);
-    } catch (err) {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'coach', text: 'Connection error. Try again.' },
-      ]);
+    } catch {
+      setChatMessages(prev => [...prev, { role: 'coach', text: 'Connection error. Try again.' }]);
     } finally {
       setSending(false);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
@@ -105,244 +60,194 @@ export default function WorkoutScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2563eb" />
+      <View style={s.center}>
+        <View style={s.skeleton}><View style={s.skeletonBar} /><View style={[s.skeletonBar, { width: '60%' }]} /></View>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={fetchWorkout}>
-          <Text style={styles.retryText}>Retry</Text>
+      <View style={s.center}>
+        <Ionicons name="cloud-offline-outline" size={40} color={colors.textTertiary} />
+        <Text style={s.errorText}>{error}</Text>
+        <TouchableOpacity style={s.retryBtn} onPress={fetchWorkout}>
+          <Text style={s.retryText}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   const plan = session?.ai_plan ? JSON.parse(session.ai_plan) : null;
+  const hasWhoop = session?.whoop_recovery_score != null;
+
+  // Recovery color
+  const recoveryColor = (session?.whoop_recovery_score ?? 0) >= 67 ? colors.success
+    : (session?.whoop_recovery_score ?? 0) >= 34 ? colors.warning : colors.error;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#666" />
-        }
-      >
-        {/* Header */}
-        <Text style={styles.title}>
-          {DAY_LABELS[session?.day_type || ''] || session?.day_type}
-        </Text>
+    <KeyboardAvoidingView style={s.outer} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+      <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={s.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchWorkout(); }} tintColor={colors.textTertiary} />}>
 
-        {/* Whoop Context */}
-        {session?.whoop_recovery_score && (
-          <View style={styles.whoopCard}>
-            <Text style={styles.whoopText}>
-              Recovery {session.whoop_recovery_score}%
-              {session.whoop_hrv ? ` · HRV ${session.whoop_hrv}` : ''}
-              {session.whoop_sleep_score ? ` · Sleep ${session.whoop_sleep_score}%` : ''}
-            </Text>
+        <Text style={s.screenTitle}>{DAY_LABELS[session?.day_type || ''] || session?.day_type}</Text>
+
+        {/* Whoop Recovery Card */}
+        {hasWhoop && (
+          <View style={[s.card, { borderColor: recoveryColor + '30' }]}>
+            <View style={s.whoopHeader}>
+              <Ionicons name="heart" size={16} color={recoveryColor} />
+              <Text style={[s.whoopTitle, { color: recoveryColor }]}>Recovery</Text>
+            </View>
+            <View style={s.whoopStats}>
+              <View style={s.whoopStat}>
+                <Text style={[s.whoopValue, { color: recoveryColor }]}>{Math.round(session!.whoop_recovery_score!)}%</Text>
+                <Text style={s.whoopLabel}>Score</Text>
+              </View>
+              {session!.whoop_hrv && (
+                <View style={s.whoopStat}>
+                  <Text style={s.whoopValue}>{Math.round(session!.whoop_hrv!)}</Text>
+                  <Text style={s.whoopLabel}>HRV</Text>
+                </View>
+              )}
+              {session!.whoop_resting_hr && (
+                <View style={s.whoopStat}>
+                  <Text style={s.whoopValue}>{Math.round(session!.whoop_resting_hr!)}</Text>
+                  <Text style={s.whoopLabel}>RHR</Text>
+                </View>
+              )}
+              {session!.whoop_sleep_score && (
+                <View style={s.whoopStat}>
+                  <Text style={s.whoopValue}>{Math.round(session!.whoop_sleep_score!)}%</Text>
+                  <Text style={s.whoopLabel}>Sleep</Text>
+                </View>
+              )}
+            </View>
+            {/* Recovery bar */}
+            <View style={s.recoveryBarTrack}>
+              <View style={[s.recoveryBarFill, { width: `${session!.whoop_recovery_score}%`, backgroundColor: recoveryColor }]} />
+            </View>
           </View>
         )}
 
-        {/* Plan Summary */}
-        {plan?.exercises && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Today's Plan</Text>
+        {/* Plan */}
+        {plan?.exercises && plan.exercises.length > 0 && (
+          <View style={s.card}>
+            <Text style={s.cardLabel}>TODAY'S PLAN</Text>
             {plan.pre_jog && (
-              <Text style={styles.planItem}>
-                🏃 {plan.pre_jog.minutes}min jog ({plan.pre_jog.pace})
-              </Text>
+              <View style={s.exerciseRow}>
+                <Text style={s.exerciseName}>{plan.pre_jog.minutes}min warmup jog</Text>
+                <Text style={s.exerciseDetail}>{plan.pre_jog.pace}</Text>
+              </View>
             )}
             {plan.exercises.map((ex: any, i: number) => (
-              <View key={i} style={styles.exerciseRow}>
-                <Text style={styles.exerciseName}>{ex.name}</Text>
-                <Text style={styles.exerciseDetail}>
-                  {ex.sets}×{ex.reps}
-                  {ex.weight ? ` @ ${ex.weight} lbs` : ''}
-                </Text>
+              <View key={i} style={[s.exerciseRow, i === plan.exercises.length - 1 && { borderBottomWidth: 0 }]}>
+                <Text style={s.exerciseName}>{ex.name}</Text>
+                <Text style={s.exerciseDetail}>{ex.sets}x{ex.reps}{ex.weight ? ` · ${ex.weight}lb` : ''}</Text>
               </View>
             ))}
-            {plan.estimated_duration_minutes && (
-              <Text style={styles.duration}>
-                ~{plan.estimated_duration_minutes} min
-              </Text>
+            {plan.estimated_duration_minutes > 0 && (
+              <Text style={s.duration}>{plan.estimated_duration_minutes} min estimated</Text>
             )}
           </View>
         )}
 
         {/* Completed Sets */}
         {session?.exercises && session.exercises.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Completed</Text>
+          <View style={s.card}>
+            <Text style={s.cardLabel}>COMPLETED</Text>
             {session.exercises.map((ex: any, i: number) => (
-              <View key={i} style={styles.setRow}>
-                <Text style={styles.setName}>{ex.exercise_name}</Text>
-                <Text style={styles.setDetail}>
-                  Set {ex.set_number}: {ex.weight}×{ex.reps}
-                  {ex.is_warmup ? ' (warmup)' : ''}
-                </Text>
+              <View key={i} style={s.setRow}>
+                <Text style={s.setName}>{ex.exercise_name}</Text>
+                <Text style={s.setDetail}>Set {ex.set_number}: {ex.weight}x{ex.reps}{ex.is_warmup ? '  warmup' : ''}</Text>
               </View>
             ))}
           </View>
         )}
 
         {/* Chat */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Coach Chat</Text>
+        <View style={s.card}>
+          <Text style={s.cardLabel}>COACH</Text>
           {chatMessages.map((msg, i) => (
-            <View
-              key={i}
-              style={[
-                styles.chatBubble,
-                msg.role === 'user' ? styles.userBubble : styles.coachBubble,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.chatText,
-                  msg.role === 'user' ? styles.userText : styles.coachText,
-                ]}
-              >
-                {msg.text}
-              </Text>
+            <View key={i} style={[s.bubble, msg.role === 'user' ? s.userBubble : s.coachBubble]}>
+              <Text style={[s.bubbleText, msg.role === 'user' ? { color: '#fff' } : { color: colors.text }]}>{msg.text}</Text>
             </View>
           ))}
-          {sending && (
-            <ActivityIndicator size="small" color="#666" style={{ marginTop: 8 }} />
-          )}
+          {sending && <ActivityIndicator size="small" color={colors.textTertiary} style={{ marginTop: 8 }} />}
         </View>
       </ScrollView>
 
-      {/* Chat Input */}
-      <View style={styles.inputBar}>
-        <TextInput
-          style={styles.chatInput}
-          placeholder="bench 165 for 5..."
-          placeholderTextColor="#666"
-          value={chatInput}
-          onChangeText={setChatInput}
-          onSubmitEditing={sendMessage}
-          returnKeyType="send"
-          editable={!sending}
-        />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!chatInput.trim() || sending) && styles.sendBtnDisabled]}
-          onPress={sendMessage}
-          disabled={!chatInput.trim() || sending}
-        >
-          <Text style={styles.sendBtnText}>→</Text>
+      {/* Input */}
+      <View style={s.inputBar}>
+        <TextInput style={s.chatInput} placeholder="bench 165 for 5..."
+          placeholderTextColor={colors.textTertiary}
+          value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendMessage}
+          returnKeyType="send" editable={!sending} />
+        <TouchableOpacity style={[s.sendBtn, (!chatInput.trim() || sending) && { opacity: 0.3 }]}
+          onPress={sendMessage} disabled={!chatInput.trim() || sending}>
+          <Ionicons name="arrow-up" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+const s = StyleSheet.create({
+  outer: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
-  content: { padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 20 },
-  center: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  errorText: { color: '#ef4444', fontSize: 16, marginBottom: 16 },
-  retryBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#2563eb', borderRadius: 8 },
-  retryText: { color: '#fff', fontWeight: '600' },
-  title: { fontSize: 28, fontWeight: '700', color: '#fff', marginBottom: 16 },
+  container: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48, paddingBottom: 20 },
+  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
+  screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
 
-  whoopCard: {
-    backgroundColor: '#1a2a1a',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#2d4a2d',
-  },
-  whoopText: { color: '#4ade80', fontSize: 14, fontWeight: '600' },
+  skeleton: { gap: spacing.md, width: '80%' },
+  skeletonBar: { height: 16, backgroundColor: colors.input, borderRadius: radius.sm, width: '100%' },
 
-  card: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  cardTitle: { fontSize: 14, fontWeight: '600', color: '#aaa', marginBottom: 12 },
+  errorText: { ...typography.body, color: colors.textSecondary, marginTop: spacing.sm },
+  retryBtn: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, backgroundColor: colors.accent, borderRadius: radius.sm },
+  retryText: { ...typography.bodyBold, color: '#fff' },
 
-  planItem: { color: '#fff', fontSize: 14, marginBottom: 8 },
+  // Whoop card
+  card: { ...cardStyle, marginBottom: spacing.md },
+  cardLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
+
+  whoopHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
+  whoopTitle: { ...typography.caption, fontWeight: '700' },
+  whoopStats: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
+  whoopStat: { alignItems: 'center' },
+  whoopValue: { ...typography.title2, color: colors.text },
+  whoopLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 2 },
+  recoveryBarTrack: { height: 4, backgroundColor: colors.input, borderRadius: 2 },
+  recoveryBarFill: { height: 4, borderRadius: 2 },
+
   exerciseRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingVertical: 4,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  exerciseName: { color: '#fff', fontSize: 15, fontWeight: '600', flex: 1 },
-  exerciseDetail: { color: '#2563eb', fontSize: 14, fontWeight: '600' },
-  duration: { color: '#666', fontSize: 12, marginTop: 8 },
+  exerciseName: { ...typography.body, color: colors.text, flex: 1 },
+  exerciseDetail: { ...typography.bodyBold, color: colors.accent },
+  duration: { ...typography.caption, color: colors.textTertiary, marginTop: spacing.sm },
 
-  setRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  setName: { color: '#aaa', fontSize: 13 },
-  setDetail: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  setRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm },
+  setName: { ...typography.caption, color: colors.textSecondary },
+  setDetail: { ...typography.caption, color: colors.text, fontWeight: '600' },
 
-  chatBubble: {
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    maxWidth: '85%',
-  },
-  userBubble: {
-    backgroundColor: '#2563eb',
-    alignSelf: 'flex-end',
-  },
-  coachBubble: {
-    backgroundColor: '#222',
-    alignSelf: 'flex-start',
-  },
-  chatText: { fontSize: 14, lineHeight: 20 },
-  userText: { color: '#fff' },
-  coachText: { color: '#ddd' },
+  bubble: { borderRadius: 16, padding: spacing.md, marginBottom: spacing.sm, maxWidth: '85%' },
+  userBubble: { backgroundColor: colors.accent, alignSelf: 'flex-end', borderBottomRightRadius: 4 },
+  coachBubble: { backgroundColor: colors.cardElevated, alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
+  bubbleText: { ...typography.body, lineHeight: 22 },
 
   inputBar: {
-    flexDirection: 'row',
-    padding: 12,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-    backgroundColor: '#111',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
-    gap: 8,
+    flexDirection: 'row', padding: spacing.md,
+    paddingBottom: Platform.OS === 'ios' ? 32 : spacing.md,
+    backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm,
   },
   chatInput: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    color: '#fff',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#333',
+    flex: 1, backgroundColor: colors.input, color: colors.text,
+    borderRadius: radius.xl, paddingHorizontal: spacing.lg, paddingVertical: 12,
+    ...typography.body, borderWidth: 1, borderColor: colors.border,
   },
   sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#2563eb',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent,
+    alignItems: 'center', justifyContent: 'center',
   },
-  sendBtnDisabled: { opacity: 0.4 },
-  sendBtnText: { color: '#fff', fontSize: 20, fontWeight: '700' },
 });

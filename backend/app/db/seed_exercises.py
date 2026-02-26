@@ -9,22 +9,26 @@ from app.models.workout import ExerciseProfile
 
 # Exercises from Notion Lift Log + standard pull/legs exercises at estimated baselines
 EXERCISE_SEEDS = [
-    # Push (from Notion data)
-    {"exercise_name": "Bench Press", "muscle_group": "push", "current_working_weight": 135, "current_rep_target": 5, "current_set_target": 3},
-    {"exercise_name": "OHP", "muscle_group": "push", "current_working_weight": 40, "current_rep_target": 8, "current_set_target": 3},
-    {"exercise_name": "Incline DB Press", "muscle_group": "push", "current_working_weight": 50, "current_rep_target": 8, "current_set_target": 3},
-    {"exercise_name": "Tricep Pushdowns", "muscle_group": "push", "current_working_weight": 30, "current_rep_target": 12, "current_set_target": 3},
-    {"exercise_name": "Lateral Raises", "muscle_group": "push", "current_working_weight": 12.5, "current_rep_target": 12, "current_set_target": 3},
-    {"exercise_name": "Overhead Tricep Extension", "muscle_group": "push", "current_working_weight": 20, "current_rep_target": 10, "current_set_target": 3},
+    # Chest
+    {"exercise_name": "Bench Press", "muscle_group": "chest", "current_working_weight": 135, "current_rep_target": 5, "current_set_target": 3},
+    {"exercise_name": "Incline DB Press", "muscle_group": "chest", "current_working_weight": 50, "current_rep_target": 8, "current_set_target": 3},
 
-    # Pull (no Notion data — baseline discovery mode)
-    {"exercise_name": "Barbell Row", "muscle_group": "pull", "current_working_weight": None, "current_rep_target": 8, "current_set_target": 4},
-    {"exercise_name": "Pull-ups", "muscle_group": "pull", "current_working_weight": None, "current_rep_target": 6, "current_set_target": 3},
-    {"exercise_name": "Seated Cable Row", "muscle_group": "pull", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
-    {"exercise_name": "Barbell Curl", "muscle_group": "pull", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
-    {"exercise_name": "Face Pulls", "muscle_group": "pull", "current_working_weight": None, "current_rep_target": 15, "current_set_target": 3},
+    # Shoulders
+    {"exercise_name": "OHP", "muscle_group": "shoulders", "current_working_weight": 40, "current_rep_target": 8, "current_set_target": 3},
+    {"exercise_name": "Lateral Raises", "muscle_group": "shoulders", "current_working_weight": 12.5, "current_rep_target": 12, "current_set_target": 3},
+    {"exercise_name": "Face Pulls", "muscle_group": "shoulders", "current_working_weight": None, "current_rep_target": 15, "current_set_target": 3},
 
-    # Legs (no Notion data — baseline discovery mode)
+    # Back
+    {"exercise_name": "Barbell Row", "muscle_group": "back", "current_working_weight": None, "current_rep_target": 8, "current_set_target": 4},
+    {"exercise_name": "Pull-ups", "muscle_group": "back", "current_working_weight": None, "current_rep_target": 6, "current_set_target": 3},
+    {"exercise_name": "Seated Cable Row", "muscle_group": "back", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
+
+    # Arms
+    {"exercise_name": "Tricep Pushdowns", "muscle_group": "arms", "current_working_weight": 30, "current_rep_target": 12, "current_set_target": 3},
+    {"exercise_name": "Overhead Tricep Extension", "muscle_group": "arms", "current_working_weight": 20, "current_rep_target": 10, "current_set_target": 3},
+    {"exercise_name": "Barbell Curl", "muscle_group": "arms", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
+
+    # Legs
     {"exercise_name": "Squat", "muscle_group": "legs", "current_working_weight": None, "current_rep_target": 5, "current_set_target": 4},
     {"exercise_name": "RDL", "muscle_group": "legs", "current_working_weight": None, "current_rep_target": 8, "current_set_target": 3},
     {"exercise_name": "Leg Press", "muscle_group": "legs", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
