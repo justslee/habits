@@ -17,10 +17,30 @@ const pwaMeta = `
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="/manifest.json">
     <style>
-      #root { background-color: #09090F; min-height: 100vh; }
+      html, body, #root {
+        background-color: #09090F;
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+        margin: 0;
+        padding: 0;
+      }
+      body { 
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      /* Remove blue tap highlight on iOS Safari */
+      * { -webkit-tap-highlight-color: transparent; }
+      /* Remove focus outlines on inputs */
+      input, textarea { outline: none !important; }
     </style>`;
 
 html = html.replace('</head>', pwaMeta + '\n  </head>');
+
+// Ensure viewport-fit=cover for edge-to-edge PWA
+html = html.replace(
+  'width=device-width, initial-scale=1, shrink-to-fit=no',
+  'width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover'
+);
 
 fs.writeFileSync(file, html);
 

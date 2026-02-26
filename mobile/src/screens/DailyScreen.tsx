@@ -433,7 +433,7 @@ const s = StyleSheet.create({
   // Tab bar
   tabBar: {
     flexDirection: 'row', paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: spacing.sm,
+    paddingTop: Platform.OS === 'ios' ? 54 : 40, paddingBottom: spacing.sm,
     backgroundColor: colors.bg, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
