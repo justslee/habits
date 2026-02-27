@@ -1,17 +1,18 @@
-"""Workout API endpoints — Phase 2."""
+"""Workout API endpoints — Phase 2 + Unified Training Hub."""
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.user import User
 from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
+from app.models.run import RunSession
 from app.schemas.workout import (
     ChatMessage,
     ChatResponse,
@@ -397,6 +398,134 @@ def restore_workout(session_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(session)
     return _session_to_response(session)
+
+
+# --- Unified Training Hub Endpoints ---
+
+@router.get("/training/recent")
+def get_recent_training(
+    days: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Get merged workout + run activity, sorted by date desc.
+
+    Returns a unified feed for the Train hub showing both lift sessions and runs.
+    """
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    cutoff = date.today() - timedelta(days=days)
+
+    # Fetch workouts
+    workouts = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            WorkoutSession.session_date >= cutoff,
+        )
+        .all()
+    )
+
+    # Fetch runs
+    runs = (
+        db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.deleted_at.is_(None),
+            RunSession.run_date >= cutoff,
+        )
+        .all()
+    )
+
+    items = []
+    for w in workouts:
+        exercise_count = len(set(e.exercise_name for e in w.exercises if not e.is_warmup))
+        total_volume = sum(e.volume_load for e in w.exercises if not e.is_warmup)
+        total_sets = len([e for e in w.exercises if not e.is_warmup])
+        items.append({
+            "id": w.id,
+            "type": "workout",
+            "date": w.session_date.isoformat(),
+            "label": w.day_type.replace("_", " ").title(),
+            "detail": f"{total_sets} sets • {total_volume:,.0f} lb vol" if total_volume else f"{exercise_count} exercises",
+            "status": w.status,
+            "rpe": w.overall_rpe,
+            "day_type": w.day_type,
+            "exercise_count": exercise_count,
+            "total_volume": round(total_volume),
+        })
+
+    for r in runs:
+        items.append({
+            "id": r.id,
+            "type": "run",
+            "date": r.run_date.isoformat(),
+            "label": (r.run_type or "run").title(),
+            "detail": f"{r.distance_miles:.1f} mi • {r.avg_pace_formatted}/mi",
+            "status": r.status,
+            "rpe": r.rpe,
+            "run_type": r.run_type,
+            "distance_miles": r.distance_miles,
+            "pace_formatted": r.avg_pace_formatted,
+            "duration_seconds": r.duration_seconds,
+            "is_pr": r.is_pr,
+        })
+
+    items.sort(key=lambda x: x["date"], reverse=True)
+    return items
+
+
+@router.get("/training/week-summary")
+def get_week_summary(db: Session = Depends(get_db)):
+    """Get this week's training summary (workouts + runs combined)."""
+    user = db.query(User).first()
+    if not user:
+        return {"workouts": 0, "runs": 0, "total_hours": 0, "avg_rpe": 0}
+
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+
+    workouts = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            WorkoutSession.session_date >= week_start,
+            WorkoutSession.status.in_(["completed", "in_progress"]),
+        )
+        .all()
+    )
+
+    runs = (
+        db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.deleted_at.is_(None),
+            RunSession.run_date >= week_start,
+            RunSession.status == "completed",
+        )
+        .all()
+    )
+
+    # Estimate workout duration: ~45 min each (no exact time tracked)
+    workout_hours = len(workouts) * 0.75
+    run_hours = sum(r.duration_seconds for r in runs) / 3600.0
+    total_hours = round(workout_hours + run_hours, 1)
+
+    rpe_values = [w.overall_rpe for w in workouts if w.overall_rpe] + [r.rpe for r in runs if r.rpe]
+    avg_rpe = round(sum(rpe_values) / len(rpe_values), 1) if rpe_values else 0
+
+    run_miles = round(sum(r.distance_miles for r in runs), 1)
+
+    return {
+        "workouts": len(workouts),
+        "runs": len(runs),
+        "total_hours": total_hours,
+        "avg_rpe": avg_rpe,
+        "run_miles": run_miles,
+    }
 
 
 def _update_profiles_from_session(session: WorkoutSession, db: Session) -> None:

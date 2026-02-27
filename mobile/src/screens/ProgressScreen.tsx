@@ -173,6 +173,7 @@ export default function ProgressScreen() {
     setUndoToast({ visible: true, message: `"${desc}" deleted`, entryId: entry.id, snapshot: entry });
     try {
       await deleteEntry(entry.id);
+      fetchData(); // refresh stats, heatmap, streaks, pillars
     } catch (err) {
       console.warn('Failed to delete entry:', err);
       setRecentEntries(prev => [...prev, entry].sort((a, b) => b.id - a.id));
@@ -187,6 +188,7 @@ export default function ProgressScreen() {
     try {
       await restoreEntry(entryId);
       setRecentEntries(prev => [...prev, snapshot].sort((a, b) => b.id - a.id));
+      fetchData(); // refresh stats, heatmap, streaks, pillars
     } catch (err) {
       console.warn('Failed to restore entry:', err);
     }

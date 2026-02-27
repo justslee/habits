@@ -1,10 +1,11 @@
-"""Route API endpoints — Phase 4 (P4-060)."""
+"""Route API endpoints — Phase 4 (P4-060) + Route Discovery."""
 
 from __future__ import annotations
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -104,6 +105,29 @@ def get_route_runs(route_id: int, limit: int = 20, db: Session = Depends(get_db)
         }
         for r in runs
     ]
+
+
+# --- Route Discovery ---
+
+class RouteDiscoverRequest(BaseModel):
+    latitude: float
+    longitude: float
+    target_miles: Optional[float] = None
+    preferences: Optional[list[str]] = None
+
+
+@router.post("/discover")
+async def discover_routes_endpoint(payload: RouteDiscoverRequest):
+    """Generate AI-suggested running routes based on current location."""
+    from app.services.route_discovery import discover_routes
+
+    result = await discover_routes(
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        target_miles=payload.target_miles,
+        preferences=payload.preferences,
+    )
+    return result
 
 
 def _route_to_response(route: SavedRoute) -> SavedRouteResponse:

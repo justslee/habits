@@ -427,6 +427,124 @@ export function restoreRun(runId: number): Promise<RunSessionData> {
   return request(`/api/v1/runs/${runId}/restore`, { method: 'POST' });
 }
 
+// --- Unified Training Hub ---
+
+export interface TrainingItem {
+  id: number;
+  type: 'workout' | 'run';
+  date: string;
+  label: string;
+  detail: string;
+  status: string;
+  rpe: number | null;
+  // Workout-specific
+  day_type?: string;
+  exercise_count?: number;
+  total_volume?: number;
+  // Run-specific
+  run_type?: string;
+  distance_miles?: number;
+  pace_formatted?: string;
+  duration_seconds?: number;
+  is_pr?: boolean;
+}
+
+export interface WeekSummary {
+  workouts: number;
+  runs: number;
+  total_hours: number;
+  avg_rpe: number;
+  run_miles: number;
+}
+
+export function getRecentTraining(days: number = 14): Promise<TrainingItem[]> {
+  return request(`/api/v1/workouts/training/recent?days=${days}`);
+}
+
+export function getWeekSummary(): Promise<WeekSummary> {
+  return request('/api/v1/workouts/training/week-summary');
+}
+
+// --- Route Discovery ---
+
+export interface RouteWaypoint {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+export interface DiscoveredRoute {
+  name: string;
+  description: string;
+  distance_miles: number;
+  estimated_minutes: number;
+  elevation_gain_ft: number;
+  difficulty: 'easy' | 'moderate' | 'challenging';
+  terrain: 'road' | 'trail' | 'mixed' | 'track';
+  route_type: 'loop' | 'out_and_back' | 'point_to_point';
+  tags: string[];
+  waypoints: RouteWaypoint[];
+}
+
+export interface RouteDiscoveryResult {
+  routes: DiscoveredRoute[];
+  area_name: string;
+  tips: string;
+  error?: string;
+}
+
+export function discoverRoutes(
+  latitude: number,
+  longitude: number,
+  targetMiles?: number,
+  preferences?: string[],
+): Promise<RouteDiscoveryResult> {
+  return request('/api/v1/routes/discover', {
+    method: 'POST',
+    body: JSON.stringify({
+      latitude,
+      longitude,
+      target_miles: targetMiles,
+      preferences,
+    }),
+    timeoutMs: 60_000,
+  });
+}
+
+// --- Saved Routes ---
+
+export interface SavedRouteData {
+  id: number;
+  name: string;
+  distance_miles: number;
+  elevation_gain_ft: number | null;
+  route_type: string | null;
+  tags: string | null;
+  times_run: number;
+  best_time_seconds: number | null;
+  last_run_date: string | null;
+}
+
+export function getSavedRoutes(): Promise<SavedRouteData[]> {
+  return request('/api/v1/routes/');
+}
+
+export function saveDiscoveredRoute(route: DiscoveredRoute): Promise<any> {
+  return request('/api/v1/routes/', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: route.name,
+      waypoints: JSON.stringify(route.waypoints),
+      polyline: JSON.stringify(route.waypoints),
+      distance_miles: route.distance_miles,
+      elevation_gain_ft: route.elevation_gain_ft,
+      route_type: route.route_type,
+      tags: route.tags.join(','),
+      description: route.description,
+    }),
+  });
+}
+
 // --- Vision Statement (P5-7) ---
 
 export interface VisionData {

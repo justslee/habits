@@ -1,19 +1,22 @@
 /**
- * Run History Screen — P4-040
+ * Run History Screen — P4-040 + P5-5 swipe-to-delete
  *
  * Lists past runs with distance, pace, date, run type badges.
- * Tap for detail view. Filter by run type.
+ * Swipe left to delete with undo toast.
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
 import { haptic } from '../utils/haptics';
-import { API_URL, apiHeaders } from '../api/client';
+import { API_URL, apiHeaders, deleteRun, restoreRun } from '../api/client';
+import SwipeableRow from '../components/SwipeableRow';
+import UndoToast from '../components/UndoToast';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
   easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
@@ -67,6 +70,9 @@ export default function RunHistoryScreen({ navigation }: any) {
   const [filter, setFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [undoToast, setUndoToast] = useState<{
+    visible: boolean; message: string; runId: number; snapshot: RunListItem | null;
+  }>({ visible: false, message: '', runId: 0, snapshot: null });
 
   const fetchData = useCallback(async () => {
     try {
@@ -91,9 +97,38 @@ export default function RunHistoryScreen({ navigation }: any) {
     setRefreshing(false);
   }, [fetchData]);
 
+  const handleDeleteRun = async (run: RunListItem) => {
+    setRuns(prev => prev.filter(r => r.id !== run.id));
+    haptic.light();
+    const label = `${run.distance_miles.toFixed(1)} mi ${run.run_type || 'run'} deleted`;
+    setUndoToast({ visible: true, message: label, runId: run.id, snapshot: run });
+    try {
+      await deleteRun(run.id);
+      fetchData(); // refresh stats
+    } catch (err) {
+      console.warn('Failed to delete run:', err);
+      setRuns(prev => [...prev, run].sort((a, b) => b.id - a.id));
+      setUndoToast(prev => ({ ...prev, visible: false }));
+    }
+  };
+
+  const handleUndoRun = async () => {
+    const { runId, snapshot } = undoToast;
+    setUndoToast(prev => ({ ...prev, visible: false }));
+    if (!snapshot) return;
+    try {
+      await restoreRun(runId);
+      setRuns(prev => [...prev, snapshot].sort((a, b) => b.id - a.id));
+      fetchData(); // refresh stats
+    } catch (err) {
+      console.warn('Failed to restore run:', err);
+    }
+  };
+
   const filters = [null, 'easy', 'tempo', 'intervals', 'long', 'recovery'];
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingTop: insets.top + 12 }}
@@ -147,12 +182,16 @@ export default function RunHistoryScreen({ navigation }: any) {
         })}
       </ScrollView>
 
+      {runs.length > 0 && (
+        <Text style={styles.swipeHint}>Swipe left to delete</Text>
+      )}
+
       {/* Run list */}
       {runs.length === 0 && !loading && (
         <View style={styles.emptyState}>
           <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
           <Text style={styles.emptyText}>No runs yet</Text>
-          <Text style={styles.emptySubtext}>Start your first run from the Run tab</Text>
+          <Text style={styles.emptySubtext}>Start your first run from the Train tab</Text>
         </View>
       )}
 
@@ -164,35 +203,45 @@ export default function RunHistoryScreen({ navigation }: any) {
         });
 
         return (
-          <View key={run.id} style={styles.runCard}>
-            <View style={styles.runCardLeft}>
-              <View style={[styles.runTypeIcon, { backgroundColor: typeColor + '15' }]}>
-                <Ionicons name={typeIcon} size={18} color={typeColor} />
-              </View>
-            </View>
-
-            <View style={styles.runCardCenter}>
-              <View style={styles.runCardTop}>
-                <Text style={styles.runDistance}>{run.distance_miles.toFixed(2)} mi</Text>
-                <View style={[styles.runTypeBadge, { backgroundColor: typeColor + '15' }]}>
-                  <Text style={[styles.runTypeBadgeText, { color: typeColor }]}>
-                    {(run.run_type || 'easy').toUpperCase()}
-                  </Text>
+          <SwipeableRow key={run.id} onDelete={() => handleDeleteRun(run)}>
+            <View style={styles.runCard}>
+              <View style={styles.runCardLeft}>
+                <View style={[styles.runTypeIcon, { backgroundColor: typeColor + '15' }]}>
+                  <Ionicons name={typeIcon} size={18} color={typeColor} />
                 </View>
               </View>
-              <Text style={styles.runDate}>{dateStr}</Text>
-            </View>
 
-            <View style={styles.runCardRight}>
-              <Text style={styles.runPace}>{run.avg_pace_formatted}</Text>
-              <Text style={styles.runPaceLabel}>/mi</Text>
+              <View style={styles.runCardCenter}>
+                <View style={styles.runCardTop}>
+                  <Text style={styles.runDistance}>{run.distance_miles.toFixed(2)} mi</Text>
+                  <View style={[styles.runTypeBadge, { backgroundColor: typeColor + '15' }]}>
+                    <Text style={[styles.runTypeBadgeText, { color: typeColor }]}>
+                      {(run.run_type || 'easy').toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.runDate}>{dateStr}</Text>
+              </View>
+
+              <View style={styles.runCardRight}>
+                <Text style={styles.runPace}>{run.avg_pace_formatted}</Text>
+                <Text style={styles.runPaceLabel}>/mi</Text>
+              </View>
             </View>
-          </View>
+          </SwipeableRow>
         );
       })}
 
       <View style={{ height: 40 }} />
     </ScrollView>
+
+    <UndoToast
+      visible={undoToast.visible}
+      message={undoToast.message}
+      onUndo={handleUndoRun}
+      onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
+    />
+    </GestureHandlerRootView>
   );
 }
 
@@ -213,13 +262,18 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
   statLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 2 },
 
-  filterScroll: { paddingHorizontal: spacing.lg, marginBottom: spacing.lg, maxHeight: 40 },
+  filterScroll: { paddingHorizontal: spacing.lg, marginBottom: spacing.xs, maxHeight: 40 },
   filterChip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill,
     borderWidth: 1, borderColor: colors.border, marginRight: spacing.sm,
     backgroundColor: colors.card,
   },
   filterText: { ...typography.caption, color: colors.textSecondary },
+
+  swipeHint: {
+    ...typography.micro, color: colors.textTertiary,
+    paddingHorizontal: spacing.lg, marginBottom: spacing.sm,
+  },
 
   emptyState: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
   emptyText: { ...typography.title3, color: colors.textSecondary },
