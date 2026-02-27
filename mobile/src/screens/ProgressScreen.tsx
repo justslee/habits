@@ -1,20 +1,48 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  RefreshControl, TouchableOpacity,
+  View, Text, ScrollView, StyleSheet, Animated, ActivityIndicator,
+  RefreshControl, TouchableOpacity, TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getDashboardStats, getHeatmap, getDepthProgression, getExerciseProfiles,
+  getVision, saveVision,
   DashboardStats, HeatmapDay, DepthProgressionPoint, ExerciseProfileData,
+  VisionData,
   API_URL, apiHeaders,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
 import RadarChart from '../components/RadarChart';
 import DepthChart from '../components/DepthChart';
 import CompoundingChart from '../components/CompoundingChart';
+import { ProgressSkeleton } from '../components/Skeleton';
 import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
+
+/** Animated counter that counts up from 0 to a target number. */
+function CountUp({ value, duration = 800, style }: { value: number | null; duration?: number; style?: any }) {
+  const animValue = useRef(new Animated.Value(0)).current;
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    if (value == null) return;
+    animValue.setValue(0);
+    Animated.timing(animValue, {
+      toValue: value,
+      duration,
+      useNativeDriver: false,
+    }).start();
+
+    const listener = animValue.addListener(({ value: v }) => {
+      setDisplayValue(Math.round(v));
+    });
+    return () => animValue.removeListener(listener);
+  }, [value]);
+
+  if (value == null) return <Text style={style}>—</Text>;
+  return <Text style={style}>{displayValue}</Text>;
+}
 
 const MUSCLE_GROUPS = [
   { key: 'chest', label: 'Chest', icon: 'fitness-outline' as const },
@@ -43,7 +71,7 @@ function intensityLevel(count: number): number {
   if (count === 2) return 2; if (count <= 4) return 3; return 4;
 }
 
-type Section = 'mastery' | 'strength' | 'running';
+type Section = 'mastery' | 'strength' | 'running' | 'discipline' | 'vision';
 
 interface RunStats {
   total_runs: number;
@@ -70,16 +98,22 @@ function fmtPace(s: number | null): string {
 
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
   const [depthData, setDepthData] = useState<DepthProgressionPoint[]>([]);
   const [profiles, setProfiles] = useState<ExerciseProfileData[]>([]);
   const [runStats, setRunStats] = useState<RunStats | null>(null);
   const [prs, setPRs] = useState<PRData[]>([]);
+  const [vision, setVision] = useState<VisionData | null>(null);
+  const [disciplineData, setDisciplineData] = useState<any>(null);
+  const [disciplineRange, setDisciplineRange] = useState<number>(30);
+  const [heatTooltip, setHeatTooltip] = useState<{ date: string; count: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<Section>('mastery');
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -97,6 +131,20 @@ export default function ProgressScreen() {
         if (rsResp.ok) setRunStats(await rsResp.json());
         if (prResp.ok) setPRs(await prResp.json());
       } catch (err) { console.warn('Failed to fetch run data', err); }
+
+      // Fetch vision
+      try {
+        const v = await getVision();
+        setVision(v);
+      } catch (err) { console.warn('Failed to fetch vision', err); }
+
+      // Fetch discipline analytics
+      try {
+        const dResp = await fetch(`${API_URL}/api/v1/daily/habits/analytics?start_date=${
+          new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+        }`, { headers: apiHeaders() });
+        if (dResp.ok) setDisciplineData(await dResp.json());
+      } catch (err) { console.warn('Failed to fetch discipline', err); }
     } catch (err) { console.warn('Failed to fetch progress data', err); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -106,7 +154,11 @@ export default function ProgressScreen() {
     setExpandedGroups(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
   };
 
-  if (loading) return <View style={s.center}><ActivityIndicator size="large" color={colors.accent} /></View>;
+  if (loading) return (
+    <View style={[s.scroll, { paddingTop: insets.top + spacing.md }]}>
+      <ProgressSkeleton />
+    </View>
+  );
 
   const trend = stats ? (TREND_CONFIG[stats.trend] || { icon: 'ellipse' as const, color: colors.textTertiary }) : null;
   const heatmapGrid = buildHeatmapGrid(heatmap);
@@ -119,7 +171,7 @@ export default function ProgressScreen() {
       <Text style={s.screenTitle}>Progress</Text>
 
       <View style={s.sectionTabs}>
-        {(['mastery', 'strength', 'running'] as Section[]).map(key => (
+        {(['mastery', 'strength', 'running', 'discipline', 'vision'] as Section[]).map(key => (
           <TouchableOpacity key={key}
             style={[s.tab, activeSection === key && s.tabActive]}
             onPress={() => { haptic.selection(); setActiveSection(key); }}>
@@ -135,15 +187,15 @@ export default function ProgressScreen() {
         <>
           <View style={s.statsGrid}>
             <View style={s.statCard}>
-              <Text style={s.statCardValue}>{stats.hours.all_time}</Text>
+              <CountUp value={stats.hours.all_time} style={s.statCardValue} />
               <Text style={s.statCardLabel}>ALL TIME</Text>
             </View>
             <View style={s.statCard}>
-              <Text style={s.statCardValue}>{stats.hours.this_week}</Text>
+              <CountUp value={stats.hours.this_week} style={s.statCardValue} />
               <Text style={s.statCardLabel}>THIS WEEK</Text>
             </View>
             <View style={s.statCard}>
-              <Text style={[s.statCardValue, { color: trend?.color }]}>{stats.avg_depth_score ?? '—'}</Text>
+              <CountUp value={stats.avg_depth_score} style={[s.statCardValue, { color: trend?.color }]} />
               <Text style={s.statCardLabel}>AVG DEPTH</Text>
             </View>
           </View>
@@ -174,10 +226,19 @@ export default function ProgressScreen() {
               const pillarColor = PILLAR_COLORS[p.pillar_id] || colors.textTertiary;
               const totalPct = stats.hours.all_time > 0 ? (p.total_hours / stats.hours.all_time) * 100 : 0;
               return (
-                <View key={p.pillar_id} style={[s.pillarCard, i < stats.pillar_breakdown.length - 1 && s.divider]}>
+                <TouchableOpacity
+                  key={p.pillar_id}
+                  style={[s.pillarCard, i < stats.pillar_breakdown.length - 1 && s.divider]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    haptic.selection();
+                    navigation.navigate('PillarDetail', { pillarId: p.pillar_id, pillarName: p.pillar_name });
+                  }}
+                >
                   <View style={s.pillarHeader}>
                     <View style={[s.dot, { backgroundColor: pillarColor }]} />
                     <Text style={s.pillarName}>{p.pillar_name}</Text>
+                    <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={{ marginLeft: 4 }} />
                     <Text style={s.pillarHours}>{p.total_hours}h</Text>
                   </View>
                   {/* Progress bar showing share of total hours */}
@@ -190,7 +251,7 @@ export default function ProgressScreen() {
                       <Text style={s.pillarMeta}>depth {p.avg_depth_score}</Text>
                     )}
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -251,15 +312,42 @@ export default function ProgressScreen() {
                 <View style={s.heatmapGrid}>
                   {heatmapGrid.map((week, wi) => (
                     <View key={wi} style={{ gap: 2 }}>
-                      {week.map((day, di) => (
-                        <View key={`${wi}-${di}`} style={[s.heatCell,
-                          { backgroundColor: day ? HEATMAP_COLORS[intensityLevel(day.count)] : colors.card }]} />
-                      ))}
+                      {week.map((day, di) => {
+                        const isToday = day?.date === new Date().toISOString().split('T')[0];
+                        return (
+                          <TouchableOpacity
+                            key={`${wi}-${di}`}
+                            activeOpacity={0.7}
+                            onLongPress={() => {
+                              if (day) {
+                                haptic.selection();
+                                setHeatTooltip({ date: day.date, count: day.count });
+                                setTimeout(() => setHeatTooltip(null), 2000);
+                              }
+                            }}
+                            delayLongPress={200}
+                            style={[
+                              s.heatCell,
+                              { backgroundColor: day ? HEATMAP_COLORS[intensityLevel(day.count)] : colors.card },
+                              isToday && s.heatCellToday,
+                            ]}
+                          />
+                        );
+                      })}
                     </View>
                   ))}
                 </View>
               </View>
             </ScrollView>
+            {/* Tooltip */}
+            {heatTooltip && (
+              <View style={s.heatTooltip}>
+                <Text style={s.heatTooltipText}>
+                  {new Date(heatTooltip.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {' — '}{heatTooltip.count} {heatTooltip.count === 1 ? 'entry' : 'entries'}
+                </Text>
+              </View>
+            )}
             {/* Legend */}
             <View style={s.heatLegend}>
               <Text style={s.heatLegendLabel}>Less</Text>
@@ -396,8 +484,252 @@ export default function ProgressScreen() {
         </>
       )}
 
+      {/* DISCIPLINE */}
+      {activeSection === 'discipline' && (
+        disciplineData && disciplineData.habits.length > 0 ? (
+          <>
+            {/* Discipline Score */}
+            <View style={s.statsGrid}>
+              <View style={s.statCard}>
+                <Text style={[s.statCardValue, { color: disciplineData.discipline_score >= 80 ? colors.success : disciplineData.discipline_score >= 60 ? colors.warning : colors.error }]}>
+                  {disciplineData.discipline_score}%
+                </Text>
+                <Text style={s.statCardLabel}>DISCIPLINE</Text>
+              </View>
+              <View style={s.statCard}>
+                <Text style={[s.statCardValue, { color: colors.accent }]}>{disciplineData.weekly_grade}</Text>
+                <Text style={s.statCardLabel}>GRADE</Text>
+              </View>
+              <View style={s.statCard}>
+                <Text style={[s.statCardValue, { color: '#F59E0B' }]}>{disciplineData.perfect_day_count}</Text>
+                <Text style={s.statCardLabel}>PERFECT DAYS</Text>
+              </View>
+            </View>
+
+            {/* Per-habit stats */}
+            <View style={s.card}>
+              <Text style={s.cardLabel}>HABIT STREAKS</Text>
+              {disciplineData.habits.map((h: any) => (
+                <View key={h.id} style={[ds.habitStatRow, { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={ds.habitName}>{h.name}</Text>
+                    <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: 4 }}>
+                      <Text style={ds.habitMeta}>{h.completion_rate}% rate</Text>
+                      <Text style={ds.habitMeta}>{h.rate_7d}% (7d)</Text>
+                    </View>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="flame" size={14} color="#F59E0B" />
+                      <Text style={ds.streakNum}>{h.current_streak}d</Text>
+                    </View>
+                    <Text style={ds.bestStreak}>best {h.longest_streak}d</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* Completion heatmap per habit */}
+            <View style={s.card}>
+              <Text style={s.cardLabel}>COMPLETION MAP — 30 DAYS</Text>
+              {disciplineData.habits.map((h: any) => {
+                const habitColor = h.color || colors.accent;
+                return (
+                  <View key={h.id} style={{ marginBottom: spacing.md }}>
+                    <Text style={ds.miniHabitLabel}>{h.name}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+                      {Object.entries(disciplineData.daily_map || {}).map(([dateStr, ids]: [string, any]) => {
+                        const completed = (ids as number[]).includes(h.id);
+                        return (
+                          <View
+                            key={dateStr}
+                            style={[ds.miniCell, { backgroundColor: completed ? habitColor : colors.input }]}
+                          />
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        ) : (
+          <View style={s.empty}>
+            <Ionicons name="flame-outline" size={48} color={colors.textTertiary} />
+            <Text style={s.emptyTitle}>No habits yet</Text>
+            <Text style={s.emptySubtitle}>Create habits in the Daily tab to track discipline</Text>
+          </View>
+        )
+      )}
+
+      {/* VISION */}
+      {activeSection === 'vision' && (
+        <VisionEditor
+          vision={vision}
+          onUpdate={(updated) => setVision(updated)}
+          pillarBreakdown={stats?.pillar_breakdown}
+        />
+      )}
+
       <View style={{ height: 40 }} />
     </ScrollView>
+  );
+}
+
+// ---- Vision Editor Component ----
+
+function VisionEditor({
+  vision,
+  onUpdate,
+  pillarBreakdown,
+}: {
+  vision: VisionData | null;
+  onUpdate: (v: VisionData) => void;
+  pillarBreakdown?: { pillar_id: number; pillar_name: string }[];
+}) {
+  const [visionText, setVisionText] = useState(vision?.vision_text || '');
+  const [pillarTargets, setPillarTargets] = useState<Record<string, string>>(vision?.pillar_targets || {});
+  const [antiGoals, setAntiGoals] = useState<string[]>(vision?.anti_goals || []);
+  const [newAntiGoal, setNewAntiGoal] = useState('');
+  const [saving, setSaving] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync when vision prop changes
+  useEffect(() => {
+    setVisionText(vision?.vision_text || '');
+    setPillarTargets(vision?.pillar_targets || {});
+    setAntiGoals(vision?.anti_goals || []);
+  }, [vision]);
+
+  const debouncedSave = useCallback((data: Partial<VisionData>) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        const result = await saveVision(data);
+        onUpdate(result);
+      } catch (err) {
+        console.warn('Failed to save vision:', err);
+      }
+      setSaving(false);
+    }, 1000);
+  }, [onUpdate]);
+
+  const updateVisionText = (text: string) => {
+    setVisionText(text);
+    debouncedSave({ vision_text: text });
+  };
+
+  const updatePillarTarget = (pillarId: string, text: string) => {
+    const updated = { ...pillarTargets, [pillarId]: text };
+    setPillarTargets(updated);
+    debouncedSave({ pillar_targets: updated });
+  };
+
+  const addAntiGoal = () => {
+    const text = newAntiGoal.trim();
+    if (!text) return;
+    const updated = [...antiGoals, text];
+    setAntiGoals(updated);
+    setNewAntiGoal('');
+    debouncedSave({ anti_goals: updated });
+    haptic.light();
+  };
+
+  const removeAntiGoal = (index: number) => {
+    const updated = antiGoals.filter((_, i) => i !== index);
+    setAntiGoals(updated);
+    debouncedSave({ anti_goals: updated });
+    haptic.light();
+  };
+
+  return (
+    <>
+      {/* North Star */}
+      <View style={s.card}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
+          <Ionicons name="compass-outline" size={16} color={colors.accent} />
+          <Text style={s.cardLabel}>NORTH STAR VISION</Text>
+          {saving && <ActivityIndicator size="small" color={colors.accent} style={{ marginLeft: 'auto' }} />}
+        </View>
+        <TextInput
+          style={vs.visionInput}
+          value={visionText}
+          onChangeText={updateVisionText}
+          placeholder="What is your ultimate vision? What does mastery look like for you?"
+          placeholderTextColor={colors.textTertiary}
+          multiline
+          textAlignVertical="top"
+        />
+      </View>
+
+      {/* Pillar Targets */}
+      <View style={s.card}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
+          <Ionicons name="flag-outline" size={16} color={colors.accent} />
+          <Text style={s.cardLabel}>PILLAR TARGETS</Text>
+        </View>
+        {(pillarBreakdown || []).map(p => {
+          const pillarColor = PILLAR_COLORS[p.pillar_id] || colors.accent;
+          return (
+            <View key={p.pillar_id} style={vs.pillarTargetRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <View style={[vs.pillarDot, { backgroundColor: pillarColor }]} />
+                <Text style={vs.pillarLabel}>{p.pillar_name}</Text>
+              </View>
+              <TextInput
+                style={vs.pillarInput}
+                value={pillarTargets[String(p.pillar_id)] || ''}
+                onChangeText={(text) => updatePillarTarget(String(p.pillar_id), text)}
+                placeholder={`What do you want to achieve in ${p.pillar_name.split(' ')[0]}?`}
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
+          );
+        })}
+        {(!pillarBreakdown || pillarBreakdown.length === 0) && (
+          <Text style={{ ...typography.caption, color: colors.textTertiary }}>
+            Log some entries with pillar tags to see targets here
+          </Text>
+        )}
+      </View>
+
+      {/* Anti-Goals */}
+      <View style={s.card}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
+          <Ionicons name="close-circle-outline" size={16} color={colors.error} />
+          <Text style={s.cardLabel}>ANTI-GOALS</Text>
+        </View>
+        <Text style={vs.antiGoalDesc}>Things you explicitly do NOT want to become or do.</Text>
+        {antiGoals.map((ag, i) => (
+          <View key={i} style={vs.antiGoalRow}>
+            <View style={vs.antiGoalBullet} />
+            <Text style={vs.antiGoalText}>{ag}</Text>
+            <TouchableOpacity onPress={() => removeAntiGoal(i)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close" size={16} color={colors.textTertiary} />
+            </TouchableOpacity>
+          </View>
+        ))}
+        <View style={vs.addAntiRow}>
+          <TextInput
+            style={vs.addAntiInput}
+            value={newAntiGoal}
+            onChangeText={setNewAntiGoal}
+            placeholder="Add an anti-goal..."
+            placeholderTextColor={colors.textTertiary}
+            onSubmitEditing={addAntiGoal}
+            returnKeyType="done"
+          />
+          {newAntiGoal.trim().length > 0 && (
+            <TouchableOpacity onPress={addAntiGoal}>
+              <Ionicons name="add-circle" size={24} color={colors.accent} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </>
   );
 }
 
@@ -476,6 +808,14 @@ const s = StyleSheet.create({
   heatMonthLabel: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
   heatmapGrid: { flexDirection: 'row', gap: 2, paddingVertical: spacing.sm },
   heatCell: { width: 12, height: 12, borderRadius: 2, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.03)' },
+  heatCellToday: { borderWidth: 1.5, borderColor: colors.accent },
+  heatTooltip: {
+    alignSelf: 'center', backgroundColor: colors.cardElevated,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+    borderRadius: radius.sm, marginTop: spacing.xs,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  heatTooltipText: { ...typography.caption, color: colors.text },
   heatLegend: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginTop: spacing.xs },
   heatLegendLabel: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
 
@@ -510,4 +850,110 @@ const s = StyleSheet.create({
   prLabel: { ...typography.caption, color: colors.textSecondary, flex: 1 },
   prTime: { fontSize: 16, fontWeight: '600', color: colors.accent, fontVariant: ['tabular-nums'], flex: 1, textAlign: 'center' },
   prDate: { ...typography.micro, color: colors.textTertiary, flex: 1, textAlign: 'right' },
+});
+
+// Discipline-specific styles
+const ds = StyleSheet.create({
+  habitStatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+  },
+  habitName: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  habitMeta: {
+    ...typography.caption,
+    color: colors.textTertiary,
+  },
+  streakNum: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F59E0B',
+    fontVariant: ['tabular-nums'] as any,
+  },
+  bestStreak: {
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
+  miniHabitLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  miniCell: {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+  },
+});
+
+// Vision-specific styles
+const vs = StyleSheet.create({
+  visionInput: {
+    ...typography.body,
+    color: colors.text,
+    backgroundColor: colors.input,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    minHeight: 120,
+    textAlignVertical: 'top',
+  },
+  pillarTargetRow: {
+    marginBottom: spacing.md,
+  },
+  pillarDot: {
+    width: 8, height: 8, borderRadius: 4,
+  },
+  pillarLabel: {
+    ...typography.bodyBold,
+    color: colors.text,
+  },
+  pillarInput: {
+    ...typography.body,
+    color: colors.text,
+    backgroundColor: colors.input,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
+  antiGoalDesc: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    marginBottom: spacing.md,
+  },
+  antiGoalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  antiGoalBullet: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: colors.error,
+  },
+  antiGoalText: {
+    ...typography.body,
+    color: colors.text,
+    flex: 1,
+  },
+  addAntiRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.input,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  addAntiInput: {
+    flex: 1,
+    paddingVertical: 12,
+    ...typography.body,
+    color: colors.text,
+  },
 });

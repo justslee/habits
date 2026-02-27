@@ -163,6 +163,18 @@ def complete_todo(todo_id: int, db: Session = Depends(get_db)):
     return _todo_to_response(todo)
 
 
+@router.put("/todos/reorder")
+def reorder_todos(payload: dict, db: Session = Depends(get_db)):
+    """Reorder todos by providing an ordered list of IDs."""
+    ids = payload.get("ids", [])
+    for i, todo_id in enumerate(ids):
+        todo = db.query(DailyTodo).filter(DailyTodo.id == todo_id).first()
+        if todo:
+            todo.sort_order = i
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/todos/{todo_id}")
 def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     todo = db.query(DailyTodo).filter(DailyTodo.id == todo_id).first()
@@ -258,6 +270,18 @@ def toggle_habit(habit_id: int, db: Session = Depends(get_db)):
     return _habit_to_response(habit, today, db)
 
 
+@router.put("/habits/reorder")
+def reorder_habits(payload: dict, db: Session = Depends(get_db)):
+    """Reorder habits by providing an ordered list of IDs."""
+    ids = payload.get("ids", [])
+    for i, habit_id in enumerate(ids):
+        habit = db.query(DailyHabit).filter(DailyHabit.id == habit_id).first()
+        if habit:
+            habit.sort_order = i
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/habits/{habit_id}")
 def delete_habit(habit_id: int, db: Session = Depends(get_db)):
     habit = db.query(DailyHabit).filter(DailyHabit.id == habit_id).first()
@@ -326,6 +350,113 @@ async def get_daily_summary(db: Session = Depends(get_db)):
         workout_day_type=workout_day_type,
         whoop_recovery=whoop_recovery,
     )
+
+
+# ==================== HABIT ANALYTICS (P5-6) ====================
+
+@router.get("/habits/analytics")
+def get_habit_analytics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Get habit analytics: completion rates, streaks, discipline score, correlations."""
+    from datetime import timedelta
+    from collections import defaultdict
+
+    user = db.query(User).first()
+    if not user:
+        return {"habits": [], "discipline_score": 0, "weekly_grade": "F", "perfect_day_count": 0, "daily_map": {}}
+
+    today = date.today()
+    s_date = date.fromisoformat(start_date) if start_date else today - timedelta(days=30)
+    e_date = date.fromisoformat(end_date) if end_date else today
+
+    # Get all active habits
+    habits = (
+        db.query(DailyHabit)
+        .filter(DailyHabit.user_id == user.id, DailyHabit.is_active == True)
+        .order_by(DailyHabit.sort_order)
+        .all()
+    )
+
+    if not habits:
+        return {"habits": [], "discipline_score": 0, "weekly_grade": "F", "perfect_day_count": 0, "daily_map": {}}
+
+    # Get all habit logs in range
+    habit_ids = [h.id for h in habits]
+    logs = (
+        db.query(DailyHabitLog)
+        .filter(
+            DailyHabitLog.habit_id.in_(habit_ids),
+            DailyHabitLog.log_date >= s_date,
+            DailyHabitLog.log_date <= e_date,
+        )
+        .all()
+    )
+
+    # Build lookup: {habit_id: set(dates)}
+    habit_dates: dict[int, set[date]] = defaultdict(set)
+    for log in logs:
+        habit_dates[log.habit_id].add(log.log_date)
+
+    # Build daily completion map: {date_str: [habit_ids]}
+    daily_map: dict[str, list[int]] = {}
+    current = s_date
+    total_days = 0
+    perfect_days = 0
+    while current <= e_date:
+        total_days += 1
+        completed_ids = [h.id for h in habits if current in habit_dates[h.id]]
+        daily_map[current.isoformat()] = completed_ids
+        if len(completed_ids) == len(habits):
+            perfect_days += 1
+        current += timedelta(days=1)
+
+    # Per-habit analytics
+    total_possible = total_days
+    habit_analytics = []
+    for h in habits:
+        completed_dates = habit_dates[h.id]
+        completions_in_range = len([d for d in completed_dates if s_date <= d <= e_date])
+
+        # Rolling completion rates
+        last_7 = sum(1 for d in completed_dates if d > today - timedelta(days=7))
+        last_30 = sum(1 for d in completed_dates if d > today - timedelta(days=30))
+
+        habit_analytics.append({
+            "id": h.id,
+            "name": h.name,
+            "icon": h.icon,
+            "color": h.color,
+            "total_completions": completions_in_range,
+            "completion_rate": round(completions_in_range / max(total_possible, 1) * 100, 1),
+            "rate_7d": round(last_7 / min(7, total_possible) * 100, 1),
+            "rate_30d": round(last_30 / min(30, total_possible) * 100, 1),
+            "current_streak": h.current_streak,
+            "longest_streak": h.longest_streak,
+        })
+
+    # Overall discipline score
+    total_completions = sum(h["total_completions"] for h in habit_analytics)
+    total_possible_all = total_possible * len(habits)
+    discipline_score = round(total_completions / max(total_possible_all, 1) * 100, 1)
+
+    # Letter grade
+    if discipline_score >= 90: grade = "A"
+    elif discipline_score >= 80: grade = "B"
+    elif discipline_score >= 70: grade = "C"
+    elif discipline_score >= 60: grade = "D"
+    else: grade = "F"
+
+    return {
+        "habits": habit_analytics,
+        "discipline_score": discipline_score,
+        "weekly_grade": grade,
+        "perfect_day_count": perfect_days,
+        "total_days": total_days,
+        "daily_map": daily_map,
+    }
 
 
 # ==================== HELPERS ====================

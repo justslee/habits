@@ -1,12 +1,12 @@
 /**
- * Radar Chart — TASK-011
+ * Radar Chart — TASK-011, P5-1 polish
  *
  * Five-axis spider chart showing relative pillar development.
- * Built with react-native-svg for lightweight rendering.
+ * Built with react-native-svg. Animated polygon scale on mount.
  */
 
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
 import Svg, { Polygon, Line, Circle, Text as SvgText } from 'react-native-svg';
 
 interface PillarScore {
@@ -36,10 +36,24 @@ const SHORT_NAMES: Record<number, string> = {
   5: 'PS',
 };
 
+// Animated polygon component
+const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
+
 export default function RadarChart({ data, size = 220 }: RadarChartProps) {
   const center = size / 2;
   const radius = size / 2 - 30;
-  const levels = 4; // concentric rings
+  const levels = 4;
+  const animProgress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    animProgress.setValue(0);
+    Animated.spring(animProgress, {
+      toValue: 1,
+      tension: 40,
+      friction: 8,
+      useNativeDriver: false,
+    }).start();
+  }, [data]);
 
   if (data.length === 0) {
     return (
@@ -51,7 +65,6 @@ export default function RadarChart({ data, size = 220 }: RadarChartProps) {
 
   const n = data.length;
   const angleStep = (2 * Math.PI) / n;
-  // Start from top (-π/2)
   const startAngle = -Math.PI / 2;
 
   const getPoint = (index: number, value: number): [number, number] => {
@@ -60,21 +73,14 @@ export default function RadarChart({ data, size = 220 }: RadarChartProps) {
     return [center + r * Math.cos(angle), center + r * Math.sin(angle)];
   };
 
-  // Build grid rings
+  // Grid rings
   const gridRings = Array.from({ length: levels }, (_, i) => {
     const r = ((i + 1) / levels) * radius;
-    const points = Array.from({ length: n }, (_, j) => {
+    return Array.from({ length: n }, (_, j) => {
       const angle = startAngle + j * angleStep;
       return `${center + r * Math.cos(angle)},${center + r * Math.sin(angle)}`;
     }).join(' ');
-    return points;
   });
-
-  // Build data polygon
-  const dataPoints = data.map((d, i) => {
-    const [x, y] = getPoint(i, d.score);
-    return `${x},${y}`;
-  }).join(' ');
 
   // Axis lines
   const axes = data.map((_, i) => {
@@ -88,69 +94,55 @@ export default function RadarChart({ data, size = 220 }: RadarChartProps) {
     return { x, y, text: SHORT_NAMES[d.pillar_id] || d.pillar_name.substring(0, 2) };
   });
 
+  // Animated data polygon points — interpolate from center to actual position
+  const animatedPoints = animProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [
+      // All at center
+      data.map(() => `${center},${center}`).join(' '),
+      // Actual data positions
+      data.map((d, i) => {
+        const [x, y] = getPoint(i, d.score);
+        return `${x},${y}`;
+      }).join(' '),
+    ],
+  });
+
   return (
     <Svg width={size} height={size}>
       {/* Grid rings */}
       {gridRings.map((points, i) => (
-        <Polygon
-          key={`ring-${i}`}
-          points={points}
-          fill="none"
-          stroke="#333"
-          strokeWidth={1}
-          opacity={0.5}
-        />
+        <Polygon key={`ring-${i}`} points={points} fill="none" stroke="#333" strokeWidth={1} opacity={0.5} />
       ))}
 
       {/* Axis lines */}
       {axes.map((a, i) => (
-        <Line
-          key={`axis-${i}`}
-          x1={a.x1}
-          y1={a.y1}
-          x2={a.x2}
-          y2={a.y2}
-          stroke="#333"
-          strokeWidth={1}
-          opacity={0.5}
-        />
+        <Line key={`axis-${i}`} x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2}
+          stroke="#333" strokeWidth={1} opacity={0.5} />
       ))}
 
-      {/* Data polygon */}
-      <Polygon
-        points={dataPoints}
-        fill="#2563eb"
+      {/* Animated data polygon */}
+      <AnimatedPolygon
+        points={animatedPoints}
+        fill="#6366F1"
         fillOpacity={0.2}
-        stroke="#2563eb"
+        stroke="#6366F1"
         strokeWidth={2}
       />
 
-      {/* Data points */}
+      {/* Data points (static, appear at final position) */}
       {data.map((d, i) => {
         const [x, y] = getPoint(i, d.score);
         return (
-          <Circle
-            key={`pt-${i}`}
-            cx={x}
-            cy={y}
-            r={4}
-            fill={PILLAR_COLORS[d.pillar_id] || '#2563eb'}
-          />
+          <Circle key={`pt-${i}`} cx={x} cy={y} r={4}
+            fill={PILLAR_COLORS[d.pillar_id] || '#6366F1'} />
         );
       })}
 
       {/* Labels */}
       {labels.map((l, i) => (
-        <SvgText
-          key={`label-${i}`}
-          x={l.x}
-          y={l.y}
-          fill="#aaa"
-          fontSize={11}
-          fontWeight="600"
-          textAnchor="middle"
-          alignmentBaseline="middle"
-        >
+        <SvgText key={`label-${i}`} x={l.x} y={l.y}
+          fill="#aaa" fontSize={11} fontWeight="600" textAnchor="middle" alignmentBaseline="middle">
           {l.text}
         </SvgText>
       ))}

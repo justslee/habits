@@ -12,11 +12,13 @@ import RunHistoryScreen from './src/screens/RunHistoryScreen';
 import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
 import RouteLibraryScreen from './src/screens/RouteLibraryScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
+import PillarDetailScreen from './src/screens/PillarDetailScreen';
 import { colors } from './src/theme';
 import ErrorBoundary from './src/components/ErrorBoundary';
 
 const Tab = createBottomTabNavigator();
 const RunStack = createStackNavigator();
+const ProgressStack = createStackNavigator();
 
 function RunStackScreen() {
   return (
@@ -27,6 +29,17 @@ function RunStackScreen() {
         <RunStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
         <RunStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
       </RunStack.Navigator>
+    </ErrorBoundary>
+  );
+}
+
+function ProgressStackScreen() {
+  return (
+    <ErrorBoundary name="ProgressStack">
+      <ProgressStack.Navigator screenOptions={{ headerShown: false }}>
+        <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} />
+        <ProgressStack.Screen name="PillarDetail" component={PillarDetailScreen} />
+      </ProgressStack.Navigator>
     </ErrorBoundary>
   );
 }
@@ -83,7 +96,7 @@ export default function App() {
           <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
           <Tab.Screen name="Train" component={TrainWithBoundary} options={{ tabBarLabel: 'Train' }} />
           <Tab.Screen name="Run" component={RunStackScreen} options={{ tabBarLabel: 'Run' }} />
-          <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
+          <Tab.Screen name="Progress" component={ProgressStackScreen} options={{ tabBarLabel: 'Progress' }} />
         </Tab.Navigator>
         <StatusBar style="light" />
       </NavigationContainer>

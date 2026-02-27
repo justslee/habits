@@ -43,6 +43,9 @@ class WorkoutSession(Base, TimestampMixin):
     # Status: planned, in_progress, completed
     status: Mapped[str] = mapped_column(String(20), default="planned")
 
+    # Soft delete (D-019)
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     exercises: Mapped[list["ExerciseLog"]] = relationship(
         "ExerciseLog", back_populates="session", cascade="all, delete-orphan",
@@ -75,6 +78,9 @@ class ExerciseLog(Base, TimestampMixin):
     # For cardio: duration in minutes, distance in miles
     duration_minutes: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     distance_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Soft delete (D-019) — cascaded from session
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     session: Mapped["WorkoutSession"] = relationship("WorkoutSession", back_populates="exercises")

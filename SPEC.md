@@ -1002,3 +1002,133 @@ Run type definitions:
 - [ ] AC-P5-4.7: Completed todos animate out (strikethrough + fade, Things 3 style)
 - [ ] AC-P5-4.8: Habit streak visualization (mini calendar or ring fill)
 - [ ] AC-P5-4.9: Daily completion summary notification at 9pm ("You completed 4/6 tasks today")
+
+### Feature P5-5: Soft Delete for Entries, Workouts & Runs
+
+**Description**: Allow the user to "delete" (soft-delete) any logged data — daily entries, workout sessions, and run sessions. Deleted records are hidden from all UI and API responses by default but retained in the database for potential recovery. This overrides the original D-005 append-only decision for entries — the user owns the data and should be able to remove mistakes, test entries, or duplicates.
+
+**Design Principles**:
+- **Soft delete, not hard delete** — Records get a `deleted_at` timestamp. They disappear from UI and default API queries but remain in the database.
+- **Cascading soft delete** — Deleting a DailyEntry also soft-deletes its Evaluation. Deleting a WorkoutSession soft-deletes its ExerciseLogs. Deleting a RunSession soft-deletes its RunSplits and RunSegmentLogs.
+- **No "are you sure?" modals** — Use swipe-to-delete or long-press → "Delete" action sheet. The undo toast (5 seconds) is the safety net.
+- **Undo toast** — After deletion, show a toast at the bottom: "[Item] deleted — Undo". Tapping "Undo" restores the record immediately (clears `deleted_at`).
+- **Aggregate recalculation** — After deletion, recalculate affected aggregates: pillar scores, streaks, weekly mileage, estimated 1RMs, personal records.
+
+**Acceptance Criteria**:
+- [ ] AC-P5-5.1: `deleted_at` (DateTime, nullable) column added to DailyEntry, WorkoutSession, RunSession, Evaluation, ExerciseLog, RunSplit, RunSegmentLog
+- [ ] AC-P5-5.2: All list/detail API endpoints filter out records where `deleted_at IS NOT NULL` by default
+- [ ] AC-P5-5.3: DELETE /api/v1/entries/{id} — soft-deletes entry + cascades to evaluation
+- [ ] AC-P5-5.4: DELETE /api/v1/workouts/{id} — soft-deletes session + cascades to exercise logs
+- [ ] AC-P5-5.5: DELETE /api/v1/runs/{id} — soft-deletes run + cascades to splits and segments
+- [ ] AC-P5-5.6: POST /api/v1/{resource}/{id}/restore — restores a soft-deleted record (clears deleted_at)
+- [ ] AC-P5-5.7: After soft-delete, recalculate PillarScores for affected date/pillar
+- [ ] AC-P5-5.8: After soft-delete of a run, recheck PersonalRecords (demote PR if deleted run held it)
+- [ ] AC-P5-5.9: After soft-delete of a workout, recalculate ExerciseProfile progression status
+- [ ] AC-P5-5.10: Mobile: swipe-left-to-delete on entry/workout/run list items
+- [ ] AC-P5-5.11: Mobile: 5-second undo toast after deletion with one-tap restore
+- [ ] AC-P5-5.12: Alembic migration adds `deleted_at` to all affected tables
+- [ ] AC-P5-5.13: Streaks recalculated after entry deletion (a deleted day breaks the streak retroactively)
+
+### Feature P5-6: Discipline Tab — Habit Analytics & Accountability
+
+**Description**: A new "Discipline" sub-tab within the Progress screen (alongside Mastery, Strength, Running). Tracks how well the user maintains daily habits over time. Answers the question: "Am I actually doing what I said I'd do?" — not just logging learning sessions, but holding the line on daily commitments.
+
+**Visualizations**:
+- **Habit Completion Heatmap** — GitHub-style grid per habit, colored by completion (green = done, empty = missed). Quickly shows consistency gaps.
+- **Habit Score Card** — Overall discipline score: % of total possible habit completions in the selected timeframe.
+- **Per-Habit Trend Lines** — Completion rate over rolling 7-day and 30-day windows. Trending up = building discipline. Trending down = slipping.
+- **Streak Board** — Current and longest streak per habit. Sorted by current streak descending.
+- **"Perfect Day" Tracker** — Days where ALL active habits were completed. Shows as gold dots on a calendar or count.
+- **Weekly Discipline Grade** — A-F letter grade based on completion rate (A ≥ 90%, B ≥ 75%, C ≥ 60%, D ≥ 40%, F < 40%).
+- **Habit Correlation** — Which habits tend to be completed together? Which habit, when missed, predicts others being missed? (Simple co-occurrence analysis.)
+
+**Acceptance Criteria**:
+- [ ] AC-P5-6.1: "Discipline" sub-tab appears in Progress screen alongside Mastery, Strength, Running
+- [ ] AC-P5-6.2: Habit completion heatmap (per-habit, GitHub-style grid) with selectable timeframe (30d/90d/6m/1y)
+- [ ] AC-P5-6.3: Overall discipline score card showing completion percentage for selected timeframe
+- [ ] AC-P5-6.4: Per-habit completion rate trend lines (7-day and 30-day rolling average)
+- [ ] AC-P5-6.5: Streak board showing current + longest streak per habit, sorted by current streak
+- [ ] AC-P5-6.6: "Perfect day" count and calendar dots for days where all active habits were completed
+- [ ] AC-P5-6.7: Weekly discipline grade (A-F) based on habit completion rate
+- [ ] AC-P5-6.8: Habit correlation insight: which habits are commonly completed or missed together
+- [ ] AC-P5-6.9: GET /api/v1/daily/habits/analytics — returns habit completion data, streaks, rates, correlations for a date range
+- [ ] AC-P5-6.10: Empty state: "Add habits on the Daily tab to start tracking discipline"
+- [ ] AC-P5-6.11: Tapping a habit in the Discipline view navigates to a detail screen showing that habit's full history and trend
+
+### Feature P5-7: Vision Statement & North Star
+
+**Description**: A dedicated "Vision" sub-tab (accessible from Progress or as a standalone section) where the user defines and maintains their long-term vision — the identity they're building toward. This vision statement is the North Star that the AI evaluation engine, weekly reviews, concept tree seeding, and coaching personas all reference when making assessments. It's not just a motivational poster — it's a system-level prompt that shapes every AI interaction in the app.
+
+**Why This Matters**:
+- The AI evaluator needs to know what "1% better" means for THIS person
+- The concept trees need to be seeded toward a specific destination, not generic curricula
+- Weekly reviews should grade against the vision, not arbitrary standards
+- The running and strength coaches should understand the hybrid athlete identity
+
+**Contents**:
+- **Vision Statement** — Free-form text (rich text or markdown). The user's articulation of who they're becoming. Example: "A world-class hedge fund manager with deep quantitative, ML, and qualitative investing expertise. A hybrid athlete who can deadlift 500 lbs, run a sub-1:45 half marathon, and dominate pickup basketball. A keynote-caliber communicator who can move markets with a presentation."
+- **Pillar Depth Targets** — Per-pillar articulation of what "mastery" looks like. More specific than the generic pillar descriptions. These feed directly into concept tree seeding.
+- **Time Horizon** — When does the user expect to reach key milestones? (1 year, 3 years, 5 years). Helps AI calibrate urgency.
+- **Anti-Goals** — What the user explicitly does NOT want to become. ("I don't want to be the person who reads about investing but never makes a trade." "I don't want to skip leg day.") AI can reference these when calling out comfort zone drift.
+
+**Acceptance Criteria**:
+- [ ] AC-P5-7.1: Vision model in backend: user_id, vision_text (rich text/markdown), pillar_targets (JSON — per-pillar depth descriptions), time_horizon (JSON — milestones with target dates), anti_goals (Text), updated_at
+- [ ] AC-P5-7.2: POST /api/v1/vision — create or update vision (upsert — one vision per user)
+- [ ] AC-P5-7.3: GET /api/v1/vision — returns current vision
+- [ ] AC-P5-7.4: "Vision" sub-tab accessible from Progress screen, beautifully rendered with markdown
+- [ ] AC-P5-7.5: Vision text editable inline (tap to edit, auto-save on blur)
+- [ ] AC-P5-7.6: Per-pillar depth targets editable with dedicated cards per pillar
+- [ ] AC-P5-7.7: Time horizon section with milestone timeline editor (add/remove/reorder milestones)
+- [ ] AC-P5-7.8: Anti-goals section as a bulleted list, editable
+- [ ] AC-P5-7.9: AI Evaluation Engine (Feature 2) includes vision context in its system prompt — references vision statement and pillar targets when scoring entries
+- [ ] AC-P5-7.10: Weekly Review (Feature 5) references vision statement when grading and making recommendations
+- [ ] AC-P5-7.11: Concept Tree seeding (P5-2) uses pillar depth targets from vision to generate research-depth concept trees tailored to the user's specific goals
+- [ ] AC-P5-7.12: Strength and running coaches receive vision context so they understand the hybrid athlete goals
+- [ ] AC-P5-7.13: If no vision is set, AI features still work with default pillar descriptions — vision enhances but doesn't gate functionality
+- [ ] AC-P5-7.14: Onboarding prompt: first time opening the app, guide user to set their vision before first check-in
+
+### Feature P5-2: Pillar Mastery Depth — Concept Trees (Updated)
+
+> **Supersedes previous P5-2 definition above.** The concept tree is now deeply integrated with the Vision (P5-7) and seeded at research depth.
+
+**Description**: Each pillar expands into a deep, research-level concept tree representing the full knowledge landscape required for world-class mastery. These are not surface-level topic lists — they are comprehensive, hierarchical maps of every concept, technique, and skill required to achieve the user's Vision (P5-7).
+
+**Seeding Philosophy**:
+- The LLM seeds each pillar's concept tree based on the user's Vision pillar depth targets (P5-7.11)
+- Target: **40-80 concepts per pillar**, organized in 4-5 tiers from foundational → cutting-edge
+- Each concept includes: name, tier (1-5), prerequisites (other concept IDs), description, key resources
+- Seeding prompt should produce PhD-curriculum-depth maps. Example tiers for Quantitative Finance:
+  - **Tier 1 (Foundation)**: Probability theory, linear algebra, calculus of variations, basic statistics
+  - **Tier 2 (Core)**: Stochastic calculus, Itô's lemma, measure theory, martingale theory, time series analysis
+  - **Tier 3 (Applied)**: Black-Scholes derivation, Greeks & hedging, Monte Carlo methods, factor models, mean-variance optimization
+  - **Tier 4 (Advanced)**: Volatility surfaces & smile modeling, exotic derivatives pricing, jump-diffusion models, SABR model, optimal execution algorithms
+  - **Tier 5 (Frontier)**: Rough volatility, market microstructure models, high-frequency statistical arbitrage, neural SDEs, reinforcement learning for portfolio management
+
+**Customizability**:
+- User can add custom concepts (things not in the AI-generated tree)
+- User can remove concepts they deem irrelevant to their path
+- User can reorder concepts within tiers
+- User can promote/demote concepts between tiers
+- User can edit concept descriptions and add personal notes
+- User can re-seed a pillar's tree at any time (destructive — warns before overwriting)
+
+**Acceptance Criteria**:
+- [ ] AC-P5-2.1: Tapping a pillar on Progress screen navigates to PillarDetailScreen
+- [ ] AC-P5-2.2: PillarDetailScreen shows a tiered concept tree for that pillar, grouped by tier (1-5)
+- [ ] AC-P5-2.3: Each concept shows: name, tier, status (not_started / in_progress / mastered), prerequisite links
+- [ ] AC-P5-2.4: Concept status derived from DailyEntry descriptions + AI classification (LLM matches entries to concepts)
+- [ ] AC-P5-2.5: Initial seed via LLM using Vision pillar depth targets — generates 40-80 concepts per pillar with tiers and prerequisites
+- [ ] AC-P5-2.6: Seed prompt produces research-depth trees (PhD/CQF level for quant finance, research-level for ML, etc.)
+- [ ] AC-P5-2.7: User can add/remove/reorder concepts manually within any tier
+- [ ] AC-P5-2.8: User can promote/demote concepts between tiers
+- [ ] AC-P5-2.9: User can edit concept name, description, and add personal notes
+- [ ] AC-P5-2.10: Visual progress bar per pillar showing % of concepts at each status level
+- [ ] AC-P5-2.11: Tapping a concept shows related DailyEntries and suggested next resources
+- [ ] AC-P5-2.12: "Next to learn" recommendation surfaced on the Daily tab based on concept gaps and prerequisite completion
+- [ ] AC-P5-2.13: Re-seed button per pillar (warns: "This will replace your current concept tree. Concept statuses will be lost.")
+- [ ] AC-P5-2.14: Concept model: id, pillar_id, name, tier (1-5), description, prerequisites (JSON array of concept IDs), status, notes, sort_order, created_at, updated_at
+- [ ] AC-P5-2.15: GET /api/v1/pillars/{id}/concepts — list concepts for a pillar
+- [ ] AC-P5-2.16: POST /api/v1/pillars/{id}/concepts/seed — trigger LLM seeding from vision
+- [ ] AC-P5-2.17: PUT /api/v1/pillars/{id}/concepts/{concept_id} — update concept (status, notes, tier, sort_order)
+- [ ] AC-P5-2.18: POST /api/v1/pillars/{id}/concepts — add custom concept
+- [ ] AC-P5-2.19: DELETE /api/v1/pillars/{id}/concepts/{concept_id} — remove concept

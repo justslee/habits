@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -122,7 +122,10 @@ def list_workout_sessions(
     if not user:
         return []
 
-    q = db.query(WorkoutSession).filter(WorkoutSession.user_id == user.id)
+    q = db.query(WorkoutSession).filter(
+        WorkoutSession.user_id == user.id,
+        WorkoutSession.deleted_at.is_(None),
+    )
     if day_type:
         q = q.filter(WorkoutSession.day_type == day_type)
     sessions = q.order_by(WorkoutSession.session_date.desc()).limit(limit).all()
@@ -145,6 +148,7 @@ async def get_today_plan(db: Session = Depends(get_db)):
         .filter(
             WorkoutSession.user_id == user.id,
             WorkoutSession.session_date == today,
+            WorkoutSession.deleted_at.is_(None),
         )
         .first()
     )
@@ -185,7 +189,10 @@ async def get_today_plan(db: Session = Depends(get_db)):
 @router.get("/{session_id}", response_model=WorkoutSessionResponse)
 def get_workout_session(session_id: int, db: Session = Depends(get_db)):
     """Get a single workout session with all exercises."""
-    session = db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return _session_to_response(session)
@@ -198,7 +205,10 @@ def add_exercise_log(
     db: Session = Depends(get_db),
 ):
     """Log an individual set to an existing session."""
-    session = db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -247,7 +257,10 @@ async def chat_with_coach(
     db: Session = Depends(get_db),
 ):
     """Send a message during a live workout and get coach feedback."""
-    session = db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -301,6 +314,8 @@ def get_exercise_history(
         .join(WorkoutSession)
         .filter(
             WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            ExerciseLog.deleted_at.is_(None),
             ExerciseLog.exercise_name == exercise_name,
             ExerciseLog.is_warmup == False,
         )
@@ -342,6 +357,46 @@ def get_volume_summary(db: Session = Depends(get_db)):
     from app.services.progressive_overload import get_weekly_volume
     groups = ["push", "pull", "legs"]
     return [get_weekly_volume(user.id, g, db) for g in groups]
+
+
+@router.delete("/{session_id}", status_code=200)
+def soft_delete_workout(session_id: int, db: Session = Depends(get_db)):
+    """Soft-delete a workout session and cascade to exercise logs (D-019, P5-5)."""
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    now = datetime.utcnow()
+    session.deleted_at = now
+
+    # Cascade to exercise logs
+    for log in session.exercises:
+        log.deleted_at = now
+
+    db.commit()
+    return {"detail": "Workout deleted", "id": session_id}
+
+
+@router.post("/{session_id}/restore", response_model=WorkoutSessionResponse)
+def restore_workout(session_id: int, db: Session = Depends(get_db)):
+    """Restore a soft-deleted workout session and its exercise logs."""
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.isnot(None),
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Deleted session not found")
+
+    session.deleted_at = None
+    for log in session.exercises:
+        log.deleted_at = None
+
+    db.commit()
+    db.refresh(session)
+    return _session_to_response(session)
 
 
 def _update_profiles_from_session(session: WorkoutSession, db: Session) -> None:

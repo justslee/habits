@@ -1,6 +1,6 @@
 """Daily entry API endpoints."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -81,6 +81,7 @@ def list_entries(
     query = (
         db.query(DailyEntry)
         .options(joinedload(DailyEntry.evaluation))
+        .filter(DailyEntry.deleted_at.is_(None))
         .order_by(DailyEntry.entry_date.desc(), DailyEntry.created_at.desc())
     )
 
@@ -99,7 +100,7 @@ def get_entry(entry_id: int, db: Session = Depends(get_db)):
     entry = (
         db.query(DailyEntry)
         .options(joinedload(DailyEntry.evaluation))
-        .filter(DailyEntry.id == entry_id)
+        .filter(DailyEntry.id == entry_id, DailyEntry.deleted_at.is_(None))
         .first()
     )
     if not entry:
@@ -115,7 +116,7 @@ def update_entry_tags(
     entry = (
         db.query(DailyEntry)
         .options(joinedload(DailyEntry.evaluation))
-        .filter(DailyEntry.id == entry_id)
+        .filter(DailyEntry.id == entry_id, DailyEntry.deleted_at.is_(None))
         .first()
     )
     if not entry:
@@ -142,7 +143,7 @@ async def evaluate_entry_endpoint(entry_id: int, db: Session = Depends(get_db)):
     entry = (
         db.query(DailyEntry)
         .options(joinedload(DailyEntry.evaluation))
-        .filter(DailyEntry.id == entry_id)
+        .filter(DailyEntry.id == entry_id, DailyEntry.deleted_at.is_(None))
         .first()
     )
     if not entry:
@@ -154,5 +155,49 @@ async def evaluate_entry_endpoint(entry_id: int, db: Session = Depends(get_db)):
     evaluation = await evaluate_entry(entry, db)
 
     # Refresh to load relationship
+    db.refresh(entry)
+    return EntryResponse.from_entry(entry)
+
+
+@router.delete("/{entry_id}", status_code=200)
+def soft_delete_entry(entry_id: int, db: Session = Depends(get_db)):
+    """Soft-delete a daily entry and its evaluation (D-019, P5-5)."""
+    entry = (
+        db.query(DailyEntry)
+        .options(joinedload(DailyEntry.evaluation))
+        .filter(DailyEntry.id == entry_id, DailyEntry.deleted_at.is_(None))
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    now = datetime.utcnow()
+    entry.deleted_at = now
+
+    # Cascade to evaluation
+    if entry.evaluation:
+        entry.evaluation.deleted_at = now
+
+    db.commit()
+    return {"detail": "Entry deleted", "id": entry_id}
+
+
+@router.post("/{entry_id}/restore", response_model=EntryResponse)
+def restore_entry(entry_id: int, db: Session = Depends(get_db)):
+    """Restore a soft-deleted entry and its evaluation."""
+    entry = (
+        db.query(DailyEntry)
+        .options(joinedload(DailyEntry.evaluation))
+        .filter(DailyEntry.id == entry_id, DailyEntry.deleted_at.isnot(None))
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Deleted entry not found")
+
+    entry.deleted_at = None
+    if entry.evaluation:
+        entry.evaluation.deleted_at = None
+
+    db.commit()
     db.refresh(entry)
     return EntryResponse.from_entry(entry)

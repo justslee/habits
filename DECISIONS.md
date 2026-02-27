@@ -54,7 +54,7 @@
 
 **Rationale**: Long-term trend data is the core product value. The compounding visualization requires complete history. Users should not be able to "hide" bad days.
 
-**Status**: Accepted
+**Status**: ~~Accepted~~ → **Superseded by D-019**
 
 ---
 
@@ -198,9 +198,38 @@ The current HEARTBEAT-based brief is a placeholder until Phase 2 is built.
 ### D-018: Onboarding Captures Current Maxes
 **Decision**: During onboarding, prompt user to input current working weights / estimated maxes for all core lifts.
 
-**Rationale**: 
+**Rationale**:
 - Progressive overload engine needs a baseline
 - Can't calculate 1RMs or progressions without starting data
 - Current bench working sets: ~160-165 lbs (known baseline)
+
+**Status**: Accepted
+
+---
+
+## 2026-02-27: Phase 5 Architecture Decisions
+
+### D-019: Soft Delete Replaces Append-Only (Supersedes D-005)
+**Decision**: Entries, workouts, and runs support soft deletion via `deleted_at` timestamp. Records are hidden from UI/API but retained in the database.
+
+**Rationale**:
+- The user owns the data and should be able to remove mistakes, test entries, or duplicates
+- Append-only was overly restrictive for a personal tool
+- Soft delete preserves the data integrity benefits (full history in DB) while giving UI-level control
+- Undo toast (5-second window) prevents accidental deletion
+- Aggregate recalculation after deletion maintains data consistency
+
+**Status**: Accepted — supersedes D-005
+
+---
+
+### D-020: Vision Statement as System-Level AI Context
+**Decision**: A user-defined Vision statement is stored in the database and injected into all AI system prompts (evaluation engine, weekly reviews, concept tree seeding, coaching personas).
+
+**Rationale**:
+- "1% better" is meaningless without a destination — the Vision defines what mastery looks like
+- Concept trees should be seeded toward the user's specific goals, not generic curricula
+- Weekly reviews should grade against the Vision, not arbitrary standards
+- All AI personas benefit from understanding the user's North Star
 
 **Status**: Accepted

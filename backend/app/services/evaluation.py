@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.models.daily_entry import DailyEntry
 from app.models.evaluation import Evaluation
 from app.models.pillar import Pillar
+from app.models.vision import Vision
 from app.services.adaptive import build_adaptive_context_block, calculate_consistency_multiplier
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ async def call_clawdbot(system_prompt: str, user_prompt: str) -> dict[str, Any]:
         )
 
     headers = {"Authorization": f"Bearer {CLAWDBOT_TOKEN}"}
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         response = await client.post(CLAWDBOT_URL, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()
@@ -141,6 +142,58 @@ def parse_llm_response(raw_response: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_vision_context(user_id: int, pillar_ids: list[int], pillars: list[Pillar], db: Session) -> str:
+    """Build a context block from the user's Vision statement (D-020, P5-7).
+
+    Injected into the AI system prompt so evaluations are aligned with the
+    user's North Star, pillar-specific targets, and anti-goals.
+    """
+    vision = db.query(Vision).filter(Vision.user_id == user_id).first()
+    if not vision:
+        return ""
+
+    parts = []
+    parts.append("\n## User's North Star Vision")
+
+    if vision.vision_text:
+        parts.append(f"**Vision:** {vision.vision_text}")
+
+    if vision.pillar_targets:
+        try:
+            targets = json.loads(vision.pillar_targets)
+            pillar_map = {p.id: p.name for p in pillars}
+            relevant = []
+            for pid in pillar_ids:
+                target = targets.get(str(pid))
+                pname = pillar_map.get(pid, f"Pillar {pid}")
+                if target:
+                    relevant.append(f"- {pname}: {target}")
+            if relevant:
+                parts.append("**Pillar-specific targets for this session:**")
+                parts.extend(relevant)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if vision.anti_goals:
+        try:
+            anti = json.loads(vision.anti_goals)
+            if anti:
+                parts.append("**Anti-goals (things the user explicitly does NOT want):**")
+                for ag in anti:
+                    parts.append(f"- {ag}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    parts.append(
+        "\nUse this vision to calibrate relevance scoring. "
+        "Sessions that directly advance the user's stated vision and pillar targets "
+        "should score higher on relevance. Sessions that conflict with anti-goals "
+        "should be flagged."
+    )
+
+    return "\n".join(parts)
+
+
 async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
     """Evaluate an entry using the AI engine and store the result.
 
@@ -163,6 +216,13 @@ async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
     system_prompt = SYSTEM_PROMPT
     if adaptive_block:
         system_prompt = SYSTEM_PROMPT + "\n" + adaptive_block
+
+    # D-020: Inject vision context for relevance alignment
+    vision_block = _build_vision_context(
+        entry.user_id, entry.pillar_tag_list, pillars, db
+    )
+    if vision_block:
+        system_prompt = system_prompt + "\n" + vision_block
 
     # TASK-006: Calculate consistency multiplier from streak data
     consistency_mult = calculate_consistency_multiplier(

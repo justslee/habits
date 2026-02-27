@@ -65,21 +65,35 @@ export interface EntryResponse {
   };
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
   await _configPromise;
+  const { timeoutMs, ...fetchOptions } = options ?? {};
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
   };
-  const res = await fetch(`${API_URL}${path}`, {
-    headers,
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${body}`);
+
+  // Default 30s timeout; LLM endpoints can override with timeoutMs
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs ?? 30_000);
+
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      headers,
+      signal: controller.signal,
+      ...fetchOptions,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`API ${res.status}: ${body}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 /** Build headers for raw fetch calls (used by screens not yet migrated to client functions). */
@@ -93,9 +107,11 @@ export function apiHeaders(): Record<string, string> {
 export { API_URL };
 
 export function createEntry(payload: EntryCreatePayload): Promise<EntryResponse> {
+  // Entry creation triggers LLM evaluation (~30-60s)
   return request('/api/v1/entries', {
     method: 'POST',
     body: JSON.stringify(payload),
+    timeoutMs: 120_000,
   });
 }
 
@@ -376,4 +392,122 @@ export function getDepthProgression(
   let url = `/api/v1/dashboard/depth-progression?days=${days}`;
   if (pillarId !== undefined) url += `&pillar_id=${pillarId}`;
   return request(url);
+}
+
+// --- Soft Delete / Restore (P5-5) ---
+
+export function deleteEntry(entryId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/entries/${entryId}`, { method: 'DELETE' });
+}
+
+export function restoreEntry(entryId: number): Promise<EntryResponse> {
+  return request(`/api/v1/entries/${entryId}/restore`, { method: 'POST' });
+}
+
+export function deleteWorkout(sessionId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/workouts/${sessionId}`, { method: 'DELETE' });
+}
+
+export function restoreWorkout(sessionId: number): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/restore`, { method: 'POST' });
+}
+
+export function deleteRun(runId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/runs/${runId}`, { method: 'DELETE' });
+}
+
+export function restoreRun(runId: number): Promise<RunSessionData> {
+  return request(`/api/v1/runs/${runId}/restore`, { method: 'POST' });
+}
+
+// --- Vision Statement (P5-7) ---
+
+export interface VisionData {
+  id: number;
+  vision_text: string | null;
+  pillar_targets: Record<string, string> | null;
+  time_horizon: Array<{ title: string; target_date: string }> | null;
+  anti_goals: string[] | null;
+}
+
+export function getVision(): Promise<VisionData | null> {
+  return request('/api/v1/vision');
+}
+
+export function saveVision(data: Partial<VisionData>): Promise<VisionData> {
+  return request('/api/v1/vision', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// --- Concept Trees (P5-2) ---
+
+export interface ConceptData {
+  id: number;
+  pillar_id: number;
+  name: string;
+  tier: number;
+  description: string | null;
+  prerequisites: string[] | null;
+  status: 'not_started' | 'in_progress' | 'mastered';
+  notes: string | null;
+  key_resources: string | null;
+  sort_order: number;
+}
+
+export interface TierGroup {
+  tier: number;
+  tier_name: string;
+  concepts: ConceptData[];
+}
+
+export interface ConceptTreeData {
+  pillar_id: number;
+  total: number;
+  mastered: number;
+  in_progress: number;
+  tiers: TierGroup[];
+}
+
+export function getPillarConcepts(pillarId: number): Promise<ConceptTreeData> {
+  return request(`/api/v1/pillars/${pillarId}/concepts`);
+}
+
+export function seedPillarConcepts(
+  pillarId: number,
+  mode: 'quick' | 'research' = 'quick',
+): Promise<ConceptTreeData> {
+  // LLM generates 40-80 concepts — quick ~120s, research ~180s
+  const timeoutMs = mode === 'research' ? 300_000 : 180_000;
+  return request(`/api/v1/pillars/${pillarId}/concepts/seed`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+    timeoutMs,
+  });
+}
+
+export function addConcept(
+  pillarId: number,
+  data: { name: string; tier: number; description?: string; key_resources?: string },
+): Promise<ConceptData> {
+  return request(`/api/v1/pillars/${pillarId}/concepts`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateConcept(
+  pillarId: number,
+  conceptId: number,
+  data: Partial<Pick<ConceptData, 'name' | 'tier' | 'description' | 'status' | 'notes' | 'key_resources' | 'sort_order'>>,
+): Promise<ConceptData> {
+  return request(`/api/v1/pillars/${pillarId}/concepts/${conceptId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteConcept(pillarId: number, conceptId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/pillars/${pillarId}/concepts/${conceptId}`, { method: 'DELETE' });
 }

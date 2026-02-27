@@ -3,7 +3,7 @@
 import datetime
 from typing import Optional
 
-from sqlalchemy import Date, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -53,6 +53,9 @@ class RunSession(Base, TimestampMixin):
     # Status: in_progress, completed, discarded
     status: Mapped[str] = mapped_column(String(20), default="completed")
 
+    # Soft delete (D-019)
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     splits: Mapped[list["RunSplit"]] = relationship(
         "RunSplit", back_populates="run", cascade="all, delete-orphan",
@@ -91,6 +94,9 @@ class RunSplit(Base, TimestampMixin):
     pace_seconds: Mapped[int] = mapped_column(Integer, nullable=False)  # seconds per mile
     elevation_change_ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     avg_heart_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Soft delete (D-019) — cascaded from run
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationship
     run: Mapped["RunSession"] = relationship("RunSession", back_populates="splits")
@@ -234,6 +240,9 @@ class RunSegmentLog(Base, TimestampMixin):
     target_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     actual_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     distance_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Soft delete (D-019) — cascaded from run
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"<RunSegmentLog(run={self.run_id}, seg={self.segment_index}, type={self.segment_type})>"

@@ -8,14 +8,29 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Platform, RefreshControl, KeyboardAvoidingView, Alert,
+  Platform, RefreshControl, KeyboardAvoidingView, Animated,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { haptic } from '../utils/haptics';
 import { colors, spacing, typography, radius, PILLAR_COLORS_BY_NAME } from '../theme';
 import { API_URL, apiHeaders } from '../api/client';
 import CheckInContent from './CheckInScreen';
+import SwipeableRow from '../components/SwipeableRow';
+import UndoToast from '../components/UndoToast';
+
+const TIME_ESTIMATES = [15, 30, 45, 60, 90];
+const HABIT_ICONS: string[] = [
+  'flame-outline', 'book-outline', 'barbell-outline', 'water-outline',
+  'bed-outline', 'walk-outline', 'code-slash-outline', 'musical-notes-outline',
+  'leaf-outline', 'heart-outline', 'medkit-outline', 'pencil-outline',
+  'bulb-outline', 'fitness-outline', 'cafe-outline', 'bicycle-outline',
+];
+const HABIT_COLORS = [
+  '#6366F1', '#8B5CF6', '#EC4899', '#EF4444', '#F59E0B',
+  '#22C55E', '#06B6D4', '#3B82F6', '#F97316', '#10B981',
+];
 
 // Types
 interface Todo {
@@ -72,7 +87,61 @@ export default function DailyScreen() {
   const [addingTodo, setAddingTodo] = useState(false);
   const [showAddHabit, setShowAddHabit] = useState(false);
   const [newHabitName, setNewHabitName] = useState('');
+  const [newHabitIcon, setNewHabitIcon] = useState<string>('flame-outline');
+  const [newHabitColor, setNewHabitColor] = useState<string>(colors.accent);
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const [selectedTimeEstimate, setSelectedTimeEstimate] = useState<number | null>(null);
   const inputRef = useRef<TextInput>(null);
+
+  // Undo toast state for swipe-to-delete
+  const [undoToast, setUndoToast] = useState<{
+    visible: boolean;
+    message: string;
+    type: 'todo' | 'habit';
+    id: number;
+    snapshot: Todo | Habit;
+  }>({ visible: false, message: '', type: 'todo', id: 0, snapshot: {} as Todo });
+
+  const handleUndo = useCallback(async () => {
+    const { type, id, snapshot } = undoToast;
+    setUndoToast(prev => ({ ...prev, visible: false }));
+    if (type === 'todo') {
+      // Re-add the todo locally
+      setTodos(prev => [...prev, snapshot as Todo].sort((a, b) => a.sort_order - b.sort_order));
+      // Re-create on server (POST the same text, server re-creates)
+      try {
+        const resp = await fetch(`${API_URL}/api/v1/daily/todos`, {
+          method: 'POST',
+          headers: apiHeaders(),
+          body: JSON.stringify({ text: (snapshot as Todo).text }),
+        });
+        if (resp.ok) {
+          // Refresh to get correct server IDs
+          const data = await resp.json();
+          setTodos(prev => prev.map(t => t.id === (snapshot as Todo).id ? data : t));
+        }
+      } catch (err) {
+        console.warn('Failed to undo todo delete:', err);
+      }
+    } else {
+      // Re-add the habit locally
+      setHabits(prev => [...prev, snapshot as Habit].sort((a, b) => a.sort_order - b.sort_order));
+      try {
+        const resp = await fetch(`${API_URL}/api/v1/daily/habits`, {
+          method: 'POST',
+          headers: apiHeaders(),
+          body: JSON.stringify({ name: (snapshot as Habit).name }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setHabits(prev => prev.map(h => h.id === (snapshot as Habit).id ? data : h));
+        }
+      } catch (err) {
+        console.warn('Failed to undo habit delete:', err);
+      }
+    }
+    haptic.success();
+  }, [undoToast]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -106,12 +175,13 @@ export default function DailyScreen() {
       const resp = await fetch(`${API_URL}/api/v1/daily/todos`, {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, estimated_minutes: selectedTimeEstimate }),
       });
       if (resp.ok) {
         const todo = await resp.json();
         setTodos(prev => [...prev, todo]);
         setNewTodoText('');
+        setSelectedTimeEstimate(null);
         haptic.light();
       }
     } catch (err) {
@@ -136,22 +206,21 @@ export default function DailyScreen() {
     }
   };
 
-  const deleteTodo = (id: number, text: string) => {
-    Alert.alert('Delete', `Remove "${text}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await fetch(`${API_URL}/api/v1/daily/todos/${id}`, { method: 'DELETE', headers: apiHeaders() });
-            setTodos(prev => prev.filter(t => t.id !== id));
-            haptic.light();
-          } catch (err) {
-            console.warn('Failed to delete todo:', err);
-          }
-        },
-      },
-    ]);
+  const deleteTodo = async (id: number, text: string) => {
+    // Optimistic remove + show undo toast
+    const snapshot = todos.find(t => t.id === id);
+    if (!snapshot) return;
+    setTodos(prev => prev.filter(t => t.id !== id));
+    haptic.light();
+    setUndoToast({ visible: true, message: `"${text}" deleted`, type: 'todo', id, snapshot });
+    try {
+      await fetch(`${API_URL}/api/v1/daily/todos/${id}`, { method: 'DELETE', headers: apiHeaders() });
+    } catch (err) {
+      // Restore on failure
+      console.warn('Failed to delete todo:', err);
+      setTodos(prev => [...prev, snapshot].sort((a, b) => a.sort_order - b.sort_order));
+      setUndoToast(prev => ({ ...prev, visible: false }));
+    }
   };
 
   // ---- Habit Actions ----
@@ -178,13 +247,16 @@ export default function DailyScreen() {
       const resp = await fetch(`${API_URL}/api/v1/daily/habits`, {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, icon: newHabitIcon, color: newHabitColor }),
       });
       if (resp.ok) {
         const habit = await resp.json();
         setHabits(prev => [...prev, habit]);
         setNewHabitName('');
+        setNewHabitIcon('flame-outline');
+        setNewHabitColor(colors.accent);
         setShowAddHabit(false);
+        setShowIconPicker(false);
         haptic.light();
       }
     } catch (err) {
@@ -192,22 +264,20 @@ export default function DailyScreen() {
     }
   };
 
-  const deleteHabit = (id: number, name: string) => {
-    Alert.alert('Remove Habit', `Delete "${name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await fetch(`${API_URL}/api/v1/daily/habits/${id}`, { method: 'DELETE', headers: apiHeaders() });
-            setHabits(prev => prev.filter(h => h.id !== id));
-            haptic.light();
-          } catch (err) {
-            console.warn('Failed to delete habit:', err);
-          }
-        },
-      },
-    ]);
+  const deleteHabit = async (id: number, name: string) => {
+    // Optimistic remove + show undo toast
+    const snapshot = habits.find(h => h.id === id);
+    if (!snapshot) return;
+    setHabits(prev => prev.filter(h => h.id !== id));
+    haptic.light();
+    setUndoToast({ visible: true, message: `"${name}" deleted`, type: 'habit', id, snapshot });
+    try {
+      await fetch(`${API_URL}/api/v1/daily/habits/${id}`, { method: 'DELETE', headers: apiHeaders() });
+    } catch (err) {
+      console.warn('Failed to delete habit:', err);
+      setHabits(prev => [...prev, snapshot].sort((a, b) => a.sort_order - b.sort_order));
+      setUndoToast(prev => ({ ...prev, visible: false }));
+    }
   };
 
   // Count progress
@@ -283,32 +353,40 @@ export default function DailyScreen() {
       {todos.map(todo => {
         const pillarColor = todo.pillar_name ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent) : null;
         return (
-          <TouchableOpacity
-            key={todo.id}
-            style={st.todoRow}
-            onPress={() => toggleTodo(todo.id)}
-            onLongPress={() => deleteTodo(todo.id, todo.text)}
-          >
-            <View style={[
-              st.todoCheck,
-              todo.completed && { backgroundColor: colors.success, borderColor: colors.success },
-            ]}>
-              {todo.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
-            </View>
-            <View style={st.todoContent}>
-              <Text style={[st.todoText, todo.completed && st.todoTextDone]} numberOfLines={2}>
-                {todo.text}
-              </Text>
-              {pillarColor && (
-                <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
-                  <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
-                  <Text style={[st.pillarTagText, { color: pillarColor }]}>
-                    {todo.pillar_name}
-                  </Text>
+          <SwipeableRow key={todo.id} onDelete={() => deleteTodo(todo.id, todo.text)}>
+            <TouchableOpacity
+              style={st.todoRow}
+              onPress={() => toggleTodo(todo.id)}
+            >
+              <View style={[
+                st.todoCheck,
+                todo.completed && { backgroundColor: colors.success, borderColor: colors.success },
+              ]}>
+                {todo.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+              <View style={st.todoContent}>
+                <Text style={[st.todoText, todo.completed && st.todoTextDone]} numberOfLines={2}>
+                  {todo.text}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' }}>
+                  {pillarColor && (
+                    <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
+                      <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
+                      <Text style={[st.pillarTagText, { color: pillarColor }]}>
+                        {todo.pillar_name}
+                      </Text>
+                    </View>
+                  )}
+                  {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
+                    <View style={st.estBadge}>
+                      <Ionicons name="time-outline" size={10} color={colors.textTertiary} />
+                      <Text style={st.estText}>{todo.estimated_minutes}m</Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </SwipeableRow>
         );
       })}
 
@@ -331,6 +409,24 @@ export default function DailyScreen() {
         )}
       </View>
 
+      {/* Time estimate pills */}
+      {newTodoText.trim().length > 0 && (
+        <View style={st.timeEstRow}>
+          <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
+          {TIME_ESTIMATES.map(min => (
+            <TouchableOpacity
+              key={min}
+              style={[st.timePill, selectedTimeEstimate === min && st.timePillActive]}
+              onPress={() => { setSelectedTimeEstimate(selectedTimeEstimate === min ? null : min); haptic.selection(); }}
+            >
+              <Text style={[st.timePillText, selectedTimeEstimate === min && st.timePillTextActive]}>
+                {min}m
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* HABITS section */}
       <View style={[st.sectionHeader, { marginTop: spacing.xl }]}>
         <Ionicons name="flame-outline" size={16} color={colors.textSecondary} />
@@ -342,53 +438,92 @@ export default function DailyScreen() {
       </View>
 
       {showAddHabit && (
-        <View style={st.addRow}>
-          <TextInput
-            style={st.addInput}
-            placeholder="New habit name..."
-            placeholderTextColor={colors.textTertiary}
-            value={newHabitName}
-            onChangeText={setNewHabitName}
-            onSubmitEditing={addHabit}
-            returnKeyType="done"
-            autoFocus
-          />
-          {newHabitName.trim().length > 0 && (
-            <TouchableOpacity style={st.addBtn} onPress={addHabit}>
-              <Ionicons name="arrow-up-circle" size={28} color={colors.accent} />
+        <>
+          <View style={st.addRow}>
+            <TouchableOpacity onPress={() => { setShowIconPicker(!showIconPicker); haptic.selection(); }}>
+              <View style={[st.habitIconPreview, { backgroundColor: newHabitColor + '20', borderColor: newHabitColor + '40' }]}>
+                <Ionicons name={newHabitIcon as any} size={16} color={newHabitColor} />
+              </View>
             </TouchableOpacity>
+            <TextInput
+              style={st.addInput}
+              placeholder="New habit name..."
+              placeholderTextColor={colors.textTertiary}
+              value={newHabitName}
+              onChangeText={setNewHabitName}
+              onSubmitEditing={addHabit}
+              returnKeyType="done"
+              autoFocus
+            />
+            {newHabitName.trim().length > 0 && (
+              <TouchableOpacity style={st.addBtn} onPress={addHabit}>
+                <Ionicons name="arrow-up-circle" size={28} color={colors.accent} />
+              </TouchableOpacity>
+            )}
+          </View>
+          {showIconPicker && (
+            <View style={st.pickerCard}>
+              {/* Icon grid */}
+              <Text style={st.pickerLabel}>ICON</Text>
+              <View style={st.iconGrid}>
+                {HABIT_ICONS.map(icon => (
+                  <TouchableOpacity
+                    key={icon}
+                    style={[st.iconCell, newHabitIcon === icon && { backgroundColor: newHabitColor + '25', borderColor: newHabitColor }]}
+                    onPress={() => { setNewHabitIcon(icon); haptic.selection(); }}
+                  >
+                    <Ionicons name={icon as any} size={20} color={newHabitIcon === icon ? newHabitColor : colors.textTertiary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {/* Color row */}
+              <Text style={[st.pickerLabel, { marginTop: spacing.md }]}>COLOR</Text>
+              <View style={st.colorRow}>
+                {HABIT_COLORS.map(c => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[st.colorDot, { backgroundColor: c }, newHabitColor === c && st.colorDotActive]}
+                    onPress={() => { setNewHabitColor(c); haptic.selection(); }}
+                  />
+                ))}
+              </View>
+            </View>
           )}
-        </View>
+        </>
       )}
 
       {habits.map(habit => {
         const habitColor = habit.color || colors.accent;
+        const habitIcon = habit.icon || 'flame-outline';
         return (
-          <TouchableOpacity
-            key={habit.id}
-            style={st.habitRow}
-            onPress={() => toggleHabit(habit.id)}
-            onLongPress={() => deleteHabit(habit.id, habit.name)}
-          >
-            <View style={[
-              st.habitCircle,
-              { borderColor: habitColor },
-              habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
-            ]}>
-              {habit.completed_today && <Ionicons name="checkmark" size={16} color="#fff" />}
-            </View>
-            <View style={st.habitInfo}>
-              <Text style={[st.habitName, habit.completed_today && { color: colors.textTertiary }]}>
-                {habit.name}
-              </Text>
-              {habit.current_streak > 0 && (
-                <View style={st.streakBadge}>
-                  <Ionicons name="flame" size={10} color="#F59E0B" />
-                  <Text style={st.streakText}>{habit.current_streak}d</Text>
-                </View>
-              )}
-            </View>
-          </TouchableOpacity>
+          <SwipeableRow key={habit.id} onDelete={() => deleteHabit(habit.id, habit.name)}>
+            <TouchableOpacity
+              style={st.habitRow}
+              onPress={() => toggleHabit(habit.id)}
+            >
+              <View style={[
+                st.habitCircle,
+                { borderColor: habitColor },
+                habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
+              ]}>
+                {habit.completed_today
+                  ? <Ionicons name="checkmark" size={16} color="#fff" />
+                  : <Ionicons name={habitIcon as any} size={14} color={habitColor} />
+                }
+              </View>
+              <View style={st.habitInfo}>
+                <Text style={[st.habitName, habit.completed_today && { color: colors.textTertiary }]}>
+                  {habit.name}
+                </Text>
+                {habit.current_streak > 0 && (
+                  <View style={st.streakBadge}>
+                    <Ionicons name="flame" size={10} color="#F59E0B" />
+                    <Text style={st.streakText}>{habit.current_streak}d</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          </SwipeableRow>
         );
       })}
 
@@ -404,27 +539,37 @@ export default function DailyScreen() {
   );
 
   return (
-    <KeyboardAvoidingView
-      style={st.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      {/* Sub-tab bar */}
-      <View style={[st.tabBar, { paddingTop: insets.top + spacing.xs }]}>
-        {(['today', 'checkin'] as SubTab[]).map(tab => (
-          <TouchableOpacity
-            key={tab}
-            style={[st.tab, activeTab === tab && st.tabActive]}
-            onPress={() => { setActiveTab(tab); haptic.selection(); }}
-          >
-            <Text style={[st.tabText, activeTab === tab && st.tabTextActive]}>
-              {tab === 'today' ? 'Today' : 'Check-In'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={st.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {/* Sub-tab bar */}
+        <View style={[st.tabBar, { paddingTop: insets.top + spacing.xs }]}>
+          {(['today', 'checkin'] as SubTab[]).map(tab => (
+            <TouchableOpacity
+              key={tab}
+              style={[st.tab, activeTab === tab && st.tabActive]}
+              onPress={() => { setActiveTab(tab); haptic.selection(); }}
+            >
+              <Text style={[st.tabText, activeTab === tab && st.tabTextActive]}>
+                {tab === 'today' ? 'Today' : 'Check-In'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      {activeTab === 'today' ? renderToday() : <CheckInContent />}
-    </KeyboardAvoidingView>
+        {activeTab === 'today' ? renderToday() : <CheckInContent />}
+
+        {/* Undo toast for swipe-to-delete */}
+        <UndoToast
+          visible={undoToast.visible}
+          message={undoToast.message}
+          onUndo={handleUndo}
+          onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
+        />
+      </KeyboardAvoidingView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -534,4 +679,58 @@ const st = StyleSheet.create({
     paddingVertical: spacing.lg, opacity: 0.5,
   },
   emptyHabitsText: { ...typography.caption, color: colors.textTertiary },
+
+  // Time estimate pills
+  timeEstRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginBottom: spacing.md, marginTop: -spacing.xs, paddingHorizontal: spacing.xs,
+  },
+  timePill: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+    borderRadius: radius.pill, backgroundColor: colors.card,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  timePillActive: {
+    backgroundColor: colors.accentMuted, borderColor: colors.accent,
+  },
+  timePillText: { ...typography.micro, color: colors.textTertiary },
+  timePillTextActive: { color: colors.accent },
+
+  // Estimated time badge on todos
+  estBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
+    backgroundColor: colors.card, marginTop: 4,
+  },
+  estText: { fontSize: 10, fontWeight: '500', color: colors.textTertiary },
+
+  // Habit icon/color picker
+  habitIconPreview: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, marginRight: spacing.sm,
+  },
+  pickerCard: {
+    backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, marginBottom: spacing.md,
+  },
+  pickerLabel: { ...typography.micro, color: colors.textTertiary, marginBottom: spacing.sm },
+  iconGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm,
+  },
+  iconCell: {
+    width: 40, height: 40, borderRadius: radius.sm,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.input, borderWidth: 1, borderColor: 'transparent',
+  },
+  colorRow: {
+    flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap',
+  },
+  colorDot: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  colorDotActive: {
+    borderColor: '#fff', borderWidth: 3,
+  },
 });

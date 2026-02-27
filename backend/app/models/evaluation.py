@@ -1,8 +1,9 @@
 """Evaluation model - AI assessment of daily entries."""
 
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -50,6 +51,9 @@ class Evaluation(Base, TimestampMixin):
 
     # Raw LLM response for debugging
     raw_llm_response: Mapped[str] = mapped_column(Text, nullable=True)
+
+    # Soft delete (D-019)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationship
     entry: Mapped["DailyEntry"] = relationship("DailyEntry", back_populates="evaluation")

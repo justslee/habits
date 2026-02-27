@@ -1,12 +1,19 @@
 """Mastery Tracker API - FastAPI Backend."""
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from backend directory (supports local dev without exporting vars)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import daily, dashboard, entries, milestones, routes, runs, streaks, weekly_reviews, workouts
+from app.routers import concepts, daily, dashboard, entries, milestones, routes, runs, streaks, vision, weekly_reviews, workouts
 
 app = FastAPI(
     title="Mastery Tracker API",
@@ -50,6 +57,8 @@ app.include_router(weekly_reviews.router)
 app.include_router(routes.router)
 app.include_router(runs.router)
 app.include_router(workouts.router)
+app.include_router(vision.router)
+app.include_router(concepts.router)
 
 
 @app.get("/health")
