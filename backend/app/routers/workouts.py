@@ -265,6 +265,8 @@ async def chat_with_coach(
             for s in result["parsed_sets"]
         ],
         session_summary=result.get("session_summary"),
+        plan_updated=result.get("plan_updated", False),
+        session_completed=result.get("session_completed", False),
     )
 
 

@@ -35,7 +35,7 @@ CRITICAL RULES:
 - If someone reports pain or discomfort, take it seriously. Suggest modifications.
 - Progressive overload is king. Track their numbers mentally and push for progress.
 
-You have TWO jobs every message:
+You have FOUR jobs every message:
 
 1. **PARSE** — If the message contains set data (weight, reps, exercise), extract it.
    Common formats: "bench 165 for 5", "got 3 reps at 185", "bench — 165×5, 165×5",
@@ -49,13 +49,24 @@ You have TWO jobs every message:
    - Saying they're tired/struggling → adjust expectations, suggest modifications
    - Asking what's next → guide them through the workout plan
 
+3. **ADJUST** — If the athlete asks to modify the plan (time constraint, fatigue, injury, swap exercise),
+   return an "adjustments" object with the updated full exercise list. Otherwise null.
+   Format: {"adjustments": {"exercises": [...full updated list...], "reason": "short explanation"}}
+   Each exercise: {"name": "Exercise Name", "sets": 3, "reps": 8, "weight": 135, "rest_seconds": 90, "notes": "optional"}
+
+4. **COMPLETE** — If the athlete says they're done/finished with the workout, return:
+   {"session_complete": true}
+   Give a brief wrap-up: summarize what was accomplished, note any PRs, give encouragement.
+   Otherwise return {"session_complete": false}.
+
 ALWAYS respond with valid JSON:
 {
   "parsed_sets": [
     {"exercise_name": "Bench Press", "weight": 165, "reps": 5, "rpe": null, "set_number": 1}
   ],
   "coach_response": "Your response as a coach (2-4 sentences, conversational)",
-  "adjustments": null
+  "adjustments": null,
+  "session_complete": false
 }
 
 If no sets to parse, return empty parsed_sets []. ALWAYS include a coach_response.
@@ -210,11 +221,52 @@ ATHLETE SAYS: {message}"""
 
     if logged_sets:
         session.status = "in_progress"
+
+    # Process plan adjustments
+    adjustments = parsed.get("adjustments")
+    if adjustments and isinstance(adjustments, dict):
+        updated_exercises = adjustments.get("exercises")
+        if updated_exercises:
+            plan = json.loads(session.ai_plan) if isinstance(session.ai_plan, str) else session.ai_plan or {}
+            plan["exercises"] = updated_exercises
+            plan["coach_notes"] = adjustments.get("reason", plan.get("coach_notes", ""))
+            session.ai_plan = json.dumps(plan)
+            logger.info("Plan adjusted for session %d: %s", session.id, adjustments.get("reason"))
+
+    # Process session completion
+    session_completed = False
+    if parsed.get("session_complete"):
+        session.status = "completed"
+        session_completed = True
+        # Calculate overall RPE from set-level RPEs if available
+        set_rpes = [e.rpe for e in session.exercises if e.rpe is not None]
+        if set_rpes:
+            session.overall_rpe = round(sum(set_rpes) / len(set_rpes))
+        logger.info("Session %d completed via coach chat", session.id)
+
+        # Update exercise profiles with progressive overload data
+        try:
+            from app.services.progressive_overload import update_profile_after_session
+            exercise_names = set(e.exercise_name for e in session.exercises if not e.is_warmup)
+            for name in exercise_names:
+                profile = (
+                    db.query(ExerciseProfile)
+                    .filter(ExerciseProfile.user_id == session.user_id, ExerciseProfile.exercise_name == name)
+                    .first()
+                )
+                if profile:
+                    logs = [e for e in session.exercises if e.exercise_name == name]
+                    update_profile_after_session(profile, logs, db)
+        except Exception as e:
+            logger.warning("Failed to update profiles after session: %s", e)
+
     db.commit()
 
     return {
         "coach_response": parsed.get("coach_response", "Let's get after it."),
         "parsed_sets": logged_sets,
+        "plan_updated": bool(adjustments and adjustments.get("exercises")),
+        "session_completed": session_completed,
         "session_summary": None,
     }
 
@@ -224,6 +276,40 @@ def _fallback_response(
 ) -> dict[str, Any]:
     """Fallback when Clawdbot is unavailable. Still tries to be useful."""
     msg_lower = message.lower().strip()
+
+    # Completion detection
+    completion_phrases = {"done", "finished", "that's it", "all done", "i'm done",
+                          "workout complete", "that's the workout", "im done",
+                          "thats it", "i finished", "we're done", "wrap it up"}
+    if any(phrase in msg_lower for phrase in completion_phrases):
+        session.status = "completed"
+        set_rpes = [e.rpe for e in session.exercises if e.rpe is not None]
+        if set_rpes:
+            session.overall_rpe = round(sum(set_rpes) / len(set_rpes))
+        db.commit()
+
+        try:
+            from app.services.progressive_overload import update_profile_after_session
+            exercise_names = set(e.exercise_name for e in session.exercises if not e.is_warmup)
+            for name in exercise_names:
+                profile = (
+                    db.query(ExerciseProfile)
+                    .filter(ExerciseProfile.user_id == session.user_id, ExerciseProfile.exercise_name == name)
+                    .first()
+                )
+                if profile:
+                    logs = [e for e in session.exercises if e.exercise_name == name]
+                    update_profile_after_session(profile, logs, db)
+        except Exception as e:
+            logger.warning("Failed to update profiles after session: %s", e)
+
+        return {
+            "coach_response": "Great session. Everything's logged. Recovery starts now.",
+            "parsed_sets": [],
+            "session_completed": True,
+            "plan_updated": False,
+            "session_summary": None,
+        }
 
     # Basic greeting detection
     greetings = {"hello", "hi", "hey", "sup", "yo", "what's up", "whats up"}

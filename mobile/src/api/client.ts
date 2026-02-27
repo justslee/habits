@@ -191,6 +191,8 @@ export interface ChatResponseData {
   coach_response: string;
   parsed_sets: ExerciseLogData[];
   session_summary: string | null;
+  plan_updated?: boolean;
+  session_completed?: boolean;
 }
 
 export function getTodayWorkout(): Promise<WorkoutSession> {

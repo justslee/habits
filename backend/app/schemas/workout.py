@@ -82,3 +82,5 @@ class ChatResponse(BaseModel):
     coach_response: str
     parsed_sets: List[ExerciseLogCreate]
     session_summary: Optional[str] = None
+    plan_updated: bool = False
+    session_completed: bool = False

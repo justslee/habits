@@ -25,6 +25,7 @@ export default function WorkoutScreen() {
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [sessionComplete, setSessionComplete] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const fetchWorkout = useCallback(async () => {
@@ -32,6 +33,7 @@ export default function WorkoutScreen() {
       setError(null);
       const data = await getTodayWorkout();
       setSession(data);
+      if (data.status === 'completed') setSessionComplete(true);
       if (data.coach_notes && chatMessages.length === 0) {
         setChatMessages([{ role: 'coach', text: data.coach_notes }]);
       }
@@ -55,7 +57,12 @@ export default function WorkoutScreen() {
       setChatMessages(prev => [...prev, { role: 'coach', text: response.coach_response }]);
       const updated = await getTodayWorkout();
       setSession(updated);
-      haptic.success();
+      if (response.session_completed) {
+        haptic.success();
+        setSessionComplete(true);
+      } else {
+        haptic.success();
+      }
     } catch (err) {
       console.warn('Workout chat error:', err);
       setChatMessages(prev => [...prev, { role: 'coach', text: 'Connection error. Try again.' }]);
@@ -184,17 +191,24 @@ export default function WorkoutScreen() {
         </View>
       </ScrollView>
 
-      {/* Input */}
-      <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-        <TextInput style={s.chatInput} placeholder="bench 165 for 5..."
-          placeholderTextColor={colors.textTertiary}
-          value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendMessage}
-          returnKeyType="send" editable={!sending} />
-        <TouchableOpacity style={[s.sendBtn, (!chatInput.trim() || sending) && { opacity: 0.3 }]}
-          onPress={sendMessage} disabled={!chatInput.trim() || sending}>
-          <Ionicons name="arrow-up" size={18} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      {/* Completion banner or Input */}
+      {sessionComplete ? (
+        <View style={[s.completeBanner, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+          <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+          <Text style={s.completeText}>Workout Complete</Text>
+        </View>
+      ) : (
+        <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+          <TextInput style={s.chatInput} placeholder="bench 165 for 5..."
+            placeholderTextColor={colors.textTertiary}
+            value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendMessage}
+            returnKeyType="send" editable={!sending} />
+          <TouchableOpacity style={[s.sendBtn, (!chatInput.trim() || sending) && { opacity: 0.3 }]}
+            onPress={sendMessage} disabled={!chatInput.trim() || sending}>
+            <Ionicons name="arrow-up" size={18} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -256,4 +270,10 @@ const s = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent,
     alignItems: 'center', justifyContent: 'center',
   },
+
+  completeBanner: {
+    flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm,
+    backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  completeText: { ...typography.bodyBold, color: colors.success, flex: 1 },
 });
