@@ -6,6 +6,7 @@ Handles token refresh and graceful fallback.
 
 import json
 import logging
+import os
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -39,8 +40,8 @@ def _save_tokens(tokens: dict[str, Any]) -> None:
     TOKEN_PATH.write_text(json.dumps(tokens, indent=2))
 
 
-WHOOP_CLIENT_ID = "1e8ae741-dd42-4119-ad04-30c9f259b28d"
-WHOOP_CLIENT_SECRET = "f9ae26fe8c23a2b2ebced854b071e15fc329736b5e7b3b8748a5f5a81d75512a"
+WHOOP_CLIENT_ID = os.getenv("WHOOP_CLIENT_ID", "")
+WHOOP_CLIENT_SECRET = os.getenv("WHOOP_CLIENT_SECRET", "")
 
 
 async def _refresh_token(tokens: dict[str, Any]) -> dict[str, Any]:

@@ -1,13 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, ActivityIndicator, Platform,
+  View, Text, ScrollView, StyleSheet, ActivityIndicator,
   RefreshControl, TouchableOpacity,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getDashboardStats, getHeatmap, getDepthProgression, getExerciseProfiles,
   DashboardStats, HeatmapDay, DepthProgressionPoint, ExerciseProfileData,
+  API_URL, apiHeaders,
 } from '../api/client';
+import { haptic } from '../utils/haptics';
 import RadarChart from '../components/RadarChart';
 import DepthChart from '../components/DepthChart';
 import CompoundingChart from '../components/CompoundingChart';
@@ -42,8 +45,6 @@ function intensityLevel(count: number): number {
 
 type Section = 'mastery' | 'strength' | 'running';
 
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
-
 interface RunStats {
   total_runs: number;
   total_miles: number;
@@ -68,6 +69,7 @@ function fmtPace(s: number | null): string {
 }
 
 export default function ProgressScreen() {
+  const insets = useSafeAreaInsets();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
   const [depthData, setDepthData] = useState<DepthProgressionPoint[]>([]);
@@ -89,13 +91,13 @@ export default function ProgressScreen() {
       // Fetch run data
       try {
         const [rsResp, prResp] = await Promise.all([
-          fetch(`${API}/api/v1/runs/stats`),
-          fetch(`${API}/api/v1/runs/prs`),
+          fetch(`${API_URL}/api/v1/runs/stats`, { headers: apiHeaders() }),
+          fetch(`${API_URL}/api/v1/runs/prs`, { headers: apiHeaders() }),
         ]);
         if (rsResp.ok) setRunStats(await rsResp.json());
         if (prResp.ok) setPRs(await prResp.json());
-      } catch {}
-    } catch {} finally { setLoading(false); setRefreshing(false); }
+      } catch (err) { console.warn('Failed to fetch run data', err); }
+    } catch (err) { console.warn('Failed to fetch progress data', err); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -111,7 +113,7 @@ export default function ProgressScreen() {
   const grouped = MUSCLE_GROUPS.map(mg => ({ ...mg, exercises: profiles.filter(p => p.muscle_group === mg.key) })).filter(mg => mg.exercises.length > 0);
 
   return (
-    <ScrollView style={s.scroll} contentContainerStyle={s.container}
+    <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
       <Text style={s.screenTitle}>Progress</Text>
@@ -120,7 +122,7 @@ export default function ProgressScreen() {
         {(['mastery', 'strength', 'running'] as Section[]).map(key => (
           <TouchableOpacity key={key}
             style={[s.tab, activeSection === key && s.tabActive]}
-            onPress={() => setActiveSection(key)}>
+            onPress={() => { haptic.selection(); setActiveSection(key); }}>
             <Text style={[s.tabText, activeSection === key && s.tabTextActive]}>
               {key.charAt(0).toUpperCase() + key.slice(1)}
             </Text>
@@ -168,46 +170,104 @@ export default function ProgressScreen() {
 
           <View style={s.card}>
             <Text style={s.cardLabel}>PILLARS</Text>
-            {stats.pillar_breakdown.map((p, i) => (
-              <View key={p.pillar_id} style={[s.pillarRow, i < stats.pillar_breakdown.length - 1 && s.divider]}>
-                <View style={[s.dot, { backgroundColor: PILLAR_COLORS[p.pillar_id] || colors.textTertiary }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.pillarName}>{p.pillar_name}</Text>
-                  <Text style={s.pillarMeta}>{p.total_hours}h · {p.entry_count} entries{p.avg_depth_score != null ? ` · ${p.avg_depth_score}` : ''}</Text>
+            {stats.pillar_breakdown.map((p, i) => {
+              const pillarColor = PILLAR_COLORS[p.pillar_id] || colors.textTertiary;
+              const totalPct = stats.hours.all_time > 0 ? (p.total_hours / stats.hours.all_time) * 100 : 0;
+              return (
+                <View key={p.pillar_id} style={[s.pillarCard, i < stats.pillar_breakdown.length - 1 && s.divider]}>
+                  <View style={s.pillarHeader}>
+                    <View style={[s.dot, { backgroundColor: pillarColor }]} />
+                    <Text style={s.pillarName}>{p.pillar_name}</Text>
+                    <Text style={s.pillarHours}>{p.total_hours}h</Text>
+                  </View>
+                  {/* Progress bar showing share of total hours */}
+                  <View style={s.pillarBarTrack}>
+                    <View style={[s.pillarBarFill, { width: `${totalPct}%` as any, backgroundColor: pillarColor }]} />
+                  </View>
+                  <View style={s.pillarFooter}>
+                    <Text style={s.pillarMeta}>{p.entry_count} entries</Text>
+                    {p.avg_depth_score != null && (
+                      <Text style={s.pillarMeta}>depth {p.avg_depth_score}</Text>
+                    )}
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
           {stats.streaks.length > 0 && (
             <View style={s.card}>
               <Text style={s.cardLabel}>STREAKS</Text>
-              {stats.streaks.map((sk, i) => (
-                <View key={sk.id} style={[s.streakRow, i < stats.streaks.length - 1 && s.divider]}>
-                  <Text style={s.streakName}>{sk.pillar_name}</Text>
-                  <View style={{ flexDirection: 'row', gap: spacing.md, alignItems: 'center' }}>
-                    <Text style={{ ...typography.title3, color: colors.warning }}>{sk.current_streak}d</Text>
-                    <Text style={{ ...typography.micro, color: colors.textTertiary }}>best {sk.longest_streak}d</Text>
-                  </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -spacing.sm }}>
+                <View style={{ flexDirection: 'row', gap: spacing.md, paddingHorizontal: spacing.sm }}>
+                  {stats.streaks.map(sk => {
+                    const pct = sk.longest_streak > 0 ? Math.min(100, (sk.current_streak / sk.longest_streak) * 100) : 0;
+                    const pillarColor = PILLAR_COLORS[sk.pillar_id] || colors.warning;
+                    return (
+                      <View key={sk.id} style={s.streakRing}>
+                        {/* Ring background */}
+                        <View style={[s.ringTrack, { borderColor: 'rgba(255,255,255,0.05)' }]}>
+                          {/* Ring fill - simulated with border */}
+                          <View style={[s.ringTrack, {
+                            borderColor: pillarColor,
+                            borderTopColor: pct > 75 ? pillarColor : 'transparent',
+                            borderRightColor: pct > 50 ? pillarColor : 'transparent',
+                            borderBottomColor: pct > 25 ? pillarColor : 'transparent',
+                            position: 'absolute',
+                          }]} />
+                          <Text style={s.ringNum}>{sk.current_streak}</Text>
+                        </View>
+                        <Text style={s.ringLabel} numberOfLines={1}>{sk.pillar_name.split(' ')[0]}</Text>
+                        <Text style={s.ringBest}>best {sk.longest_streak}d</Text>
+                      </View>
+                    );
+                  })}
                 </View>
-              ))}
+              </ScrollView>
             </View>
           )}
 
           <View style={s.card}>
             <Text style={s.cardLabel}>ACTIVITY — 6 MONTHS</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={s.heatmapGrid}>
-                {heatmapGrid.map((week, wi) => (
-                  <View key={wi} style={{ gap: 2 }}>
-                    {week.map((day, di) => (
-                      <View key={`${wi}-${di}`} style={[s.heatCell,
-                        { backgroundColor: day ? HEATMAP_COLORS[intensityLevel(day.count)] : colors.card }]} />
-                    ))}
-                  </View>
-                ))}
+              <View>
+                {/* Month labels */}
+                <View style={s.heatmapMonths}>
+                  {heatmapGrid.map((week, wi) => {
+                    if (!week[0]) return <View key={wi} style={{ width: 14 }} />;
+                    const d = new Date(week[0].date + 'T00:00:00');
+                    const isFirstWeekOfMonth = d.getDate() <= 7;
+                    return (
+                      <View key={wi} style={{ width: 14 }}>
+                        {isFirstWeekOfMonth && (
+                          <Text style={s.heatMonthLabel}>
+                            {d.toLocaleDateString('en-US', { month: 'short' })}
+                          </Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+                <View style={s.heatmapGrid}>
+                  {heatmapGrid.map((week, wi) => (
+                    <View key={wi} style={{ gap: 2 }}>
+                      {week.map((day, di) => (
+                        <View key={`${wi}-${di}`} style={[s.heatCell,
+                          { backgroundColor: day ? HEATMAP_COLORS[intensityLevel(day.count)] : colors.card }]} />
+                      ))}
+                    </View>
+                  ))}
+                </View>
               </View>
             </ScrollView>
+            {/* Legend */}
+            <View style={s.heatLegend}>
+              <Text style={s.heatLegendLabel}>Less</Text>
+              {HEATMAP_COLORS.map((c, i) => (
+                <View key={i} style={[s.heatCell, { backgroundColor: c }]} />
+              ))}
+              <Text style={s.heatLegendLabel}>More</Text>
+            </View>
           </View>
         </>
       )}
@@ -363,7 +423,7 @@ function buildHeatmapGrid(data: HeatmapDay[]): (HeatmapDay | null)[][] {
 
 const s = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bg },
-  container: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48, paddingBottom: 40 },
+  container: { padding: spacing.lg, paddingBottom: 40 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.md },
 
@@ -379,6 +439,7 @@ const s = StyleSheet.create({
 
   card: { ...cardStyle, marginBottom: spacing.md },
   cardLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
+  sectionHeader: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
   divider: { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: spacing.md, marginBottom: spacing.md },
 
   statsGrid: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
@@ -389,16 +450,34 @@ const s = StyleSheet.create({
   statCardValue: { fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
   statCardLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 4 },
 
-  pillarRow: { flexDirection: 'row', alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.md },
-  pillarName: { ...typography.body, color: colors.text, fontWeight: '600' },
-  pillarMeta: { ...typography.caption, color: colors.textTertiary, marginTop: 2 },
+  pillarCard: { paddingVertical: spacing.sm },
+  pillarHeader: { flexDirection: 'row', alignItems: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.sm },
+  pillarName: { ...typography.body, color: colors.text, fontWeight: '600', flex: 1 },
+  pillarHours: { ...typography.bodyBold, color: colors.text, fontVariant: ['tabular-nums'] },
+  pillarBarTrack: {
+    height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.05)',
+    marginTop: spacing.xs, marginLeft: spacing.md + 8,
+  },
+  pillarBarFill: { height: '100%', borderRadius: 2 },
+  pillarFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, marginLeft: spacing.md + 8 },
+  pillarMeta: { ...typography.caption, color: colors.textTertiary },
 
-  streakRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  streakName: { ...typography.body, color: colors.text },
+  streakRing: { alignItems: 'center', width: 72 },
+  ringTrack: {
+    width: 56, height: 56, borderRadius: 28, borderWidth: 3,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  ringNum: { fontSize: 20, fontWeight: '700', color: colors.text },
+  ringLabel: { ...typography.micro, color: colors.textSecondary, marginTop: 4 },
+  ringBest: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
 
+  heatmapMonths: { flexDirection: 'row', gap: 2, marginBottom: 2, height: 16 },
+  heatMonthLabel: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
   heatmapGrid: { flexDirection: 'row', gap: 2, paddingVertical: spacing.sm },
   heatCell: { width: 12, height: 12, borderRadius: 2, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.03)' },
+  heatLegend: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginTop: spacing.xs },
+  heatLegendLabel: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
 
   groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   groupTitle: { ...typography.title3, color: colors.text },

@@ -23,11 +23,19 @@ export interface RunState {
   isPaused: boolean;
   startTime: number;
   elapsedMs: number;
+  pausedMs: number;
   distanceMiles: number;
   currentPaceSeconds: number | null; // sec/mile
+  currentSpeedMph: number;
   elevationGainFt: number;
   points: GpsPoint[];
   splits: SplitData[];
+  /** Elapsed time at the last mile boundary (for accurate split calculation). */
+  lastSplitElapsedMs: number;
+  /** Elevation at the last mile boundary. */
+  lastSplitElevationFt: number;
+  /** Auto-pause tracking. */
+  autoPausedAt: number | null;
 }
 
 export interface SplitData {
@@ -71,17 +79,27 @@ export async function requestLocationPermissions(): Promise<boolean> {
 /**
  * Create a new empty run state.
  */
+/** Speed threshold for auto-pause in mph (~0.5 m/s walking pace). */
+const AUTO_PAUSE_SPEED_MPH = 1.0;
+/** Minimum speed to resume from auto-pause. */
+const AUTO_RESUME_SPEED_MPH = 1.5;
+
 export function createRunState(): RunState {
   return {
     isTracking: false,
     isPaused: false,
     startTime: 0,
     elapsedMs: 0,
+    pausedMs: 0,
     distanceMiles: 0,
     currentPaceSeconds: null,
+    currentSpeedMph: 0,
     elevationGainFt: 0,
     points: [],
     splits: [],
+    lastSplitElapsedMs: 0,
+    lastSplitElevationFt: 0,
+    autoPausedAt: null,
   };
 }
 
@@ -100,9 +118,28 @@ export function processGpsPoint(state: RunState, point: GpsPoint): RunState {
       prevPoint.latitude, prevPoint.longitude,
       point.latitude, point.longitude,
     );
-    newState.distanceMiles = state.distanceMiles + distMeters * METERS_TO_MILES;
 
-    // Elevation gain
+    // Instantaneous speed (mph)
+    const dtSec = (point.timestamp - prevPoint.timestamp) / 1000;
+    const speedMph = dtSec > 0 ? (distMeters * METERS_TO_MILES) / (dtSec / 3600) : 0;
+    newState.currentSpeedMph = speedMph;
+
+    // Auto-pause detection
+    if (state.autoPausedAt === null && speedMph < AUTO_PAUSE_SPEED_MPH && state.points.length > 5) {
+      // Trigger auto-pause
+      newState.autoPausedAt = point.timestamp;
+    } else if (state.autoPausedAt !== null && speedMph > AUTO_RESUME_SPEED_MPH) {
+      // Resume from auto-pause — accumulate paused time
+      newState.pausedMs = state.pausedMs + (point.timestamp - state.autoPausedAt);
+      newState.autoPausedAt = null;
+    }
+
+    // Only accumulate distance when not auto-paused
+    if (state.autoPausedAt === null) {
+      newState.distanceMiles = state.distanceMiles + distMeters * METERS_TO_MILES;
+    }
+
+    // Elevation gain (always track)
     if (point.altitude !== null && prevPoint.altitude !== null) {
       const elevDiff = (point.altitude - prevPoint.altitude) * METERS_TO_FEET;
       if (elevDiff > 0) {
@@ -127,27 +164,28 @@ export function processGpsPoint(state: RunState, point: GpsPoint): RunState {
     }
   }
 
-  // Elapsed time
+  // Elapsed time (subtract accumulated paused time)
   if (state.startTime > 0 && !state.isPaused) {
-    newState.elapsedMs = point.timestamp - state.startTime;
+    newState.elapsedMs = point.timestamp - state.startTime - newState.pausedMs;
   }
 
-  // Split detection
+  // Split detection — calculate pace for THIS mile only
   const prevMile = Math.floor(state.distanceMiles);
   const currentMile = Math.floor(newState.distanceMiles);
   if (currentMile > prevMile && currentMile > 0) {
-    // Crossed a mile boundary
-    const splitPace = newState.elapsedMs > 0
-      ? Math.round((newState.elapsedMs / 1000) / newState.distanceMiles)
-      : 0;
+    const splitElapsedMs = newState.elapsedMs - state.lastSplitElapsedMs;
+    // Each split is exactly 1 mile, so pace = time for that mile
+    const splitPace = Math.round(splitElapsedMs / 1000);
+    const splitElevChange = newState.elevationGainFt - state.lastSplitElevationFt;
 
-    // Calculate this split's pace more precisely using points near mile boundaries
     const splitData: SplitData = {
       mileNumber: currentMile,
       paceSeconds: splitPace,
-      elevationChangeFt: 0, // simplified for now
+      elevationChangeFt: Math.round(splitElevChange),
     };
     newState.splits = [...state.splits, splitData];
+    newState.lastSplitElapsedMs = newState.elapsedMs;
+    newState.lastSplitElevationFt = newState.elevationGainFt;
   }
 
   return newState;
@@ -225,4 +263,36 @@ export async function stopBackgroundTracking(): Promise<void> {
   if (isTracking) {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK);
   }
+}
+
+/**
+ * Subscribe to foreground location updates.
+ * Returns a subscription handle — call .remove() to unsubscribe.
+ */
+export async function watchLocation(
+  onPoint: (point: GpsPoint) => void,
+): Promise<{ remove: () => void }> {
+  if (Platform.OS === 'web') return { remove: () => {} };
+  const sub = await Location.watchPositionAsync(
+    { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
+    loc => {
+      onPoint({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        altitude: loc.coords.altitude,
+        timestamp: loc.timestamp,
+      });
+    },
+  );
+  return sub;
+}
+
+/**
+ * Consume any background location points that were collected while the screen was locked.
+ * Returns the points and clears the buffer.
+ */
+export function consumeBackgroundPoints(): GpsPoint[] {
+  const pts = (globalThis as any).__backgroundLocations || [];
+  (globalThis as any).__backgroundLocations = [];
+  return pts;
 }

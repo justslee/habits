@@ -23,7 +23,7 @@ export const colors = {
   error: '#EF4444',
   info: '#3B82F6',
 
-  // Pillar colors
+  // Pillar colors — single source of truth
   pillarQuant: '#8B5CF6',
   pillarMacro: '#06B6D4',
   pillarML: '#F97316',
@@ -39,12 +39,22 @@ export const colors = {
   chartFill: 'rgba(99,102,241,0.06)',
 };
 
+/** Pillar colors by DB id (1-5). */
 export const PILLAR_COLORS: Record<number, string> = {
   1: colors.pillarQuant,
   2: colors.pillarMacro,
   3: colors.pillarML,
   4: colors.pillarAI,
   5: colors.pillarSpeaking,
+};
+
+/** Pillar colors by full name (for when backend returns name strings). */
+export const PILLAR_COLORS_BY_NAME: Record<string, string> = {
+  'Quantitative Finance': colors.pillarQuant,
+  'Macro & Qualitative Investing': colors.pillarMacro,
+  'Machine Learning (Math)': colors.pillarML,
+  'AI Engineering & Deployment': colors.pillarAI,
+  'Public Speaking & Communication': colors.pillarSpeaking,
 };
 
 // --- Spacing: 8px grid ---

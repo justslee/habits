@@ -3,31 +3,19 @@
  *
  * Today: motivational quote, workout preview, smart todos, daily habits
  * Check-In: existing deep learning session logger
- *
- * Inspired by Things 3 (clean todos), Streaks (habit rings),
- * and Todoist (quick add). Dark, minimal, haptic-rich.
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Platform, RefreshControl, KeyboardAvoidingView, Alert, Animated,
+  Platform, RefreshControl, KeyboardAvoidingView, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ExpoHaptics from 'expo-haptics';
-
-// Safe haptics wrapper — no-ops on web
-const haptic = {
-  light: () => { if (Platform.OS !== 'web') ExpoHaptics.impactAsync(ExpoHaptics.ImpactFeedbackStyle.Light).catch(() => {}); },
-  medium: () => { if (Platform.OS !== 'web') ExpoHaptics.impactAsync(ExpoHaptics.ImpactFeedbackStyle.Medium).catch(() => {}); },
-  success: () => { if (Platform.OS !== 'web') ExpoHaptics.notificationAsync(ExpoHaptics.NotificationFeedbackType.Success).catch(() => {}); },
-  warning: () => { if (Platform.OS !== 'web') ExpoHaptics.notificationAsync(ExpoHaptics.NotificationFeedbackType.Warning).catch(() => {}); },
-  selection: () => { if (Platform.OS !== 'web') ExpoHaptics.selectionAsync().catch(() => {}); },
-};
-import { colors, spacing, typography, radius } from '../theme';
+import { haptic } from '../utils/haptics';
+import { colors, spacing, typography, radius, PILLAR_COLORS_BY_NAME } from '../theme';
+import { API_URL, apiHeaders } from '../api/client';
 import CheckInContent from './CheckInScreen';
-
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Types
 interface Todo {
@@ -65,14 +53,6 @@ interface DailySummary {
   whoop_recovery: number | null;
 }
 
-const PILLAR_COLORS: Record<string, string> = {
-  'Quantitative Finance': '#3B82F6',
-  'Macro & Qualitative Investing': '#10B981',
-  'Machine Learning (Math)': '#F59E0B',
-  'AI Engineering & Deployment': '#8B5CF6',
-  'Public Speaking & Communication': '#EC4899',
-};
-
 const DAY_TYPE_COLORS: Record<string, string> = {
   push: '#EF4444', pull: '#3B82F6', legs: '#10B981',
   rest: '#6B7280', cardio: '#F59E0B',
@@ -81,6 +61,7 @@ const DAY_TYPE_COLORS: Record<string, string> = {
 type SubTab = 'today' | 'checkin';
 
 export default function DailyScreen() {
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<SubTab>('today');
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -95,14 +76,16 @@ export default function DailyScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const resp = await fetch(`${API}/api/v1/daily/summary`);
+      const resp = await fetch(`${API_URL}/api/v1/daily/summary`, { headers: apiHeaders() });
       if (resp.ok) {
         const data: DailySummary = await resp.json();
         setSummary(data);
         setTodos(data.todos);
         setHabits(data.habits);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to load daily summary:', err);
+    }
     setLoading(false);
   }, []);
 
@@ -120,9 +103,9 @@ export default function DailyScreen() {
     if (!text) return;
     setAddingTodo(true);
     try {
-      const resp = await fetch(`${API}/api/v1/daily/todos`, {
+      const resp = await fetch(`${API_URL}/api/v1/daily/todos`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders(),
         body: JSON.stringify({ text }),
       });
       if (resp.ok) {
@@ -131,19 +114,26 @@ export default function DailyScreen() {
         setNewTodoText('');
         haptic.light();
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to add todo:', err);
+    }
     setAddingTodo(false);
   };
 
   const toggleTodo = async (id: number) => {
     try {
-      const resp = await fetch(`${API}/api/v1/daily/todos/${id}/complete`, { method: 'POST' });
+      const resp = await fetch(`${API_URL}/api/v1/daily/todos/${id}/complete`, {
+        method: 'POST',
+        headers: apiHeaders(),
+      });
       if (resp.ok) {
         const updated = await resp.json();
         setTodos(prev => prev.map(t => t.id === id ? updated : t));
         updated.completed ? haptic.success() : haptic.warning();
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to toggle todo:', err);
+    }
   };
 
   const deleteTodo = (id: number, text: string) => {
@@ -153,9 +143,12 @@ export default function DailyScreen() {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
           try {
-            await fetch(`${API}/api/v1/daily/todos/${id}`, { method: 'DELETE' });
+            await fetch(`${API_URL}/api/v1/daily/todos/${id}`, { method: 'DELETE', headers: apiHeaders() });
             setTodos(prev => prev.filter(t => t.id !== id));
-          } catch {}
+            haptic.light();
+          } catch (err) {
+            console.warn('Failed to delete todo:', err);
+          }
         },
       },
     ]);
@@ -164,22 +157,27 @@ export default function DailyScreen() {
   // ---- Habit Actions ----
   const toggleHabit = async (id: number) => {
     try {
-      const resp = await fetch(`${API}/api/v1/daily/habits/${id}/toggle`, { method: 'POST' });
+      const resp = await fetch(`${API_URL}/api/v1/daily/habits/${id}/toggle`, {
+        method: 'POST',
+        headers: apiHeaders(),
+      });
       if (resp.ok) {
         const updated = await resp.json();
         setHabits(prev => prev.map(h => h.id === id ? updated : h));
         updated.completed_today ? haptic.medium() : haptic.light();
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to toggle habit:', err);
+    }
   };
 
   const addHabit = async () => {
     const name = newHabitName.trim();
     if (!name) return;
     try {
-      const resp = await fetch(`${API}/api/v1/daily/habits`, {
+      const resp = await fetch(`${API_URL}/api/v1/daily/habits`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders(),
         body: JSON.stringify({ name }),
       });
       if (resp.ok) {
@@ -189,7 +187,9 @@ export default function DailyScreen() {
         setShowAddHabit(false);
         haptic.light();
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to add habit:', err);
+    }
   };
 
   const deleteHabit = (id: number, name: string) => {
@@ -199,9 +199,12 @@ export default function DailyScreen() {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
           try {
-            await fetch(`${API}/api/v1/daily/habits/${id}`, { method: 'DELETE' });
+            await fetch(`${API_URL}/api/v1/daily/habits/${id}`, { method: 'DELETE', headers: apiHeaders() });
             setHabits(prev => prev.filter(h => h.id !== id));
-          } catch {}
+            haptic.light();
+          } catch (err) {
+            console.warn('Failed to delete habit:', err);
+          }
         },
       },
     ]);
@@ -216,90 +219,90 @@ export default function DailyScreen() {
   // ===== TODAY TAB =====
   const renderToday = () => (
     <ScrollView
-      style={s.scroll}
-      contentContainerStyle={s.scrollContent}
+      style={st.scroll}
+      contentContainerStyle={st.scrollContent}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
       {/* Header with date + progress */}
-      <View style={s.header}>
+      <View style={st.header}>
         <View>
-          <Text style={s.dateLabel}>
+          <Text style={st.dateLabel}>
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </Text>
-          <Text style={s.title}>Today</Text>
+          <Text style={st.title}>Today</Text>
         </View>
         {totalItems > 0 && (
-          <View style={s.progressPill}>
-            <Text style={s.progressText}>{totalComplete}/{totalItems}</Text>
+          <View style={st.progressPill}>
+            <Text style={st.progressText}>{totalComplete}/{totalItems}</Text>
           </View>
         )}
       </View>
 
       {/* Quote card */}
       {summary && (
-        <View style={s.quoteCard}>
+        <View style={st.quoteCard}>
           <Ionicons name="flame-outline" size={16} color={colors.accent} style={{ marginBottom: 6 }} />
-          <Text style={s.quoteText}>"{summary.quote}"</Text>
-          <Text style={s.quoteAuthor}>— {summary.quote_author}</Text>
+          <Text style={st.quoteText}>"{summary.quote}"</Text>
+          <Text style={st.quoteAuthor}>— {summary.quote_author}</Text>
         </View>
       )}
 
       {/* Workout + Recovery row */}
       {summary && (summary.workout_preview || summary.whoop_recovery != null) && (
-        <View style={s.contextRow}>
+        <View style={st.contextRow}>
           {summary.workout_preview && (
-            <View style={[s.contextChip, {
+            <View style={[st.contextChip, {
               borderColor: (DAY_TYPE_COLORS[summary.workout_day_type || ''] || colors.accent) + '40',
             }]}>
               <Ionicons name="barbell-outline" size={14}
                 color={DAY_TYPE_COLORS[summary.workout_day_type || ''] || colors.accent} />
-              <Text style={s.contextText}>{summary.workout_preview}</Text>
+              <Text style={st.contextText}>{summary.workout_preview}</Text>
             </View>
           )}
           {summary.whoop_recovery != null && (
-            <View style={[s.contextChip, {
+            <View style={[st.contextChip, {
               borderColor: summary.whoop_recovery >= 67 ? '#10B98140'
                 : summary.whoop_recovery >= 34 ? '#F59E0B40' : '#EF444440',
             }]}>
               <Ionicons name="heart-outline" size={14}
                 color={summary.whoop_recovery >= 67 ? '#10B981'
                   : summary.whoop_recovery >= 34 ? '#F59E0B' : '#EF4444'} />
-              <Text style={s.contextText}>{Math.round(summary.whoop_recovery)}% recovery</Text>
+              <Text style={st.contextText}>{Math.round(summary.whoop_recovery)}% recovery</Text>
             </View>
           )}
         </View>
       )}
 
       {/* TODOS section */}
-      <View style={s.sectionHeader}>
+      <View style={st.sectionHeader}>
         <Ionicons name="checkbox-outline" size={16} color={colors.textSecondary} />
-        <Text style={s.sectionTitle}>TASKS</Text>
-        <Text style={s.sectionCount}>{todosComplete}/{todos.length}</Text>
+        <Text style={st.sectionTitle}>TASKS</Text>
+        <Text style={st.sectionCount}>{todosComplete}/{todos.length}</Text>
       </View>
 
       {todos.map(todo => {
-        const pillarColor = todo.pillar_name ? (PILLAR_COLORS[todo.pillar_name] || colors.accent) : null;
+        const pillarColor = todo.pillar_name ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent) : null;
         return (
           <TouchableOpacity
             key={todo.id}
-            style={s.todoRow}
+            style={st.todoRow}
             onPress={() => toggleTodo(todo.id)}
             onLongPress={() => deleteTodo(todo.id, todo.text)}
           >
             <View style={[
-              s.todoCheck,
+              st.todoCheck,
               todo.completed && { backgroundColor: colors.success, borderColor: colors.success },
             ]}>
               {todo.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
             </View>
-            <View style={s.todoContent}>
-              <Text style={[s.todoText, todo.completed && s.todoTextDone]} numberOfLines={2}>
+            <View style={st.todoContent}>
+              <Text style={[st.todoText, todo.completed && st.todoTextDone]} numberOfLines={2}>
                 {todo.text}
               </Text>
               {pillarColor && (
-                <View style={[s.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
-                  <View style={[s.pillarDot, { backgroundColor: pillarColor }]} />
-                  <Text style={[s.pillarTagText, { color: pillarColor }]}>
+                <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
+                  <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
+                  <Text style={[st.pillarTagText, { color: pillarColor }]}>
                     {todo.pillar_name}
                   </Text>
                 </View>
@@ -310,10 +313,10 @@ export default function DailyScreen() {
       })}
 
       {/* Quick add todo */}
-      <View style={s.addRow}>
+      <View style={st.addRow}>
         <TextInput
           ref={inputRef}
-          style={s.addInput}
+          style={st.addInput}
           placeholder="Add a task..."
           placeholderTextColor={colors.textTertiary}
           value={newTodoText}
@@ -322,26 +325,26 @@ export default function DailyScreen() {
           returnKeyType="done"
         />
         {newTodoText.trim().length > 0 && (
-          <TouchableOpacity style={s.addBtn} onPress={addTodo} disabled={addingTodo}>
+          <TouchableOpacity style={st.addBtn} onPress={addTodo} disabled={addingTodo}>
             <Ionicons name="arrow-up-circle" size={28} color={colors.accent} />
           </TouchableOpacity>
         )}
       </View>
 
       {/* HABITS section */}
-      <View style={[s.sectionHeader, { marginTop: spacing.xl }]}>
+      <View style={[st.sectionHeader, { marginTop: spacing.xl }]}>
         <Ionicons name="flame-outline" size={16} color={colors.textSecondary} />
-        <Text style={s.sectionTitle}>HABITS</Text>
-        <Text style={s.sectionCount}>{habitsComplete}/{habits.length}</Text>
-        <TouchableOpacity onPress={() => setShowAddHabit(!showAddHabit)} style={{ marginLeft: 'auto' }}>
+        <Text style={st.sectionTitle}>HABITS</Text>
+        <Text style={st.sectionCount}>{habitsComplete}/{habits.length}</Text>
+        <TouchableOpacity onPress={() => { setShowAddHabit(!showAddHabit); haptic.selection(); }} style={{ marginLeft: 'auto' }}>
           <Ionicons name={showAddHabit ? 'close' : 'add'} size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {showAddHabit && (
-        <View style={s.addRow}>
+        <View style={st.addRow}>
           <TextInput
-            style={s.addInput}
+            style={st.addInput}
             placeholder="New habit name..."
             placeholderTextColor={colors.textTertiary}
             value={newHabitName}
@@ -351,7 +354,7 @@ export default function DailyScreen() {
             autoFocus
           />
           {newHabitName.trim().length > 0 && (
-            <TouchableOpacity style={s.addBtn} onPress={addHabit}>
+            <TouchableOpacity style={st.addBtn} onPress={addHabit}>
               <Ionicons name="arrow-up-circle" size={28} color={colors.accent} />
             </TouchableOpacity>
           )}
@@ -363,25 +366,25 @@ export default function DailyScreen() {
         return (
           <TouchableOpacity
             key={habit.id}
-            style={s.habitRow}
+            style={st.habitRow}
             onPress={() => toggleHabit(habit.id)}
             onLongPress={() => deleteHabit(habit.id, habit.name)}
           >
             <View style={[
-              s.habitCircle,
+              st.habitCircle,
               { borderColor: habitColor },
               habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
             ]}>
               {habit.completed_today && <Ionicons name="checkmark" size={16} color="#fff" />}
             </View>
-            <View style={s.habitInfo}>
-              <Text style={[s.habitName, habit.completed_today && { color: colors.textTertiary }]}>
+            <View style={st.habitInfo}>
+              <Text style={[st.habitName, habit.completed_today && { color: colors.textTertiary }]}>
                 {habit.name}
               </Text>
               {habit.current_streak > 0 && (
-                <View style={s.streakBadge}>
+                <View style={st.streakBadge}>
                   <Ionicons name="flame" size={10} color="#F59E0B" />
-                  <Text style={s.streakText}>{habit.current_streak}d</Text>
+                  <Text style={st.streakText}>{habit.current_streak}d</Text>
                 </View>
               )}
             </View>
@@ -390,9 +393,9 @@ export default function DailyScreen() {
       })}
 
       {habits.length === 0 && !showAddHabit && (
-        <TouchableOpacity style={s.emptyHabits} onPress={() => setShowAddHabit(true)}>
+        <TouchableOpacity style={st.emptyHabits} onPress={() => setShowAddHabit(true)}>
           <Ionicons name="add-circle-outline" size={24} color={colors.textTertiary} />
-          <Text style={s.emptyHabitsText}>Add your first daily habit</Text>
+          <Text style={st.emptyHabitsText}>Add your first daily habit</Text>
         </TouchableOpacity>
       )}
 
@@ -402,18 +405,18 @@ export default function DailyScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={s.container}
+      style={st.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* Sub-tab bar */}
-      <View style={s.tabBar}>
+      <View style={[st.tabBar, { paddingTop: insets.top + spacing.xs }]}>
         {(['today', 'checkin'] as SubTab[]).map(tab => (
           <TouchableOpacity
             key={tab}
-            style={[s.tab, activeTab === tab && s.tabActive]}
+            style={[st.tab, activeTab === tab && st.tabActive]}
             onPress={() => { setActiveTab(tab); haptic.selection(); }}
           >
-            <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
+            <Text style={[st.tabText, activeTab === tab && st.tabTextActive]}>
               {tab === 'today' ? 'Today' : 'Check-In'}
             </Text>
           </TouchableOpacity>
@@ -425,15 +428,15 @@ export default function DailyScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
   scrollContent: { padding: spacing.lg, paddingTop: spacing.md },
 
-  // Tab bar
+  // Tab bar — paddingTop is set dynamically via insets
   tabBar: {
     flexDirection: 'row', paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === 'ios' ? 54 : 40, paddingBottom: spacing.sm,
+    paddingBottom: spacing.sm,
     backgroundColor: colors.bg, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },

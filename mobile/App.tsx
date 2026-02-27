@@ -3,8 +3,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform, View } from 'react-native';
-import CheckInScreen from './src/screens/CheckInScreen';
+import { View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import DailyScreen from './src/screens/DailyScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
 import RunScreen from './src/screens/RunScreen';
@@ -30,7 +30,6 @@ function RunStackScreen() {
 
 const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
   Daily: { active: 'today', inactive: 'today-outline' },
-  CheckIn: { active: 'add-circle', inactive: 'add-circle-outline' },
   Train: { active: 'barbell', inactive: 'barbell-outline' },
   Run: { active: 'footsteps', inactive: 'footsteps-outline' },
   Progress: { active: 'stats-chart', inactive: 'stats-chart-outline' },
@@ -38,49 +37,49 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          headerShown: false,
-          tabBarStyle: {
-            backgroundColor: colors.bg,
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-            elevation: 0,
-            height: Platform.OS === 'ios' ? 92 : 68,
-            paddingBottom: Platform.OS === 'ios' ? 32 : 12,
-            paddingTop: 8,
-          },
-          tabBarActiveTintColor: colors.accent,
-          tabBarInactiveTintColor: colors.textTertiary,
-          tabBarLabelStyle: {
-            fontSize: 10,
-            fontWeight: '600',
-            marginTop: 2,
-            letterSpacing: 0.3,
-          },
-          tabBarIcon: ({ focused, color }) => {
-            const icons = TAB_ICONS[route.name];
-            const iconName = focused ? icons.active : icons.inactive;
-            return (
-              <View style={focused ? {
-                backgroundColor: colors.accentMuted,
-                borderRadius: 12,
-                paddingHorizontal: 14,
-                paddingVertical: 4,
-              } : undefined}>
-                <Ionicons name={iconName} size={22} color={color} />
-              </View>
-            );
-          },
-        })}
-      >
-        <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
-        <Tab.Screen name="Train" component={WorkoutScreen} options={{ tabBarLabel: 'Train' }} />
-        <Tab.Screen name="Run" component={RunStackScreen} options={{ tabBarLabel: 'Run' }} />
-        <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
-      </Tab.Navigator>
-      <StatusBar style="light" />
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <Tab.Navigator
+          screenOptions={({ route }) => ({
+            headerShown: false,
+            tabBarStyle: {
+              backgroundColor: colors.bg,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+              elevation: 0,
+              paddingTop: 8,
+            },
+            tabBarActiveTintColor: colors.accent,
+            tabBarInactiveTintColor: colors.textTertiary,
+            tabBarLabelStyle: {
+              fontSize: 10,
+              fontWeight: '600',
+              marginTop: 2,
+              letterSpacing: 0.3,
+            },
+            tabBarIcon: ({ focused, color }) => {
+              const icons = TAB_ICONS[route.name];
+              const iconName = focused ? icons.active : icons.inactive;
+              return (
+                <View style={focused ? {
+                  backgroundColor: colors.accentMuted,
+                  borderRadius: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 4,
+                } : undefined}>
+                  <Ionicons name={iconName} size={22} color={color} />
+                </View>
+              );
+            },
+          })}
+        >
+          <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
+          <Tab.Screen name="Train" component={WorkoutScreen} options={{ tabBarLabel: 'Train' }} />
+          <Tab.Screen name="Run" component={RunStackScreen} options={{ tabBarLabel: 'Run' }} />
+          <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
+        </Tab.Navigator>
+        <StatusBar style="light" />
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }

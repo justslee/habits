@@ -16,6 +16,7 @@ const pwaMeta = `
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
     <style>
       html, body, #root {
         background-color: #09090F;
@@ -48,6 +49,16 @@ fs.writeFileSync(file, html);
 const manifest = path.join(__dirname, '..', 'web', 'manifest.json');
 if (fs.existsSync(manifest)) {
   fs.copyFileSync(manifest, path.join(__dirname, '..', 'dist', 'manifest.json'));
+}
+
+// Copy PWA icons to dist
+const iconsDir = path.join(__dirname, '..', 'web', 'icons');
+const distIcons = path.join(__dirname, '..', 'dist', 'icons');
+if (fs.existsSync(iconsDir)) {
+  fs.mkdirSync(distIcons, { recursive: true });
+  for (const f of fs.readdirSync(iconsDir)) {
+    fs.copyFileSync(path.join(iconsDir, f), path.join(distIcons, f));
+  }
 }
 
 console.log('Web fixes applied');

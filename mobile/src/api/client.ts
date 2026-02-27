@@ -3,6 +3,7 @@
  */
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
 
 export interface EntryCreatePayload {
   description: string;
@@ -49,8 +50,12 @@ export interface EntryResponse {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+  };
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...options,
   });
   if (!res.ok) {
@@ -59,6 +64,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   return res.json();
 }
+
+/** Build headers for raw fetch calls (used by screens not yet migrated to client functions). */
+export function apiHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+  };
+}
+
+export { API_URL };
 
 export function createEntry(payload: EntryCreatePayload): Promise<EntryResponse> {
   return request('/api/v1/entries', {

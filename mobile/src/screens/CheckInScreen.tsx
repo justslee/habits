@@ -3,9 +3,11 @@ import {
   View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { createEntry, suggestTags, PillarSuggestion } from '../api/client';
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { haptic } from '../utils/haptics';
 
 const PILLARS = [
   { id: 1, name: 'Quant Finance', short: 'QF', color: colors.pillarQuant },
@@ -19,6 +21,7 @@ const TIME_PRESETS = ['15m', '30m', '1h', '1.5h', '2h', '3h', '4h+'];
 const TIME_MINUTES: Record<string, number> = { '15m': 15, '30m': 30, '1h': 60, '1.5h': 90, '2h': 120, '3h': 180, '4h+': 240 };
 
 export default function CheckInScreen() {
+  const insets = useSafeAreaInsets();
   const [description, setDescription] = useState('');
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [customMinutes, setCustomMinutes] = useState('');
@@ -45,12 +48,15 @@ export default function CheckInScreen() {
             const autoIds = res.suggestions.filter((s) => s.confidence >= 0.6).map((s) => s.pillar_id);
             if (autoIds.length > 0) setSelectedPillars(autoIds);
           }
-        } catch {} finally { setSuggestingTags(false); }
+        } catch (err) {
+          console.warn('CheckIn suggestTags error:', err);
+        } finally { setSuggestingTags(false); }
       }, 1000);
     }
   }, [selectedPillars.length]);
 
   const togglePillar = (id: number) => {
+    haptic.selection();
     setSelectedPillars(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
   };
 
@@ -67,8 +73,10 @@ export default function CheckInScreen() {
         pillar_tags: selectedPillars, difficulty_rating: difficulty,
         energy_level: energy, key_takeaway: takeaway.trim(),
       });
+      haptic.success();
       setSubmitted(true);
     } catch (err: unknown) {
+      console.warn('CheckIn submit error:', err);
       Alert.alert('Failed', err instanceof Error ? err.message : 'Unknown error');
     } finally { setSubmitting(false); }
   };
@@ -87,7 +95,7 @@ export default function CheckInScreen() {
         </View>
         <Text style={s.successTitle}>Logged</Text>
         <Text style={s.successSub}>Entry submitted for evaluation</Text>
-        <TouchableOpacity style={s.primaryBtn} onPress={resetForm}>
+        <TouchableOpacity style={s.primaryBtn} onPress={() => { haptic.light(); resetForm(); }}>
           <Text style={s.primaryBtnText}>Log Another</Text>
         </TouchableOpacity>
       </View>
@@ -95,7 +103,7 @@ export default function CheckInScreen() {
   }
 
   return (
-    <ScrollView style={s.scroll} contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
+    <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + 16 }]} keyboardShouldPersistTaps="handled">
       <Text style={s.greeting}>Check-In</Text>
 
       {/* Description */}
@@ -112,7 +120,7 @@ export default function CheckInScreen() {
         {TIME_PRESETS.map(t => (
           <TouchableOpacity key={t}
             style={[s.presetPill, selectedTime === t && s.presetPillActive]}
-            onPress={() => { setSelectedTime(t); setCustomMinutes(''); }}>
+            onPress={() => { haptic.light(); setSelectedTime(t); setCustomMinutes(''); }}>
             <Text style={[s.presetText, selectedTime === t && s.presetTextActive]}>{t}</Text>
           </TouchableOpacity>
         ))}
@@ -141,7 +149,7 @@ export default function CheckInScreen() {
             difficulty >= n && { backgroundColor: colors.accent },
             n === 1 && { borderTopLeftRadius: 6, borderBottomLeftRadius: 6 },
             n === 10 && { borderTopRightRadius: 6, borderBottomRightRadius: 6 },
-          ]} onPress={() => setDifficulty(n)} testID={`difficulty-${n}`} />
+          ]} onPress={() => { haptic.light(); setDifficulty(n); }} testID={`difficulty-${n}`} />
         ))}
       </View>
 
@@ -153,7 +161,7 @@ export default function CheckInScreen() {
             energy >= n && { backgroundColor: colors.success },
             n === 1 && { borderTopLeftRadius: 6, borderBottomLeftRadius: 6 },
             n === 10 && { borderTopRightRadius: 6, borderBottomRightRadius: 6 },
-          ]} onPress={() => setEnergy(n)} testID={`energy-${n}`} />
+          ]} onPress={() => { haptic.light(); setEnergy(n); }} testID={`energy-${n}`} />
         ))}
       </View>
 
@@ -177,7 +185,7 @@ export default function CheckInScreen() {
 
 const s = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bg },
-  container: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48 },
+  container: { padding: spacing.lg },
   greeting: { ...typography.title1, color: colors.text, marginBottom: spacing.xl },
 
   label: {

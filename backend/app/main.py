@@ -1,7 +1,10 @@
 """Mastery Tracker API - FastAPI Backend."""
 
-from fastapi import FastAPI
+import os
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.routers import daily, dashboard, entries, milestones, routes, runs, streaks, weekly_reviews, workouts
 
@@ -11,14 +14,31 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS configuration for mobile app
+# CORS — restrict to known origins
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:19006,http://localhost:8081").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Will restrict in production
+    allow_origins=[o.strip() for o in _allowed_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Simple API key auth — protects tunnel-exposed endpoints
+_api_key = os.getenv("API_KEY", "")
+
+_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Require API key for all non-public endpoints."""
+    if _api_key and request.url.path not in _PUBLIC_PATHS:
+        provided = request.headers.get("X-API-Key", "")
+        if provided != _api_key:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    return await call_next(request)
 
 
 app.include_router(daily.router)

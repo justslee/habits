@@ -6,12 +6,13 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, RefreshControl, Alert,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
-
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+import { haptic } from '../utils/haptics';
+import { API_URL, apiHeaders } from '../api/client';
 
 interface RouteItem {
   id: number;
@@ -42,15 +43,18 @@ function fmtDuration(s: number): string {
 }
 
 export default function RouteLibraryScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [routes, setRoutes] = useState<RouteItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchRoutes = useCallback(async () => {
     try {
-      const resp = await fetch(`${API}/api/v1/routes/`);
+      const resp = await fetch(`${API_URL}/api/v1/routes/`, { headers: apiHeaders() });
       if (resp.ok) setRoutes(await resp.json());
-    } catch {}
+    } catch (err) {
+      console.warn('RouteLibrary fetch error:', err);
+    }
     setLoading(false);
   }, []);
 
@@ -69,9 +73,12 @@ export default function RouteLibraryScreen({ navigation }: any) {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
           try {
-            await fetch(`${API}/api/v1/routes/${id}`, { method: 'DELETE' });
+            await fetch(`${API_URL}/api/v1/routes/${id}`, { method: 'DELETE', headers: apiHeaders() });
             setRoutes(prev => prev.filter(r => r.id !== id));
-          } catch {}
+            haptic.success();
+          } catch (err) {
+            console.warn('RouteLibrary delete error:', err);
+          }
         },
       },
     ]);
@@ -80,7 +87,7 @@ export default function RouteLibraryScreen({ navigation }: any) {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={{ paddingTop: insets.top + 12 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
       <View style={styles.header}>
@@ -156,7 +163,6 @@ export default function RouteLibraryScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingTop: Platform.OS === 'ios' ? 60 : 40 },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
   backBtn: { marginRight: spacing.md },

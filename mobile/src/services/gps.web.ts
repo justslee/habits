@@ -14,11 +14,16 @@ export interface RunState {
   isPaused: boolean;
   startTime: number;
   elapsedMs: number;
+  pausedMs: number;
   distanceMiles: number;
   currentPaceSeconds: number | null;
+  currentSpeedMph: number;
   elevationGainFt: number;
   points: GpsPoint[];
   splits: SplitData[];
+  lastSplitElapsedMs: number;
+  lastSplitElevationFt: number;
+  autoPausedAt: number | null;
 }
 
 export interface SplitData {
@@ -33,9 +38,9 @@ export async function requestLocationPermissions(): Promise<boolean> {
 
 export function createRunState(): RunState {
   return {
-    isTracking: false, isPaused: false, startTime: 0, elapsedMs: 0,
-    distanceMiles: 0, currentPaceSeconds: null, elevationGainFt: 0,
-    points: [], splits: [],
+    isTracking: false, isPaused: false, startTime: 0, elapsedMs: 0, pausedMs: 0,
+    distanceMiles: 0, currentPaceSeconds: null, currentSpeedMph: 0, elevationGainFt: 0,
+    points: [], splits: [], lastSplitElapsedMs: 0, lastSplitElevationFt: 0, autoPausedAt: null,
   };
 }
 
@@ -61,3 +66,13 @@ export function formatDuration(ms: number): string {
 
 export async function startBackgroundTracking(): Promise<void> {}
 export async function stopBackgroundTracking(): Promise<void> {}
+
+export async function watchLocation(
+  _onPoint: (point: GpsPoint) => void,
+): Promise<{ remove: () => void }> {
+  return { remove: () => {} };
+}
+
+export function consumeBackgroundPoints(): GpsPoint[] {
+  return [];
+}

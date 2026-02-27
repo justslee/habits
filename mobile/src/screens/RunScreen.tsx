@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform, Alert,
-  Animated as RNAnimated, Modal,
+  Animated as RNAnimated, AppState,
 } from 'react-native';
-import * as Location from 'expo-location';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   RunState, GpsPoint, createRunState, processGpsPoint, formatPace, formatDuration,
-  requestLocationPermissions, startBackgroundTracking, stopBackgroundTracking,
+  requestLocationPermissions, startBackgroundTracking, stopBackgroundTracking, watchLocation,
+  consumeBackgroundPoints,
 } from '../services/gps';
 import {
   CoachConfig, createCoachState, coachTick, getCurrentSegment,
   announceStart, announceFinish, PlannedSegment,
 } from '../services/audioCoach';
-import { getTodayRun, TodayRunData, getPostRunFeedback } from '../api/client';
+import { getTodayRun, TodayRunData, getPostRunFeedback, API_URL, apiHeaders } from '../api/client';
+import { haptic } from '../utils/haptics';
 import MapView from '../components/MapView';
 import PacePolyline from '../components/PacePolyline';
 import { colors, spacing, typography, radius } from '../theme';
@@ -26,6 +28,7 @@ const RUN_TYPE_COLORS: Record<string, string> = {
 type Phase = 'pre' | 'countdown' | 'active' | 'paused' | 'rpe' | 'summary';
 
 export default function RunScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('pre');
   const [runState, setRunState] = useState<RunState>(createRunState);
   const [permissionGranted, setPermissionGranted] = useState(false);
@@ -38,7 +41,7 @@ export default function RunScreen({ navigation }: any) {
   const [prType, setPRType] = useState<string | null>(null);
   const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
   const countdownScale = useRef(new RNAnimated.Value(1)).current;
-  const locationSub = useRef<Location.LocationSubscription | null>(null);
+  const locationSub = useRef<{ remove: () => void } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stateRef = useRef(runState);
   stateRef.current = runState;
@@ -49,13 +52,31 @@ export default function RunScreen({ navigation }: any) {
 
   useEffect(() => {
     requestLocationPermissions().then(setPermissionGranted);
-    getTodayRun().then(setTodayRun).catch(() => {});
+    getTodayRun().then(setTodayRun).catch((err) => { console.warn('Failed to fetch today run', err); });
     return () => { locationSub.current?.remove(); if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  // Consume background GPS points when app returns to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && stateRef.current.isTracking) {
+        const bgPoints = consumeBackgroundPoints();
+        if (bgPoints.length > 0) {
+          setRunState(prev => {
+            let updated = prev;
+            for (const pt of bgPoints) { updated = processGpsPoint(updated, pt); }
+            return updated;
+          });
+        }
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   // --- Countdown ---
   const startCountdown = useCallback(() => {
     if (!permissionGranted) { Alert.alert('Permission Required', 'Location access needed.'); return; }
+    haptic.medium();
     setPhase('countdown');
     setCountdownNum(3);
     let count = 3;
@@ -91,24 +112,20 @@ export default function RunScreen({ navigation }: any) {
     };
     announceStart(coachConfigRef.current);
 
-    locationSub.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
-      loc => {
-        const point: GpsPoint = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, altitude: loc.coords.altitude, timestamp: loc.timestamp };
-        setRunState(prev => {
-          const updated = processGpsPoint(prev, point);
-          // Run audio coach on each GPS tick
-          coachStateRef.current = coachTick(updated, coachConfigRef.current, coachStateRef.current);
-          return updated;
-        });
-      },
-    );
-    try { await startBackgroundTracking(); } catch {}
+    locationSub.current = await watchLocation((point: GpsPoint) => {
+      setRunState(prev => {
+        const updated = processGpsPoint(prev, point);
+        // Run audio coach on each GPS tick
+        coachStateRef.current = coachTick(updated, coachConfigRef.current, coachStateRef.current);
+        return updated;
+      });
+    });
+    try { await startBackgroundTracking(); } catch (err) { console.warn('Failed to start background tracking', err); }
 
     timerRef.current = setInterval(() => {
       setRunState(prev => {
         if (!prev.isTracking || prev.isPaused) return prev;
-        const updated = { ...prev, elapsedMs: Date.now() - prev.startTime };
+        const updated = { ...prev, elapsedMs: Date.now() - prev.startTime - prev.pausedMs };
         // Also tick coach on timer (for segment transitions based on time)
         coachStateRef.current = coachTick(updated, coachConfigRef.current, coachStateRef.current);
         return updated;
@@ -117,14 +134,16 @@ export default function RunScreen({ navigation }: any) {
   }, [audioCoachEnabled, planned, segments]);
 
   const handlePause = () => {
+    haptic.medium();
     setRunState(s => ({ ...s, isPaused: !s.isPaused }));
     setPhase(phase === 'paused' ? 'active' : 'paused');
   };
 
   const handleStop = () => {
+    haptic.heavy();
     locationSub.current?.remove(); locationSub.current = null;
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    stopBackgroundTracking().catch(() => {});
+    stopBackgroundTracking().catch((err) => { console.warn('Failed to stop background tracking', err); });
     if (stateRef.current.distanceMiles < 0.1) { resetToPreRun(); return; }
     announceFinish(stateRef.current);
     setPhase('rpe');
@@ -133,8 +152,8 @@ export default function RunScreen({ navigation }: any) {
   const saveRun = async () => {
     const state = stateRef.current;
     try {
-      const resp = await fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/runs/`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const resp = await fetch(`${API_URL}/api/v1/runs/`, {
+        method: 'POST', headers: apiHeaders(),
         body: JSON.stringify({
           distance_miles: Math.round(state.distanceMiles * 100) / 100,
           duration_seconds: Math.round(state.elapsedMs / 1000),
@@ -149,15 +168,16 @@ export default function RunScreen({ navigation }: any) {
       if (resp.ok) {
         const data = await resp.json();
         setSavedRunId(data.id);
+        haptic.success();
         // Get AI feedback
         try {
           const fb = await getPostRunFeedback(data.id);
           setFeedback(fb.feedback);
           setIsPR(fb.is_pr);
           setPRType(fb.pr_type || null);
-        } catch { setFeedback(null); }
+        } catch (err) { console.warn('Failed to get post-run feedback', err); setFeedback(null); }
       }
-    } catch {}
+    } catch (err) { console.warn('Failed to save run', err); }
     setPhase('summary');
   };
 
@@ -169,7 +189,7 @@ export default function RunScreen({ navigation }: any) {
     setSelectedRPE(5);
     setIsPR(false);
     setPRType(null);
-    getTodayRun().then(setTodayRun).catch(() => {});
+    getTodayRun().then(setTodayRun).catch((err) => { console.warn('Failed to refresh today run', err); });
   };
 
   const { distanceMiles, currentPaceSeconds, elapsedMs, elevationGainFt, splits, points } = runState;
@@ -180,13 +200,13 @@ export default function RunScreen({ navigation }: any) {
   // Parse structure
   let segments: any[] = [];
   if (planned?.structure) {
-    try { segments = JSON.parse(planned.structure); } catch {}
+    try { segments = JSON.parse(planned.structure); } catch (err) { console.warn('Failed to parse run structure', err); }
   }
 
   // === PRE-RUN ===
   if (phase === 'pre') {
     return (
-      <ScrollView style={s.container} contentContainerStyle={s.preContent}>
+      <ScrollView style={s.container} contentContainerStyle={[s.preContent, { paddingTop: insets.top + spacing.md }]}>
         <View style={s.preHeader}>
           <Text style={s.screenTitle}>Run</Text>
           <View style={{ flexDirection: 'row', gap: spacing.xs }}>
@@ -303,7 +323,7 @@ export default function RunScreen({ navigation }: any) {
   // === RPE PROMPT ===
   if (phase === 'rpe') {
     return (
-      <View style={s.rpeContainer}>
+      <View style={[s.rpeContainer, { paddingTop: insets.top + spacing.md }]}>
         <Text style={s.rpeTitle}>How did it feel?</Text>
         <Text style={s.rpeSubtitle}>{distanceMiles.toFixed(2)} mi · {formatDuration(elapsedMs)}</Text>
 
@@ -311,7 +331,7 @@ export default function RunScreen({ navigation }: any) {
           {[1,2,3,4,5,6,7,8,9,10].map(n => (
             <TouchableOpacity key={n}
               style={[s.rpeBtn, selectedRPE === n && { backgroundColor: colors.accent, borderColor: colors.accent }]}
-              onPress={() => setSelectedRPE(n)}>
+              onPress={() => { haptic.selection(); setSelectedRPE(n); }}>
               <Text style={[s.rpeBtnText, selectedRPE === n && { color: '#fff' }]}>{n}</Text>
             </TouchableOpacity>
           ))}
@@ -338,7 +358,7 @@ export default function RunScreen({ navigation }: any) {
       : null;
 
     return (
-      <ScrollView style={s.container} contentContainerStyle={s.summaryContent}>
+      <ScrollView style={s.container} contentContainerStyle={[s.summaryContent, { paddingTop: insets.top + spacing.md }]}>
         {/* PR Badge */}
         {isPR && (
           <View style={s.prBanner}>
@@ -400,18 +420,54 @@ export default function RunScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Splits table */}
+        {/* Elevation profile */}
+        {state.points.length > 5 && state.elevationGainFt > 0 && (
+          <View style={[s.card, { width: '100%' }]}>
+            <Text style={s.cardLabel}>ELEVATION</Text>
+            <View style={s.elevProfile}>
+              {(() => {
+                const alts = state.points
+                  .filter(p => p.altitude !== null)
+                  .map(p => p.altitude as number);
+                if (alts.length < 2) return null;
+                const min = Math.min(...alts);
+                const max = Math.max(...alts);
+                const range = max - min || 1;
+                const step = Math.max(1, Math.floor(alts.length / 60));
+                const sampled = alts.filter((_, i) => i % step === 0);
+                return sampled.map((alt, i) => (
+                  <View key={i} style={[
+                    s.elevBar,
+                    { height: `${Math.max(4, ((alt - min) / range) * 100)}%` as any, flex: 1 },
+                  ]} />
+                ));
+              })()}
+            </View>
+          </View>
+        )}
+
+        {/* Splits table with pace bars */}
         {state.splits.length > 0 && (
           <View style={[s.card, { width: '100%' }]}>
             <Text style={s.cardLabel}>SPLITS</Text>
             {state.splits.map(sp => {
               const isBest = bestSplit && sp.mileNumber === bestSplit.mileNumber;
               const paceDeviation = avgPace > 0 ? sp.paceSeconds - avgPace : 0;
+              const maxPace = Math.max(...state.splits.map(x => x.paceSeconds));
+              const minPace = Math.min(...state.splits.map(x => x.paceSeconds));
+              const paceRange = maxPace - minPace || 1;
+              const barPct = 100 - ((sp.paceSeconds - minPace) / paceRange) * 40;
               return (
                 <View key={sp.mileNumber} style={s.splitRow}>
-                  <Text style={s.splitMile}>Mile {sp.mileNumber}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    {isBest && <Ionicons name="flash" size={14} color="#F59E0B" />}
+                  <Text style={s.splitMile}>{sp.mileNumber}</Text>
+                  <View style={s.splitBarContainer}>
+                    <View style={[s.splitBar, {
+                      width: `${barPct}%` as any,
+                      backgroundColor: paceDeviation < -5 ? '#10B981' : paceDeviation > 10 ? '#EF4444' : colors.accent,
+                    }]} />
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 60, justifyContent: 'flex-end' }}>
+                    {isBest && <Ionicons name="flash" size={12} color="#F59E0B" />}
                     <Text style={[
                       s.splitPace,
                       paceDeviation < -5 && { color: '#10B981' },
@@ -470,48 +526,72 @@ export default function RunScreen({ navigation }: any) {
         </View>
       )}
 
-      {/* Segment progress bar */}
+      {/* Segment progress bar + countdown overlay */}
       {segments.length > 0 && phase === 'active' && (() => {
         const totalMin = segments.reduce((sum: number, seg: any) => sum + (seg.minutes || 0), 0);
         const { index: segIdx, segment: curSeg, segmentElapsedMs, segmentRemainingMs } = getCurrentSegment(
           segments as PlannedSegment[], elapsedMs,
         );
         const segProgress = curSeg ? segmentElapsedMs / (curSeg.minutes * 60 * 1000) : 0;
+        const remainSec = Math.ceil((segmentRemainingMs || 0) / 1000);
+        const showBigCountdown = remainSec <= 10 && remainSec > 0 && curSeg && segIdx < segments.length - 1;
+        const nextSeg = segIdx < segments.length - 1 ? segments[segIdx + 1] : null;
         return (
-          <View style={s.segProgressContainer}>
-            <View style={s.segProgressBar}>
-              {segments.map((seg: any, i: number) => {
-                const widthPct = totalMin > 0 ? (seg.minutes / totalMin) * 100 : 0;
-                const segColor = seg.type === 'warmup' || seg.type === 'cooldown' ? colors.textTertiary
-                  : seg.type === 'work' ? runTypeColor : colors.info;
-                const isActive = i === segIdx;
-                const isDone = i < segIdx;
-                return (
-                  <View key={i} style={[s.segBlock, { width: `${widthPct}%` as any }]}>
-                    <View style={[
-                      s.segFill,
-                      { backgroundColor: segColor, opacity: isDone ? 1 : isActive ? 0.8 : 0.25 },
-                      isActive && { width: `${Math.min(segProgress * 100, 100)}%` as any },
-                      isDone && { width: '100%' },
-                      !isDone && !isActive && { width: '100%' },
-                    ]} />
-                  </View>
-                );
-              })}
-            </View>
-            {curSeg && (
-              <Text style={s.segProgressLabel}>
-                {curSeg.type === 'warmup' ? 'WARM UP' : curSeg.type === 'cooldown' ? 'COOL DOWN' : curSeg.type.toUpperCase()}
-                {'  '}
-                {Math.ceil((segmentRemainingMs || 0) / 1000)}s left
-              </Text>
+          <>
+            {/* Big countdown overlay for last 10s of segment */}
+            {showBigCountdown && (
+              <View style={s.countdownOverlay}>
+                <Text style={s.countdownOverlayNum}>{remainSec}</Text>
+                {nextSeg && (
+                  <Text style={s.countdownOverlayNext}>
+                    NEXT: {(nextSeg as any).type === 'warmup' ? 'WARM UP' : (nextSeg as any).type === 'cooldown' ? 'COOL DOWN' : (nextSeg as any).type.toUpperCase()}
+                  </Text>
+                )}
+              </View>
             )}
-          </View>
+            <View style={s.segProgressContainer}>
+              <View style={s.segProgressBar}>
+                {segments.map((seg: any, i: number) => {
+                  const widthPct = totalMin > 0 ? (seg.minutes / totalMin) * 100 : 0;
+                  const segColor = seg.type === 'warmup' || seg.type === 'cooldown' ? colors.textTertiary
+                    : seg.type === 'work' ? runTypeColor : colors.info;
+                  const isActive = i === segIdx;
+                  const isDone = i < segIdx;
+                  return (
+                    <View key={i} style={[s.segBlock, { width: `${widthPct}%` as any }]}>
+                      <View style={[
+                        s.segFill,
+                        { backgroundColor: segColor, opacity: isDone ? 1 : isActive ? 0.8 : 0.25 },
+                        isActive && { width: `${Math.min(segProgress * 100, 100)}%` as any },
+                        isDone && { width: '100%' },
+                        !isDone && !isActive && { width: '100%' },
+                      ]} />
+                    </View>
+                  );
+                })}
+              </View>
+              {curSeg && (
+                <Text style={s.segProgressLabel}>
+                  {curSeg.type === 'warmup' ? 'WARM UP' : curSeg.type === 'cooldown' ? 'COOL DOWN' : curSeg.type.toUpperCase()}
+                  {'  '}
+                  {remainSec > 60 ? `${Math.floor(remainSec / 60)}:${(remainSec % 60).toString().padStart(2, '0')}` : `${remainSec}s`} left
+                </Text>
+              )}
+            </View>
+          </>
         );
       })()}
 
+      {/* Auto-pause indicator */}
+      {runState.autoPausedAt !== null && (
+        <View style={s.autoPauseBanner}>
+          <Ionicons name="pause-circle" size={16} color={colors.warning} />
+          <Text style={s.autoPauseText}>AUTO-PAUSED</Text>
+        </View>
+      )}
+
       {/* Stats bottom sheet */}
-      <View style={s.statsSheet}>
+      <View style={[s.statsSheet, { paddingBottom: insets.bottom + spacing.md }]}>
         <View style={s.mainMetric}>
           <Text style={s.bigDistance}>{distanceMiles.toFixed(2)}</Text>
           <Text style={s.bigUnit}>mi</Text>
@@ -563,7 +643,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
 
   // Pre-run
-  preContent: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48 },
+  preContent: { padding: spacing.lg },
   preHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
   screenTitle: { ...typography.title1, color: colors.text },
   historyBtn: { padding: spacing.sm },
@@ -623,9 +703,21 @@ const s = StyleSheet.create({
   segFill: { height: '100%', borderRadius: 3 },
   segProgressLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 4, textAlign: 'center' },
 
+  countdownOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  countdownOverlayNum: { fontSize: 96, fontWeight: '200', color: '#fff' },
+  countdownOverlayNext: { ...typography.micro, color: colors.accent, letterSpacing: 2, marginTop: spacing.sm },
+
+  autoPauseBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)', paddingVertical: spacing.xs,
+  },
+  autoPauseText: { ...typography.micro, color: colors.warning, letterSpacing: 2 },
+
   statsSheet: {
     backgroundColor: colors.bg, padding: spacing.lg,
-    paddingBottom: Platform.OS === 'ios' ? 44 : spacing.lg,
     borderTopWidth: 1, borderTopColor: colors.border,
   },
   mainMetric: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', marginBottom: spacing.md },
@@ -654,7 +746,7 @@ const s = StyleSheet.create({
   stopControl: { backgroundColor: colors.error, borderColor: colors.error },
 
   // RPE
-  rpeContainer: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 120 : 80, alignItems: 'center' },
+  rpeContainer: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg, alignItems: 'center' },
   rpeTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.sm },
   rpeSubtitle: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.xl },
   rpeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm, marginBottom: spacing.sm },
@@ -669,7 +761,7 @@ const s = StyleSheet.create({
   saveBtnText: { ...typography.bodyBold, color: '#fff' },
 
   // Summary
-  summaryContent: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48, alignItems: 'center' },
+  summaryContent: { padding: spacing.lg, alignItems: 'center' },
   prBanner: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: 'rgba(245, 158, 11, 0.1)', borderRadius: radius.pill,
@@ -697,8 +789,18 @@ const s = StyleSheet.create({
   },
   rpeSummaryText: { ...typography.caption, color: colors.textSecondary },
 
-  splitRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  splitMile: { ...typography.body, color: colors.textSecondary },
+  elevProfile: {
+    flexDirection: 'row', alignItems: 'flex-end', height: 60, gap: 1,
+  },
+  elevBar: { backgroundColor: colors.accent, borderRadius: 1, opacity: 0.6, minWidth: 2 },
+
+  splitRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  splitMile: { ...typography.micro, color: colors.textTertiary, width: 20, textAlign: 'center' },
+  splitBarContainer: { flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.05)' },
+  splitBar: { height: '100%', borderRadius: 3 },
   splitPace: { ...typography.bodyBold, color: colors.text },
 
   feedbackText: { ...typography.body, color: colors.textSecondary, lineHeight: 22 },

@@ -3,9 +3,11 @@ import {
   View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Platform, KeyboardAvoidingView, RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getTodayWorkout, chatWithCoach, WorkoutSession } from '../api/client';
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { haptic } from '../utils/haptics';
 
 interface ChatMessage { role: 'user' | 'coach'; text: string; }
 
@@ -15,6 +17,7 @@ const DAY_LABELS: Record<string, string> = {
 };
 
 export default function WorkoutScreen() {
+  const insets = useSafeAreaInsets();
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +36,7 @@ export default function WorkoutScreen() {
         setChatMessages([{ role: 'coach', text: data.coach_notes }]);
       }
     } catch (err) {
+      console.warn('Workout fetch error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -45,12 +49,15 @@ export default function WorkoutScreen() {
     setChatInput('');
     setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setSending(true);
+    haptic.light();
     try {
       const response = await chatWithCoach(session.id, msg);
       setChatMessages(prev => [...prev, { role: 'coach', text: response.coach_response }]);
       const updated = await getTodayWorkout();
       setSession(updated);
-    } catch {
+      haptic.success();
+    } catch (err) {
+      console.warn('Workout chat error:', err);
       setChatMessages(prev => [...prev, { role: 'coach', text: 'Connection error. Try again.' }]);
     } finally {
       setSending(false);
@@ -71,7 +78,7 @@ export default function WorkoutScreen() {
       <View style={s.center}>
         <Ionicons name="cloud-offline-outline" size={40} color={colors.textTertiary} />
         <Text style={s.errorText}>{error}</Text>
-        <TouchableOpacity style={s.retryBtn} onPress={fetchWorkout}>
+        <TouchableOpacity style={s.retryBtn} onPress={() => { haptic.light(); fetchWorkout(); }}>
           <Text style={s.retryText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -87,7 +94,7 @@ export default function WorkoutScreen() {
 
   return (
     <KeyboardAvoidingView style={s.outer} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-      <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={s.container}
+      <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + 16 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchWorkout(); }} tintColor={colors.textTertiary} />}>
 
         <Text style={s.screenTitle}>{DAY_LABELS[session?.day_type || ''] || session?.day_type}</Text>
@@ -178,7 +185,7 @@ export default function WorkoutScreen() {
       </ScrollView>
 
       {/* Input */}
-      <View style={s.inputBar}>
+      <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
         <TextInput style={s.chatInput} placeholder="bench 165 for 5..."
           placeholderTextColor={colors.textTertiary}
           value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendMessage}
@@ -195,7 +202,7 @@ export default function WorkoutScreen() {
 const s = StyleSheet.create({
   outer: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
-  container: { padding: spacing.lg, paddingTop: Platform.OS === 'ios' ? 68 : 48, paddingBottom: 20 },
+  container: { padding: spacing.lg, paddingBottom: 20 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
 
@@ -238,7 +245,6 @@ const s = StyleSheet.create({
 
   inputBar: {
     flexDirection: 'row', padding: spacing.md,
-    paddingBottom: Platform.OS === 'ios' ? 32 : spacing.md,
     backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm,
   },
   chatInput: {

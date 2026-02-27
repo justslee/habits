@@ -7,12 +7,13 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, RefreshControl,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
-
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+import { haptic } from '../utils/haptics';
+import { API_URL, apiHeaders } from '../api/client';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
   easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
@@ -60,6 +61,7 @@ function formatPace(seconds: number | null): string {
 }
 
 export default function RunHistoryScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [stats, setStats] = useState<RunStats | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
@@ -70,12 +72,14 @@ export default function RunHistoryScreen({ navigation }: any) {
     try {
       const filterParam = filter ? `&run_type=${filter}` : '';
       const [runsRes, statsRes] = await Promise.all([
-        fetch(`${API}/api/v1/runs/?limit=50${filterParam}`),
-        fetch(`${API}/api/v1/runs/stats`),
+        fetch(`${API_URL}/api/v1/runs/?limit=50${filterParam}`, { headers: apiHeaders() }),
+        fetch(`${API_URL}/api/v1/runs/stats`, { headers: apiHeaders() }),
       ]);
       if (runsRes.ok) setRuns(await runsRes.json());
       if (statsRes.ok) setStats(await statsRes.json());
-    } catch {}
+    } catch (err) {
+      console.warn('RunHistory fetch error:', err);
+    }
     setLoading(false);
   }, [filter]);
 
@@ -92,7 +96,7 @@ export default function RunHistoryScreen({ navigation }: any) {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={{ paddingTop: insets.top + 12 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
       {/* Header */}
@@ -135,7 +139,7 @@ export default function RunHistoryScreen({ navigation }: any) {
             <TouchableOpacity
               key={f || 'all'}
               style={[styles.filterChip, active && { backgroundColor: chipColor + '20', borderColor: chipColor }]}
-              onPress={() => setFilter(f)}
+              onPress={() => { haptic.selection(); setFilter(f); }}
             >
               <Text style={[styles.filterText, active && { color: chipColor }]}>{label}</Text>
             </TouchableOpacity>
@@ -194,7 +198,6 @@ export default function RunHistoryScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingTop: Platform.OS === 'ios' ? 60 : 40 },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
   backBtn: { marginRight: spacing.md },

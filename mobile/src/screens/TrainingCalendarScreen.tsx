@@ -7,12 +7,13 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, RefreshControl,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
-
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+import { haptic } from '../utils/haptics';
+import { API_URL, apiHeaders } from '../api/client';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
   easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
@@ -49,6 +50,7 @@ function fmtPace(s: number | null): string {
 }
 
 export default function TrainingCalendarScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [plan, setPlan] = useState<TrainingPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,7 +58,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
 
   const fetchPlan = useCallback(async () => {
     try {
-      const resp = await fetch(`${API}/api/v1/runs/plans/active`);
+      const resp = await fetch(`${API_URL}/api/v1/runs/plans/active`, { headers: apiHeaders() });
       if (resp.ok) {
         const data = await resp.json();
         if (data) {
@@ -64,7 +66,9 @@ export default function TrainingCalendarScreen({ navigation }: any) {
           setSelectedWeek(data.current_week);
         }
       }
-    } catch {}
+    } catch (err) {
+      console.warn('TrainingCalendar fetch error:', err);
+    }
     setLoading(false);
   }, []);
 
@@ -78,7 +82,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
 
   if (!plan) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { paddingTop: insets.top }]}>
         <Ionicons name="calendar-outline" size={48} color={colors.textTertiary} />
         <Text style={styles.emptyTitle}>No Active Plan</Text>
         <Text style={styles.emptySubtext}>Create a training plan to see your calendar</Text>
@@ -101,7 +105,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation?.goBack?.()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -126,7 +130,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
                 isActive && { backgroundColor: colors.accent + '20', borderColor: colors.accent },
                 isCurrent && !isActive && { borderColor: colors.accent + '60' },
               ]}
-              onPress={() => setSelectedWeek(w)}
+              onPress={() => { haptic.selection(); setSelectedWeek(w); }}
             >
               <Text style={[styles.weekNum, isActive && { color: colors.accent }]}>W{w}</Text>
               {wRuns.length > 0 && (
@@ -206,7 +210,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   centered: { justifyContent: 'center', alignItems: 'center', gap: spacing.sm },
 
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, paddingTop: Platform.OS === 'ios' ? 60 : 40, marginBottom: spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   backBtn: { marginRight: spacing.md },
   title: { ...typography.title2, color: colors.text },
   subtitle: { ...typography.caption, color: colors.textTertiary },
