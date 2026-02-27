@@ -1,9 +1,25 @@
 /**
  * API client for Mastery Tracker backend.
+ * API_URL resolution order:
+ * 1. Runtime config from /config.json (updated without rebuild)
+ * 2. Build-time env var EXPO_PUBLIC_API_URL
+ * 3. Fallback to localhost:8000
  */
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+let API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
+
+const _configPromise: Promise<void> = (async () => {
+  try {
+    const res = await fetch('/config.json', { cache: 'no-store' });
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg.apiUrl) API_URL = cfg.apiUrl;
+    }
+  } catch {
+    // config.json not available — use build-time value
+  }
+})();
 
 export interface EntryCreatePayload {
   description: string;
@@ -50,6 +66,7 @@ export interface EntryResponse {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  await _configPromise;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),

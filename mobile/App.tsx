@@ -13,19 +13,26 @@ import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
 import RouteLibraryScreen from './src/screens/RouteLibraryScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import { colors } from './src/theme';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 const Tab = createBottomTabNavigator();
 const RunStack = createStackNavigator();
 
 function RunStackScreen() {
   return (
-    <RunStack.Navigator screenOptions={{ headerShown: false }}>
-      <RunStack.Screen name="RunMain" component={RunScreen} />
-      <RunStack.Screen name="RunHistory" component={RunHistoryScreen} />
-      <RunStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
-      <RunStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
-    </RunStack.Navigator>
+    <ErrorBoundary name="RunStack">
+      <RunStack.Navigator screenOptions={{ headerShown: false }}>
+        <RunStack.Screen name="RunMain" component={RunScreen} />
+        <RunStack.Screen name="RunHistory" component={RunHistoryScreen} />
+        <RunStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
+        <RunStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
+      </RunStack.Navigator>
+    </ErrorBoundary>
   );
+}
+
+function TrainWithBoundary() {
+  return <ErrorBoundary name="Train"><WorkoutScreen /></ErrorBoundary>;
 }
 
 const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
@@ -74,7 +81,7 @@ export default function App() {
           })}
         >
           <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
-          <Tab.Screen name="Train" component={WorkoutScreen} options={{ tabBarLabel: 'Train' }} />
+          <Tab.Screen name="Train" component={TrainWithBoundary} options={{ tabBarLabel: 'Train' }} />
           <Tab.Screen name="Run" component={RunStackScreen} options={{ tabBarLabel: 'Run' }} />
           <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
         </Tab.Navigator>

@@ -14,6 +14,7 @@
 
 import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
+import { RunState, SplitData, formatPace, formatDuration } from './gps';
 
 // Lazy-import haptics to avoid web crash
 const hapticNotify = async () => {
@@ -24,7 +25,6 @@ const hapticHeavy = async () => {
   if (Platform.OS === 'web') return;
   try { const H = await import('expo-haptics'); H.impactAsync(H.ImpactFeedbackStyle.Heavy); } catch {}
 };
-import { RunState, SplitData, formatPace, formatDuration } from './gps';
 
 export interface PlannedSegment {
   type: string; // warmup, work, cooldown, recovery
