@@ -3,14 +3,15 @@ import {
   View, Text, ScrollView, StyleSheet, Animated, ActivityIndicator,
   RefreshControl, TouchableOpacity, TextInput,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getDashboardStats, getHeatmap, getDepthProgression, getExerciseProfiles,
-  getVision, saveVision,
+  getVision, saveVision, getRecentEntries, deleteEntry, restoreEntry,
   DashboardStats, HeatmapDay, DepthProgressionPoint, ExerciseProfileData,
-  VisionData,
+  VisionData, EntryResponse,
   API_URL, apiHeaders,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
@@ -18,6 +19,8 @@ import RadarChart from '../components/RadarChart';
 import DepthChart from '../components/DepthChart';
 import CompoundingChart from '../components/CompoundingChart';
 import { ProgressSkeleton } from '../components/Skeleton';
+import SwipeableRow from '../components/SwipeableRow';
+import UndoToast from '../components/UndoToast';
 import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
 
 /** Animated counter that counts up from 0 to a target number. */
@@ -108,6 +111,10 @@ export default function ProgressScreen() {
   const [vision, setVision] = useState<VisionData | null>(null);
   const [disciplineData, setDisciplineData] = useState<any>(null);
   const [disciplineRange, setDisciplineRange] = useState<number>(30);
+  const [recentEntries, setRecentEntries] = useState<EntryResponse[]>([]);
+  const [undoToast, setUndoToast] = useState<{
+    visible: boolean; message: string; entryId: number; snapshot: EntryResponse | null;
+  }>({ visible: false, message: '', entryId: 0, snapshot: null });
   const [heatTooltip, setHeatTooltip] = useState<{ date: string; count: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,10 +152,45 @@ export default function ProgressScreen() {
         }`, { headers: apiHeaders() });
         if (dResp.ok) setDisciplineData(await dResp.json());
       } catch (err) { console.warn('Failed to fetch discipline', err); }
+
+      // Fetch recent entries for delete capability
+      try {
+        const entries = await getRecentEntries(14);
+        setRecentEntries(entries);
+      } catch (err) { console.warn('Failed to fetch recent entries', err); }
     } catch (err) { console.warn('Failed to fetch progress data', err); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // --- Entry deletion with undo ---
+  const handleDeleteEntry = async (entry: EntryResponse) => {
+    setRecentEntries(prev => prev.filter(e => e.id !== entry.id));
+    haptic.light();
+    const desc = entry.description.length > 40
+      ? entry.description.slice(0, 40) + '...'
+      : entry.description;
+    setUndoToast({ visible: true, message: `"${desc}" deleted`, entryId: entry.id, snapshot: entry });
+    try {
+      await deleteEntry(entry.id);
+    } catch (err) {
+      console.warn('Failed to delete entry:', err);
+      setRecentEntries(prev => [...prev, entry].sort((a, b) => b.id - a.id));
+      setUndoToast(prev => ({ ...prev, visible: false }));
+    }
+  };
+
+  const handleUndoEntry = async () => {
+    const { entryId, snapshot } = undoToast;
+    setUndoToast(prev => ({ ...prev, visible: false }));
+    if (!snapshot) return;
+    try {
+      await restoreEntry(entryId);
+      setRecentEntries(prev => [...prev, snapshot].sort((a, b) => b.id - a.id));
+    } catch (err) {
+      console.warn('Failed to restore entry:', err);
+    }
+  };
 
   const toggleGroup = (key: string) => {
     setExpandedGroups(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
@@ -165,12 +207,18 @@ export default function ProgressScreen() {
   const grouped = MUSCLE_GROUPS.map(mg => ({ ...mg, exercises: profiles.filter(p => p.muscle_group === mg.key) })).filter(mg => mg.exercises.length > 0);
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
       <Text style={s.screenTitle}>Progress</Text>
 
-      <View style={s.sectionTabs}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={s.sectionTabsScroll}
+        contentContainerStyle={s.sectionTabs}
+      >
         {(['mastery', 'strength', 'running', 'discipline', 'vision'] as Section[]).map(key => (
           <TouchableOpacity key={key}
             style={[s.tab, activeSection === key && s.tabActive]}
@@ -180,7 +228,7 @@ export default function ProgressScreen() {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* MASTERY */}
       {activeSection === 'mastery' && stats && (
@@ -357,6 +405,45 @@ export default function ProgressScreen() {
               <Text style={s.heatLegendLabel}>More</Text>
             </View>
           </View>
+
+          {/* Recent Sessions — swipe to delete */}
+          {recentEntries.length > 0 && (
+            <View style={s.recentSection}>
+              <Text style={s.sectionLabel}>Recent Sessions</Text>
+              <Text style={[s.sectionHint, { marginBottom: spacing.sm }]}>Swipe left to delete</Text>
+              {recentEntries.slice(0, 10).map(entry => {
+                const pillarIds: number[] = entry.pillar_tags || [];
+                const scorePct = entry.evaluation
+                  ? Math.round((entry.evaluation.depth_score + entry.evaluation.relevance_score) / 2)
+                  : null;
+                const onePercent = entry.evaluation?.one_percent_better;
+                return (
+                  <SwipeableRow key={entry.id} onDelete={() => handleDeleteEntry(entry)}>
+                    <View style={s.entryRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.entryDesc} numberOfLines={1}>{entry.description}</Text>
+                        <View style={s.entryMeta}>
+                          <Text style={s.entryDate}>{entry.entry_date}</Text>
+                          <Text style={s.entryTime}>{entry.time_invested_minutes}m</Text>
+                          {pillarIds.map(pid => (
+                            <View key={pid} style={[s.entryPillarDot, { backgroundColor: PILLAR_COLORS[pid] || colors.textTertiary }]} />
+                          ))}
+                        </View>
+                      </View>
+                      {scorePct != null && (
+                        <View style={s.entryScore}>
+                          <Text style={[s.entryScoreText, { color: onePercent ? colors.success : colors.textTertiary }]}>
+                            {scorePct}
+                          </Text>
+                          {onePercent && <Ionicons name="arrow-up" size={10} color={colors.success} />}
+                        </View>
+                      )}
+                    </View>
+                  </SwipeableRow>
+                );
+              })}
+            </View>
+          )}
         </>
       )}
 
@@ -572,7 +659,16 @@ export default function ProgressScreen() {
       )}
 
       <View style={{ height: 40 }} />
+
+      {/* Undo toast for entry deletion */}
+      <UndoToast
+        visible={undoToast.visible}
+        message={undoToast.message}
+        onUndo={handleUndoEntry}
+        onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
+      />
     </ScrollView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -759,7 +855,8 @@ const s = StyleSheet.create({
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.md },
 
-  sectionTabs: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.lg },
+  sectionTabsScroll: { flexGrow: 0, marginBottom: spacing.lg },
+  sectionTabs: { flexDirection: 'row', gap: spacing.xs, paddingRight: spacing.lg },
   tab: {
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
     borderRadius: radius.pill, backgroundColor: colors.card,
@@ -850,6 +947,25 @@ const s = StyleSheet.create({
   prLabel: { ...typography.caption, color: colors.textSecondary, flex: 1 },
   prTime: { fontSize: 16, fontWeight: '600', color: colors.accent, fontVariant: ['tabular-nums'], flex: 1, textAlign: 'center' },
   prDate: { ...typography.micro, color: colors.textTertiary, flex: 1, textAlign: 'right' },
+
+  // Recent sessions
+  recentSection: { marginTop: spacing.xl },
+  sectionLabel: { ...typography.bodyBold, color: colors.text, marginBottom: 2 },
+  sectionHint: { ...typography.micro, color: colors.textTertiary },
+  entryRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: spacing.md, paddingHorizontal: spacing.md,
+    backgroundColor: colors.card, borderRadius: radius.md,
+    marginBottom: spacing.xs,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  entryDesc: { ...typography.body, color: colors.text },
+  entryMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 3 },
+  entryDate: { ...typography.micro, color: colors.textTertiary },
+  entryTime: { ...typography.micro, color: colors.textSecondary, fontWeight: '600' },
+  entryPillarDot: { width: 8, height: 8, borderRadius: 4 },
+  entryScore: { alignItems: 'center', marginLeft: spacing.sm },
+  entryScoreText: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] as any },
 });
 
 // Discipline-specific styles

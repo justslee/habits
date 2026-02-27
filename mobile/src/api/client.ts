@@ -394,6 +394,13 @@ export function getDepthProgression(
   return request(url);
 }
 
+// --- Entries list ---
+
+export function getRecentEntries(days: number = 14): Promise<EntryResponse[]> {
+  const start = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+  return request(`/api/v1/entries?start_date=${start}`);
+}
+
 // --- Soft Delete / Restore (P5-5) ---
 
 export function deleteEntry(entryId: number): Promise<{ detail: string; id: number }> {
