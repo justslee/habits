@@ -362,3 +362,64 @@ export function getDepthProgression(
   if (pillarId !== undefined) url += `&pillar_id=${pillarId}`;
   return request(url);
 }
+
+// --- Route Discovery ---
+
+export interface DiscoveredRoute {
+  name: string;
+  description: string;
+  polyline: { lat: number; lng: number; alt?: number }[];
+  distance_miles: number;
+  elevation_gain_ft: number;
+  difficulty: string;
+  street_names: string[];
+  estimated_time_minutes: number;
+}
+
+export interface RouteDiscoverResponse {
+  routes: DiscoveredRoute[];
+  cached: boolean;
+}
+
+export interface SavedRouteData {
+  id: number;
+  name: string;
+  distance_miles: number;
+  elevation_gain_ft: number | null;
+  route_type: string | null;
+  tags: string | null;
+  description: string | null;
+  times_run: number;
+  best_time_seconds: number | null;
+  last_run_date: string | null;
+}
+
+export function discoverRoutes(
+  latitude: number,
+  longitude: number,
+  distanceMiles: number = 3.0,
+): Promise<RouteDiscoverResponse> {
+  return request('/api/v1/routes/discover', {
+    method: 'POST',
+    body: JSON.stringify({ latitude, longitude, distance_miles: distanceMiles }),
+  });
+}
+
+export function saveDiscoveredRoute(route: DiscoveredRoute): Promise<SavedRouteData> {
+  return request('/api/v1/routes/discover/save', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: route.name,
+      polyline: JSON.stringify(route.polyline),
+      distance_miles: route.distance_miles,
+      elevation_gain_ft: route.elevation_gain_ft,
+      route_type: 'loop',
+      tags: route.difficulty,
+      description: route.description,
+    }),
+  });
+}
+
+export function getSavedRoutes(): Promise<SavedRouteData[]> {
+  return request('/api/v1/routes/');
+}

@@ -11,6 +11,7 @@ import RunScreen from './src/screens/RunScreen';
 import RunHistoryScreen from './src/screens/RunHistoryScreen';
 import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
 import RouteLibraryScreen from './src/screens/RouteLibraryScreen';
+import RouteSuggestionsScreen from './src/screens/RouteSuggestionsScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import { colors } from './src/theme';
 
@@ -24,6 +25,7 @@ function RunStackScreen() {
       <RunStack.Screen name="RunHistory" component={RunHistoryScreen} />
       <RunStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
       <RunStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
+      <RunStack.Screen name="RouteSuggestions" component={RouteSuggestionsScreen} />
     </RunStack.Navigator>
   );
 }

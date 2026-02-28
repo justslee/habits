@@ -1,7 +1,9 @@
 """Pydantic schemas for route endpoints."""
 
-from typing import List, Optional
-from pydantic import BaseModel
+import json
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, field_validator
 
 
 class SavedRouteCreate(BaseModel):
@@ -44,3 +46,34 @@ class SavedRouteListItem(BaseModel):
     last_run_date: Optional[str]
 
     model_config = {"from_attributes": True}
+
+
+# --- Route Discovery ---
+
+class RouteDiscoverRequest(BaseModel):
+    latitude: float
+    longitude: float
+    distance_miles: float = 3.0
+
+    @field_validator("distance_miles")
+    @classmethod
+    def validate_distance(cls, v: float) -> float:
+        if v < 0.5 or v > 30:
+            raise ValueError("distance_miles must be between 0.5 and 30")
+        return v
+
+
+class DiscoveredRoute(BaseModel):
+    name: str
+    description: str
+    polyline: List[dict]  # [{lat, lng, alt}, ...]
+    distance_miles: float
+    elevation_gain_ft: float
+    difficulty: str  # easy, moderate, hilly
+    street_names: List[str]
+    estimated_time_minutes: int
+
+
+class RouteDiscoverResponse(BaseModel):
+    routes: List[DiscoveredRoute]
+    cached: bool = False
