@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -18,16 +18,16 @@ METERS_TO_MILES = 0.000621371
 METERS_TO_FEET = 3.28084
 
 # In-memory cache: (lat_bucket, lng_bucket, dist_bucket) -> (timestamp, routes)
-_cache: dict[tuple[float, float, float], tuple[float, list[dict]]] = {}
+_cache: Dict[Tuple[float, float, float], Tuple[float, List[dict]]] = {}
 _CACHE_TTL = 3600  # 1 hour
 
 
-def _cache_key(lat: float, lng: float, distance_miles: float) -> tuple[float, float, float]:
+def _cache_key(lat: float, lng: float, distance_miles: float) -> Tuple[float, float, float]:
     """Round coords to ~0.5mi grid for cache reuse."""
     return (round(lat, 2), round(lng, 2), round(distance_miles))
 
 
-def _get_cached(lat: float, lng: float, distance_miles: float) -> list[dict] | None:
+def _get_cached(lat: float, lng: float, distance_miles: float) -> Optional[List[dict]]:
     key = _cache_key(lat, lng, distance_miles)
     entry = _cache.get(key)
     if entry and time.time() - entry[0] < _CACHE_TTL:
@@ -35,14 +35,14 @@ def _get_cached(lat: float, lng: float, distance_miles: float) -> list[dict] | N
     return None
 
 
-def _set_cached(lat: float, lng: float, distance_miles: float, routes: list[dict]) -> None:
+def _set_cached(lat: float, lng: float, distance_miles: float, routes: List[dict]) -> None:
     key = _cache_key(lat, lng, distance_miles)
     _cache[key] = (time.time(), routes)
 
 
 async def _call_graphhopper(
     lat: float, lng: float, distance_meters: float, seed: int
-) -> dict[str, Any] | None:
+) -> Optional[Dict[str, Any]]:
     """Call GraphHopper round_trip API for a single route."""
     params = {
         "profile": "foot",
@@ -50,7 +50,6 @@ async def _call_graphhopper(
         "point": f"{lat},{lng}",
         "round_trip.distance": int(distance_meters),
         "round_trip.seed": seed,
-        "elevation": "true",
         "details": "street_name",
         "type": "json",
     }
@@ -67,7 +66,7 @@ async def _call_graphhopper(
     return None
 
 
-def _decode_polyline(encoded: str, is_3d: bool = True) -> list[dict]:
+def _decode_polyline(encoded: str, is_3d: bool = True) -> List[dict]:
     """Decode Google-style encoded polyline (with elevation if is_3d)."""
     points = []
     index = 0
@@ -121,7 +120,7 @@ def _decode_polyline(encoded: str, is_3d: bool = True) -> list[dict]:
     return points
 
 
-def _extract_street_names(path_data: dict) -> list[str]:
+def _extract_street_names(path_data: dict) -> List[str]:
     """Extract top street names from GraphHopper details."""
     details = path_data.get("details", {})
     street_data = details.get("street_name", [])
@@ -129,7 +128,7 @@ def _extract_street_names(path_data: dict) -> list[str]:
         return []
 
     # street_data is [[from_idx, to_idx, name], ...]
-    name_lengths: dict[str, int] = {}
+    name_lengths: Dict[str, int] = {}
     for segment in street_data:
         if len(segment) >= 3 and segment[2]:
             name = segment[2]
@@ -154,8 +153,8 @@ def _classify_difficulty(ascend_m: float, distance_m: float) -> str:
 
 
 async def _generate_route_name(
-    street_names: list[str], distance_miles: float, difficulty: str, index: int
-) -> tuple[str, str]:
+    street_names: List[str], distance_miles: float, difficulty: str, index: int
+) -> Tuple[str, str]:
     """Use Clawdbot to generate a creative route name and description."""
     fallback_name = f"Loop Route {index + 1}"
     fallback_desc = f"A {distance_miles:.1f}-mile {difficulty} loop"
@@ -193,7 +192,7 @@ async def _generate_route_name(
 
 async def discover_routes(
     lat: float, lng: float, distance_miles: float, num_routes: int = 3
-) -> list[dict]:
+) -> List[dict]:
     """Discover loop routes from a starting point using GraphHopper.
 
     Returns a list of route dicts with: name, description, polyline, distance_miles,
@@ -219,7 +218,7 @@ async def discover_routes(
         # Decode polyline
         encoded = path_data.get("points", "")
         if isinstance(encoded, str):
-            polyline = _decode_polyline(encoded, is_3d=path_data.get("points_encoded", True))
+            polyline = _decode_polyline(encoded, is_3d=False)
         elif isinstance(encoded, dict):
             # GeoJSON format
             coords = encoded.get("coordinates", [])
