@@ -34,6 +34,11 @@ EXERCISE_SEEDS = [
     {"exercise_name": "Leg Press", "muscle_group": "legs", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
     {"exercise_name": "Walking Lunges", "muscle_group": "legs", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
     {"exercise_name": "Calf Raises", "muscle_group": "legs", "current_working_weight": None, "current_rep_target": 15, "current_set_target": 3},
+
+    # Core
+    {"exercise_name": "Planks", "muscle_group": "core", "current_working_weight": None, "current_rep_target": 1, "current_set_target": 3},
+    {"exercise_name": "Cable Woodchops", "muscle_group": "core", "current_working_weight": 20, "current_rep_target": 12, "current_set_target": 3},
+    {"exercise_name": "Hanging Leg Raises", "muscle_group": "core", "current_working_weight": None, "current_rep_target": 10, "current_set_target": 3},
 ]
 
 

@@ -92,7 +92,7 @@ def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar]) -> str:
 Be brutally honest. No sugar coating."""
 
 
-async def call_clawdbot(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+async def call_clawdbot(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
     """Call Clawdbot's OpenAI-compatible chat completions endpoint."""
     payload = {
         "model": CLAWDBOT_MODEL,
@@ -100,7 +100,7 @@ async def call_clawdbot(system_prompt: str, user_prompt: str) -> dict[str, Any]:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.3,
+        "temperature": temperature,
     }
 
     if not CLAWDBOT_TOKEN:

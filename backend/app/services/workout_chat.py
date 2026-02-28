@@ -246,17 +246,8 @@ ATHLETE SAYS: {message}"""
 
         # Update exercise profiles with progressive overload data
         try:
-            from app.services.progressive_overload import update_profile_after_session
-            exercise_names = set(e.exercise_name for e in session.exercises if not e.is_warmup)
-            for name in exercise_names:
-                profile = (
-                    db.query(ExerciseProfile)
-                    .filter(ExerciseProfile.user_id == session.user_id, ExerciseProfile.exercise_name == name)
-                    .first()
-                )
-                if profile:
-                    logs = [e for e in session.exercises if e.exercise_name == name]
-                    update_profile_after_session(profile, logs, db)
+            from app.services.progressive_overload import update_profiles_after_session
+            update_profiles_after_session(session, db)
         except Exception as e:
             logger.warning("Failed to update profiles after session: %s", e)
 
@@ -289,17 +280,8 @@ def _fallback_response(
         db.commit()
 
         try:
-            from app.services.progressive_overload import update_profile_after_session
-            exercise_names = set(e.exercise_name for e in session.exercises if not e.is_warmup)
-            for name in exercise_names:
-                profile = (
-                    db.query(ExerciseProfile)
-                    .filter(ExerciseProfile.user_id == session.user_id, ExerciseProfile.exercise_name == name)
-                    .first()
-                )
-                if profile:
-                    logs = [e for e in session.exercises if e.exercise_name == name]
-                    update_profile_after_session(profile, logs, db)
+            from app.services.progressive_overload import update_profiles_after_session
+            update_profiles_after_session(session, db)
         except Exception as e:
             logger.warning("Failed to update profiles after session: %s", e)
 
