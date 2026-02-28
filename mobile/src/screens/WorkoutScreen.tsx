@@ -166,18 +166,44 @@ export default function WorkoutScreen() {
           </View>
         )}
 
-        {/* Completed Sets */}
-        {session?.exercises && session.exercises.length > 0 && (
-          <View style={s.card}>
-            <Text style={s.cardLabel}>COMPLETED</Text>
-            {session.exercises.map((ex: any, i: number) => (
-              <View key={i} style={s.setRow}>
-                <Text style={s.setName}>{ex.exercise_name}</Text>
-                <Text style={s.setDetail}>Set {ex.set_number}: {ex.weight}x{ex.reps}{ex.is_warmup ? '  warmup' : ''}</Text>
-              </View>
-            ))}
-          </View>
-        )}
+        {/* Completed Sets — grouped by exercise */}
+        {session?.exercises && session.exercises.length > 0 && (() => {
+          // Group exercises by name, preserving first-seen order
+          const groups: { name: string; sets: typeof session.exercises }[] = [];
+          const seen = new Map<string, number>();
+          for (const ex of session.exercises) {
+            const idx = seen.get(ex.exercise_name);
+            if (idx !== undefined) {
+              groups[idx].sets.push(ex);
+            } else {
+              seen.set(ex.exercise_name, groups.length);
+              groups.push({ name: ex.exercise_name, sets: [ex] });
+            }
+          }
+          return (
+            <View style={s.card}>
+              <Text style={s.cardLabel}>COMPLETED</Text>
+              {groups.map((group, gi) => (
+                <View key={gi} style={[s.exerciseGroup, gi < groups.length - 1 && s.exerciseGroupBorder]}>
+                  <Text style={s.groupName}>{group.name}</Text>
+                  <View style={s.setsContainer}>
+                    {group.sets.map((set, si) => (
+                      <View key={si} style={[s.setChip, set.is_warmup && s.setChipWarmup]}>
+                        <Text style={s.setChipText}>
+                          {set.duration_minutes
+                            ? `${set.duration_minutes}min`
+                            : set.distance_miles
+                              ? `${set.distance_miles}mi`
+                              : `${set.weight || '—'}×${set.reps || '—'}`}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+          );
+        })()}
 
         {/* Chat */}
         <View style={s.card}>
@@ -248,9 +274,16 @@ const s = StyleSheet.create({
   exerciseDetail: { ...typography.bodyBold, color: colors.accent },
   duration: { ...typography.caption, color: colors.textTertiary, marginTop: spacing.sm },
 
-  setRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm },
-  setName: { ...typography.caption, color: colors.textSecondary },
-  setDetail: { ...typography.caption, color: colors.text, fontWeight: '600' },
+  exerciseGroup: { paddingVertical: spacing.sm },
+  exerciseGroupBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  groupName: { ...typography.bodyBold, color: colors.text, marginBottom: spacing.xs },
+  setsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  setChip: {
+    backgroundColor: colors.input, borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+  },
+  setChipWarmup: { opacity: 0.5 },
+  setChipText: { ...typography.caption, color: colors.text, fontWeight: '600' },
 
   bubble: { borderRadius: 16, padding: spacing.md, marginBottom: spacing.sm, maxWidth: '85%' },
   userBubble: { backgroundColor: colors.accent, alignSelf: 'flex-end', borderBottomRightRadius: 4 },
