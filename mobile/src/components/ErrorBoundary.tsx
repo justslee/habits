@@ -37,5 +37,5 @@ const s = StyleSheet.create({
   title: { ...typography.title2, color: colors.text, marginBottom: spacing.sm },
   message: { ...typography.body, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
   btn: { backgroundColor: colors.accent, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: 12 },
-  btnText: { ...typography.callout, color: '#fff', fontWeight: '600' },
+  btnText: { ...typography.bodyBold, color: '#fff' },
 });

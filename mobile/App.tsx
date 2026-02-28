@@ -16,6 +16,7 @@ import RouteLibraryScreen from './src/screens/RouteLibraryScreen';
 import RouteSuggestionsScreen from './src/screens/RouteSuggestionsScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import PillarDetailScreen from './src/screens/PillarDetailScreen';
+import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
 
 const Tab = createBottomTabNavigator();
@@ -24,31 +25,35 @@ const ProgressStack = createStackNavigator();
 
 function TrainStackScreen() {
   return (
-    <TrainStack.Navigator screenOptions={{ headerShown: false }}>
-      <TrainStack.Screen name="TrainHome" component={TrainHomeScreen} />
-      <TrainStack.Screen name="TodayWorkout" component={WorkoutScreen} />
-      <TrainStack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} />
-      <TrainStack.Screen name="RunGPS" component={RunScreen} />
-      <TrainStack.Screen name="RunHistory" component={RunHistoryScreen} />
-      <TrainStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
-      <TrainStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
-      <TrainStack.Screen name="RouteSuggestions" component={RouteSuggestionsScreen} />
-    </TrainStack.Navigator>
+    <ErrorBoundary name="TrainStack">
+      <TrainStack.Navigator screenOptions={{ headerShown: false }}>
+        <TrainStack.Screen name="TrainHome" component={TrainHomeScreen} />
+        <TrainStack.Screen name="TodayWorkout" component={WorkoutScreen} />
+        <TrainStack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} />
+        <TrainStack.Screen name="RunGPS" component={RunScreen} />
+        <TrainStack.Screen name="RunHistory" component={RunHistoryScreen} />
+        <TrainStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
+        <TrainStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
+        <TrainStack.Screen name="RouteSuggestions" component={RouteSuggestionsScreen} />
+      </TrainStack.Navigator>
+    </ErrorBoundary>
   );
 }
 
 function ProgressStackScreen() {
   return (
-    <ProgressStack.Navigator screenOptions={{ headerShown: false }}>
-      <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} />
-      <ProgressStack.Screen name="PillarDetail" component={PillarDetailScreen} />
-    </ProgressStack.Navigator>
+    <ErrorBoundary name="ProgressStack">
+      <ProgressStack.Navigator screenOptions={{ headerShown: false }}>
+        <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} />
+        <ProgressStack.Screen name="PillarDetail" component={PillarDetailScreen} />
+      </ProgressStack.Navigator>
+    </ErrorBoundary>
   );
 }
 
 const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
   Daily: { active: 'today', inactive: 'today-outline' },
-  Train: { active: 'barbell', inactive: 'barbell-outline' },
+  Train: { active: 'fitness', inactive: 'fitness-outline' },
   Progress: { active: 'stats-chart', inactive: 'stats-chart-outline' },
 };
 

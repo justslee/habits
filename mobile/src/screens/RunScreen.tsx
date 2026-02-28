@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform, Alert,
   Animated as RNAnimated, AppState,
@@ -49,6 +49,12 @@ export default function RunScreen({ navigation }: any) {
   const coachConfigRef = useRef<CoachConfig>({
     enabled: true, targetPaceSeconds: null, runType: 'easy', segments: [], targetDistanceMiles: null,
   });
+
+  const planned = todayRun?.planned_run;
+  const segments = useMemo<any[]>(() => {
+    if (!planned?.structure) return [];
+    try { return JSON.parse(planned.structure); } catch { return []; }
+  }, [planned?.structure]);
 
   useEffect(() => {
     requestLocationPermissions().then(setPermissionGranted);
@@ -194,14 +200,7 @@ export default function RunScreen({ navigation }: any) {
 
   const { distanceMiles, currentPaceSeconds, elapsedMs, elevationGainFt, splits, points } = runState;
   const lastPoint = points.length > 0 ? points[points.length - 1] : null;
-  const planned = todayRun?.planned_run;
   const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
-
-  // Parse structure
-  let segments: any[] = [];
-  if (planned?.structure) {
-    try { segments = JSON.parse(planned.structure); } catch (err) { console.warn('Failed to parse run structure', err); }
-  }
 
   // === PRE-RUN ===
   if (phase === 'pre') {
