@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  graphhopper:
+    image: israelhikingmap/graphhopper:latest
+    container_name: habits-graphhopper
+    ports:
+      - "8989:8989"
+    volumes:
+      - ./graphhopper-data:/data
+    environment:
+      JAVA_OPTS: "-Xmx512m -Xms256m"
+    command: >
+      --datareader.file=/data/region.osm.pbf
+      --graph.location=/data/graph-cache
+      --profiles=foot
+      --graph.encoded_values=surface
+      --server.application-connectors[0].port=8989
+    restart: unless-stopped

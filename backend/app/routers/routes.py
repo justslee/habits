@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,9 +12,68 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.run import RunSession, SavedRoute
 from app.models.user import User
-from app.schemas.route import SavedRouteCreate, SavedRouteListItem, SavedRouteResponse
+from app.schemas.route import (
+    DiscoveredRoute,
+    RouteDiscoverRequest,
+    RouteDiscoverResponse,
+    SavedRouteCreate,
+    SavedRouteListItem,
+    SavedRouteResponse,
+)
 
 router = APIRouter(prefix="/api/v1/routes", tags=["routes"])
+
+
+@router.post("/discover", response_model=RouteDiscoverResponse)
+async def discover_routes(payload: RouteDiscoverRequest):
+    """Discover loop routes from a starting point using GraphHopper."""
+    from app.services.route_discovery import check_graphhopper_health, discover_routes as _discover
+
+    if not await check_graphhopper_health():
+        raise HTTPException(status_code=503, detail="Route engine offline")
+
+    routes = await _discover(payload.latitude, payload.longitude, payload.distance_miles)
+
+    return RouteDiscoverResponse(
+        routes=[
+            DiscoveredRoute(
+                name=r["name"],
+                description=r["description"],
+                polyline=r["polyline"],
+                distance_miles=r["distance_miles"],
+                elevation_gain_ft=r["elevation_gain_ft"],
+                difficulty=r["difficulty"],
+                street_names=r["street_names"],
+                estimated_time_minutes=r["estimated_time_minutes"],
+            )
+            for r in routes
+        ],
+        cached=False,
+    )
+
+
+@router.post("/discover/save", response_model=SavedRouteResponse)
+def save_discovered_route(payload: SavedRouteCreate, db: Session = Depends(get_db)):
+    """Save a discovered route to the user's library."""
+    user = db.query(User).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No user found")
+
+    route = SavedRoute(
+        user_id=user.id,
+        name=payload.name,
+        waypoints=payload.waypoints,
+        polyline=payload.polyline,
+        distance_miles=payload.distance_miles,
+        elevation_gain_ft=payload.elevation_gain_ft,
+        route_type=payload.route_type or "loop",
+        tags=payload.tags,
+        description=payload.description,
+    )
+    db.add(route)
+    db.commit()
+    db.refresh(route)
+    return _route_to_response(route)
 
 
 @router.post("/", response_model=SavedRouteResponse)

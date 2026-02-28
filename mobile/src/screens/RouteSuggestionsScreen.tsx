@@ -1,297 +1,119 @@
 /**
- * RouteSuggestionsScreen — AI-powered running route discovery.
- *
- * Uses current GPS location to generate route suggestions via Clawdbot.
- * Shows route cards with mini map previews, difficulty badges, and save/run actions.
+ * Route Discovery — discover loop routes from your current location.
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Alert, Dimensions,
+  ActivityIndicator, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import MapView, { Polyline, Marker } from 'react-native-maps';
-import { colors, spacing, typography, radius } from '../theme';
+import MapView, { Polyline } from '../components/MapView';
+import { discoverRoutes, saveDiscoveredRoute, DiscoveredRoute } from '../api/client';
+import { colors, spacing, typography, radius, cardStyle } from '../theme';
 import { haptic } from '../utils/haptics';
-import {
-  discoverRoutes, saveDiscoveredRoute,
-  DiscoveredRoute, RouteDiscoveryResult,
-} from '../api/client';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const DISTANCE_OPTIONS = [
+  { label: '1 mi', value: 1 },
+  { label: '2 mi', value: 2 },
+  { label: '5K', value: 3.1 },
+  { label: '5 mi', value: 5 },
+  { label: '10K', value: 6.2 },
+  { label: '10 mi', value: 10 },
+];
 
 const DIFFICULTY_COLORS: Record<string, string> = {
-  easy: '#10B981',
-  moderate: '#F59E0B',
-  challenging: '#EF4444',
+  easy: colors.success,
+  moderate: colors.warning,
+  hilly: colors.error,
 };
-
-const TERRAIN_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  road: 'car-outline',
-  trail: 'leaf-outline',
-  mixed: 'git-merge-outline',
-  track: 'ellipse-outline',
-};
-
-const DISTANCE_FILTERS = [
-  { label: '1-3 mi', min: 1, max: 3, target: 2 },
-  { label: '3-5 mi', min: 3, max: 5, target: 4 },
-  { label: '5-8 mi', min: 5, max: 8, target: 6.5 },
-  { label: '8+ mi', min: 8, max: 15, target: 10 },
-];
-
-const TERRAIN_FILTERS = ['flat', 'hilly', 'scenic', 'shaded'];
-
-const FUN_MESSAGES = [
-  'Finding routes near you...',
-  'Mapping the neighborhood...',
-  'Scouting the best paths...',
-  'Checking elevation data...',
-  'Almost there...',
-];
 
 export default function RouteSuggestionsScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [result, setResult] = useState<RouteDiscoveryResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState(FUN_MESSAGES[0]);
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [distance, setDistance] = useState(3.1);
+  const [routes, setRoutes] = useState<DiscoveredRoute[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savingIdx, setSavingIdx] = useState<number | null>(null);
+  const [savedIdxs, setSavedIdxs] = useState<Set<number>>(new Set());
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Filters
-  const [distanceFilter, setDistanceFilter] = useState<number | null>(null); // index
-  const [terrainPrefs, setTerrainPrefs] = useState<string[]>([]);
-
-  // Cycle through fun loading messages
-  useEffect(() => {
-    if (!loading) return;
-    let idx = 0;
-    const timer = setInterval(() => {
-      idx = (idx + 1) % FUN_MESSAGES.length;
-      setLoadingMsg(FUN_MESSAGES[idx]);
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [loading]);
-
-  const fetchLocation = useCallback(async (): Promise<{ lat: number; lng: number } | null> => {
+  const getLocation = useCallback(async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Location Required', 'Please enable location services to discover routes nearby.');
+        setError('Location permission required');
         return null;
       }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const coords = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-      setLocation(coords);
-      return coords;
-    } catch (err) {
-      console.warn('Location error:', err);
-      Alert.alert('Location Error', 'Could not get your current location.');
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const c = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+      setCoords(c);
+      return c;
+    } catch {
+      setError('Could not get location');
       return null;
     }
   }, []);
 
-  const discover = useCallback(async (coords?: { lat: number; lng: number } | null) => {
-    const loc = coords || location;
+  const discover = useCallback(async (distMiles: number) => {
+    setLoading(true);
+    setError(null);
+    setRoutes([]);
+    setSavedIdxs(new Set());
+
+    let loc = coords;
     if (!loc) {
-      const fetched = await fetchLocation();
-      if (!fetched) { setLoading(false); return; }
-      return discover(fetched);
+      loc = await getLocation();
+      if (!loc) { setLoading(false); return; }
     }
 
-    setLoading(true);
     try {
-      const target = distanceFilter !== null ? DISTANCE_FILTERS[distanceFilter].target : undefined;
-      const prefs = terrainPrefs.length > 0 ? terrainPrefs : undefined;
-      const data = await discoverRoutes(loc.lat, loc.lng, target, prefs);
-      setResult(data);
-    } catch (err) {
-      console.warn('Route discovery error:', err);
-      setResult({ routes: [], area_name: 'Unknown', tips: 'Failed to discover routes. Try again.', error: String(err) });
+      const resp = await discoverRoutes(loc.lat, loc.lng, distMiles);
+      setRoutes(resp.routes);
+      if (resp.routes.length === 0) {
+        setError('No routes found for this distance. Try a different distance.');
+      }
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.includes('503')) {
+        setError('Route engine offline. Start GraphHopper first.');
+      } else {
+        setError('Failed to discover routes. Check connection.');
+      }
     }
     setLoading(false);
-  }, [location, distanceFilter, terrainPrefs, fetchLocation]);
+  }, [coords, getLocation]);
 
   useEffect(() => {
-    (async () => {
-      const coords = await fetchLocation();
-      if (coords) await discover(coords);
-      else setLoading(false);
-    })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    discover(distance);
+  }, []);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await discover();
-    setRefreshing(false);
-  }, [discover]);
-
-  const handleSave = async (route: DiscoveredRoute) => {
+  const onDistanceChange = (val: number) => {
+    setDistance(val);
     haptic.light();
-    setSavingId(route.name);
+    discover(val);
+  };
+
+  const saveRoute = async (route: DiscoveredRoute, idx: number) => {
+    setSavingIdx(idx);
     try {
       await saveDiscoveredRoute(route);
-      Alert.alert('Saved!', `${route.name} added to your Route Library.`);
-    } catch (err) {
-      console.warn('Save failed:', err);
-      Alert.alert('Error', 'Failed to save route.');
+      haptic.success();
+      setSavedIdxs(prev => new Set(prev).add(idx));
+    } catch {
+      haptic.error();
     }
-    setSavingId(null);
-  };
-
-  const handleRunThis = (route: DiscoveredRoute) => {
-    haptic.medium();
-    // Navigate to RunScreen with route context
-    navigation?.navigate?.('RunGPS', {
-      routeName: route.name,
-      targetMiles: route.distance_miles,
-      waypoints: route.waypoints,
-    });
-  };
-
-  const renderRouteCard = (route: DiscoveredRoute, index: number) => {
-    const diffColor = DIFFICULTY_COLORS[route.difficulty] || colors.textSecondary;
-    const terrainIcon = TERRAIN_ICONS[route.terrain] || 'map-outline';
-    const hasWaypoints = route.waypoints && route.waypoints.length >= 2;
-
-    // Calculate map region from waypoints
-    let mapRegion = null;
-    if (hasWaypoints) {
-      const lats = route.waypoints.map(w => w.lat);
-      const lngs = route.waypoints.map(w => w.lng);
-      const minLat = Math.min(...lats);
-      const maxLat = Math.max(...lats);
-      const minLng = Math.min(...lngs);
-      const maxLng = Math.max(...lngs);
-      mapRegion = {
-        latitude: (minLat + maxLat) / 2,
-        longitude: (minLng + maxLng) / 2,
-        latitudeDelta: (maxLat - minLat) * 1.5 + 0.005,
-        longitudeDelta: (maxLng - minLng) * 1.5 + 0.005,
-      };
-    }
-
-    return (
-      <View key={index} style={styles.routeCard}>
-        {/* Mini Map */}
-        {hasWaypoints && mapRegion && (
-          <View style={styles.miniMapContainer}>
-            <MapView
-              style={styles.miniMap}
-              region={mapRegion}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              rotateEnabled={false}
-              pitchEnabled={false}
-              showsUserLocation={false}
-              liteMode
-            >
-              <Polyline
-                coordinates={route.waypoints.map(w => ({ latitude: w.lat, longitude: w.lng }))}
-                strokeColor={colors.accent}
-                strokeWidth={3}
-              />
-              {/* Start marker */}
-              <Marker
-                coordinate={{ latitude: route.waypoints[0].lat, longitude: route.waypoints[0].lng }}
-                pinColor="#10B981"
-              />
-              {/* End marker */}
-              <Marker
-                coordinate={{
-                  latitude: route.waypoints[route.waypoints.length - 1].lat,
-                  longitude: route.waypoints[route.waypoints.length - 1].lng,
-                }}
-                pinColor="#EF4444"
-              />
-            </MapView>
-          </View>
-        )}
-
-        {/* Route Info */}
-        <View style={styles.routeInfo}>
-          <View style={styles.routeHeader}>
-            <Text style={styles.routeName} numberOfLines={1}>{route.name}</Text>
-            <View style={[styles.diffBadge, { backgroundColor: diffColor + '20' }]}>
-              <Text style={[styles.diffText, { color: diffColor }]}>
-                {route.difficulty.toUpperCase()}
-              </Text>
-            </View>
-          </View>
-
-          <Text style={styles.routeDesc} numberOfLines={2}>{route.description}</Text>
-
-          {/* Stats row */}
-          <View style={styles.routeStats}>
-            <View style={styles.routeStat}>
-              <Ionicons name="resize-outline" size={14} color={colors.textTertiary} />
-              <Text style={styles.routeStatText}>{route.distance_miles.toFixed(1)} mi</Text>
-            </View>
-            <View style={styles.routeStat}>
-              <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
-              <Text style={styles.routeStatText}>~{route.estimated_minutes} min</Text>
-            </View>
-            <View style={styles.routeStat}>
-              <Ionicons name="trending-up-outline" size={14} color={colors.textTertiary} />
-              <Text style={styles.routeStatText}>{route.elevation_gain_ft} ft</Text>
-            </View>
-            <View style={styles.routeStat}>
-              <Ionicons name={terrainIcon} size={14} color={colors.textTertiary} />
-              <Text style={styles.routeStatText}>{route.terrain}</Text>
-            </View>
-          </View>
-
-          {/* Tags */}
-          {route.tags.length > 0 && (
-            <View style={styles.tagsRow}>
-              {route.tags.slice(0, 4).map(tag => (
-                <View key={tag} style={styles.tagChip}>
-                  <Text style={styles.tagText}>{tag}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Action buttons */}
-          <View style={styles.routeActions}>
-            <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={() => handleSave(route)}
-              disabled={savingId === route.name}
-            >
-              {savingId === route.name ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : (
-                <>
-                  <Ionicons name="bookmark-outline" size={16} color={colors.accent} />
-                  <Text style={styles.saveBtnText}>Save</Text>
-                </>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.runBtn}
-              onPress={() => handleRunThis(route)}
-            >
-              <Ionicons name="play" size={16} color="#fff" />
-              <Text style={styles.runBtnText}>Run This</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
+    setSavingIdx(null);
   };
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40 }}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
-      }
     >
       {/* Header */}
       <View style={styles.header}>
@@ -301,111 +123,149 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
         <Text style={styles.title}>Discover Routes</Text>
       </View>
 
-      {/* Area name */}
-      {result?.area_name && !loading && (
-        <View style={styles.areaRow}>
-          <Ionicons name="location" size={16} color={colors.accent} />
-          <Text style={styles.areaName}>{result.area_name}</Text>
-        </View>
-      )}
-
-      {/* Distance filters */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-        {DISTANCE_FILTERS.map((df, idx) => {
-          const active = distanceFilter === idx;
-          return (
-            <TouchableOpacity
-              key={df.label}
-              style={[styles.filterChip, active && styles.filterChipActive]}
-              onPress={() => {
-                haptic.selection();
-                setDistanceFilter(active ? null : idx);
-              }}
-            >
-              <Text style={[styles.filterText, active && styles.filterTextActive]}>{df.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
+      {/* Distance Selector */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.pillRow}
+      >
+        {DISTANCE_OPTIONS.map(opt => (
+          <TouchableOpacity
+            key={opt.value}
+            style={[styles.pill, distance === opt.value && styles.pillActive]}
+            onPress={() => onDistanceChange(opt.value)}
+          >
+            <Text style={[styles.pillText, distance === opt.value && styles.pillTextActive]}>
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </ScrollView>
 
-      {/* Terrain preference pills */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-        {TERRAIN_FILTERS.map(tf => {
-          const active = terrainPrefs.includes(tf);
-          return (
-            <TouchableOpacity
-              key={tf}
-              style={[styles.filterChip, active && styles.filterChipActive]}
-              onPress={() => {
-                haptic.selection();
-                setTerrainPrefs(prev =>
-                  active ? prev.filter(x => x !== tf) : [...prev, tf]
-                );
-              }}
-            >
-              <Text style={[styles.filterText, active && styles.filterTextActive]}>
-                {tf.charAt(0).toUpperCase() + tf.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-        {/* Re-discover button */}
-        <TouchableOpacity
-          style={[styles.filterChip, { backgroundColor: colors.accentMuted, borderColor: colors.accent }]}
-          onPress={() => discover()}
-        >
-          <Ionicons name="refresh" size={14} color={colors.accent} />
-          <Text style={[styles.filterText, { color: colors.accent, marginLeft: 4 }]}>Refresh</Text>
-        </TouchableOpacity>
-      </ScrollView>
-
-      {/* Loading state */}
+      {/* Loading State */}
       {loading && (
-        <View style={styles.loadingState}>
-          <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.loadingText}>{loadingMsg}</Text>
-        </View>
-      )}
-
-      {/* Results */}
-      {!loading && result && result.routes.length > 0 && (
-        <>
-          {result.routes.map((route, idx) => renderRouteCard(route, idx))}
-
-          {result.tips && (
-            <View style={styles.tipsCard}>
-              <Ionicons name="bulb-outline" size={16} color={colors.warning} />
-              <Text style={styles.tipsText}>{result.tips}</Text>
+        <View style={styles.loadingContainer}>
+          {[0, 1, 2].map(i => (
+            <View key={i} style={styles.skeletonCard}>
+              <View style={styles.skeletonMap} />
+              <View style={styles.skeletonLines}>
+                <View style={[styles.skeletonBar, { width: '70%' }]} />
+                <View style={[styles.skeletonBar, { width: '90%' }]} />
+                <View style={[styles.skeletonBar, { width: '50%' }]} />
+              </View>
             </View>
-          )}
-        </>
+          ))}
+          <ActivityIndicator size="large" color={colors.accent} style={{ marginTop: spacing.md }} />
+          <Text style={styles.loadingText}>Finding routes near you...</Text>
+        </View>
       )}
 
-      {/* Empty state */}
-      {!loading && result && result.routes.length === 0 && (
-        <View style={styles.emptyState}>
+      {/* Error State */}
+      {error && !loading && (
+        <View style={styles.errorContainer}>
           <Ionicons name="compass-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No routes found</Text>
-          <Text style={styles.emptySubtext}>
-            {result.error ? 'Route discovery service is unavailable.' : 'Try different distance or terrain filters.'}
-          </Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => discover()}>
-            <Text style={styles.retryText}>Try Again</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => discover(distance)}>
+            <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* No location */}
-      {!loading && !location && (
-        <View style={styles.emptyState}>
-          <Ionicons name="location-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>Location needed</Text>
-          <Text style={styles.emptySubtext}>Enable location services to discover routes near you.</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => discover()}>
-            <Text style={styles.retryText}>Enable & Discover</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Route Cards */}
+      {!loading && routes.map((route, idx) => {
+        const diffColor = DIFFICULTY_COLORS[route.difficulty] || colors.textTertiary;
+        const isSaved = savedIdxs.has(idx);
+
+        // Calculate map region from polyline
+        const lats = route.polyline.map(p => p.lat);
+        const lngs = route.polyline.map(p => p.lng);
+        const minLat = Math.min(...lats);
+        const maxLat = Math.max(...lats);
+        const minLng = Math.min(...lngs);
+        const maxLng = Math.max(...lngs);
+        const padding = 0.002;
+
+        return (
+          <View key={idx} style={styles.routeCard}>
+            {/* Mini Map */}
+            {Platform.OS !== 'web' && route.polyline.length > 1 && (
+              <MapView
+                style={styles.miniMap}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                initialRegion={{
+                  latitude: (minLat + maxLat) / 2,
+                  longitude: (minLng + maxLng) / 2,
+                  latitudeDelta: (maxLat - minLat) + padding,
+                  longitudeDelta: (maxLng - minLng) + padding,
+                }}
+              >
+                <Polyline
+                  coordinates={route.polyline.map(p => ({ latitude: p.lat, longitude: p.lng }))}
+                  strokeColor={colors.accent}
+                  strokeWidth={3}
+                />
+              </MapView>
+            )}
+
+            {/* Route Info */}
+            <View style={styles.routeInfo}>
+              <Text style={styles.routeName}>{route.name}</Text>
+              <Text style={styles.routeDesc}>{route.description}</Text>
+
+              {/* Stats Row */}
+              <View style={styles.statsRow}>
+                <View style={styles.stat}>
+                  <Ionicons name="resize-outline" size={14} color={colors.textSecondary} />
+                  <Text style={styles.statText}>{route.distance_miles.toFixed(1)} mi</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Ionicons name="trending-up-outline" size={14} color={colors.textSecondary} />
+                  <Text style={styles.statText}>{route.elevation_gain_ft} ft</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                  <Text style={styles.statText}>{route.estimated_time_minutes} min</Text>
+                </View>
+                <View style={[styles.diffBadge, { backgroundColor: diffColor + '20' }]}>
+                  <Text style={[styles.diffText, { color: diffColor }]}>{route.difficulty}</Text>
+                </View>
+              </View>
+
+              {/* Street Names */}
+              {route.street_names.length > 0 && (
+                <Text style={styles.streets} numberOfLines={1}>
+                  {route.street_names.join(' · ')}
+                </Text>
+              )}
+            </View>
+
+            {/* Save Button */}
+            <TouchableOpacity
+              style={[styles.saveBtn, isSaved && styles.saveBtnSaved]}
+              onPress={() => saveRoute(route, idx)}
+              disabled={isSaved || savingIdx === idx}
+            >
+              {savingIdx === idx ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : (
+                <>
+                  <Ionicons
+                    name={isSaved ? 'checkmark' : 'bookmark-outline'}
+                    size={16}
+                    color={isSaved ? colors.success : colors.accent}
+                  />
+                  <Text style={[styles.saveBtnText, isSaved && { color: colors.success }]}>
+                    {isSaved ? 'Saved' : 'Save'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -420,82 +280,70 @@ const styles = StyleSheet.create({
   backBtn: { marginRight: spacing.md },
   title: { ...typography.title1, color: colors.text },
 
-  areaRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingHorizontal: spacing.lg, marginBottom: spacing.md,
+  pillRow: {
+    paddingHorizontal: spacing.lg, gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
-  areaName: { ...typography.body, color: colors.textSecondary },
-
-  filterScroll: { paddingHorizontal: spacing.lg, marginBottom: spacing.sm, maxHeight: 40 },
-  filterChip: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill,
-    borderWidth: 1, borderColor: colors.border, marginRight: spacing.sm,
-    backgroundColor: colors.card,
-  },
-  filterChipActive: { backgroundColor: colors.accentMuted, borderColor: colors.accent },
-  filterText: { ...typography.caption, color: colors.textSecondary },
-  filterTextActive: { color: colors.accent },
-
-  loadingState: { alignItems: 'center', paddingTop: 80, gap: spacing.lg },
-  loadingText: { ...typography.body, color: colors.textSecondary },
-
-  // Route cards
-  routeCard: {
-    marginHorizontal: spacing.lg, marginBottom: spacing.lg,
-    backgroundColor: colors.card, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
-  },
-  miniMapContainer: { height: 150, overflow: 'hidden' },
-  miniMap: { flex: 1 },
-  routeInfo: { padding: spacing.lg },
-  routeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
-  routeName: { ...typography.title3, color: colors.text, flex: 1, marginRight: spacing.sm },
-  diffBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.sm },
-  diffText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  routeDesc: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.md, lineHeight: 18 },
-
-  routeStats: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.sm, flexWrap: 'wrap' },
-  routeStat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  routeStatText: { ...typography.micro, color: colors.textTertiary },
-
-  tagsRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.md, flexWrap: 'wrap' },
-  tagChip: {
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill,
-    backgroundColor: colors.input,
-  },
-  tagText: { ...typography.micro, color: colors.textSecondary, fontSize: 10 },
-
-  routeActions: { flexDirection: 'row', gap: spacing.md },
-  saveBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: spacing.sm + 2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.accent, gap: 6,
-  },
-  saveBtnText: { ...typography.bodyBold, color: colors.accent, fontSize: 14 },
-  runBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: spacing.sm + 2, borderRadius: radius.md,
-    backgroundColor: colors.accent, gap: 6,
-  },
-  runBtnText: { ...typography.bodyBold, color: '#fff', fontSize: 14 },
-
-  // Tips
-  tipsCard: {
-    flexDirection: 'row', gap: spacing.sm,
-    marginHorizontal: spacing.lg, padding: spacing.md,
-    backgroundColor: colors.cardElevated, borderRadius: radius.md,
+  pill: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: radius.xl, backgroundColor: colors.card,
     borderWidth: 1, borderColor: colors.border,
   },
-  tipsText: { ...typography.caption, color: colors.textSecondary, flex: 1, lineHeight: 18 },
+  pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  pillText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
+  pillTextActive: { color: '#fff' },
 
-  // Empty
-  emptyState: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
-  emptyText: { ...typography.title3, color: colors.textSecondary },
-  emptySubtext: { ...typography.caption, color: colors.textTertiary, textAlign: 'center', paddingHorizontal: spacing.xl },
-  retryBtn: {
-    marginTop: spacing.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.lg,
-    borderRadius: radius.md, backgroundColor: colors.accentMuted,
+  loadingContainer: { alignItems: 'center', paddingHorizontal: spacing.lg },
+  skeletonCard: {
+    ...cardStyle, marginBottom: spacing.md, width: '100%',
+    marginHorizontal: spacing.lg,
   },
-  retryText: { ...typography.bodyBold, color: colors.accent },
+  skeletonMap: {
+    height: 150, backgroundColor: colors.input, borderRadius: radius.sm,
+    marginBottom: spacing.md,
+  },
+  skeletonLines: { gap: spacing.sm },
+  skeletonBar: {
+    height: 12, backgroundColor: colors.input, borderRadius: radius.sm,
+  },
+  loadingText: {
+    ...typography.caption, color: colors.textTertiary, marginTop: spacing.sm,
+  },
+
+  errorContainer: {
+    alignItems: 'center', paddingTop: 60, gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  errorText: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
+  retryBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    backgroundColor: colors.accent, borderRadius: radius.sm,
+  },
+  retryText: { ...typography.bodyBold, color: '#fff' },
+
+  routeCard: {
+    ...cardStyle, marginHorizontal: spacing.lg, marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  miniMap: { height: 150, borderRadius: radius.sm, marginBottom: spacing.md },
+  routeInfo: { paddingBottom: spacing.sm },
+  routeName: { ...typography.title3, color: colors.text, marginBottom: 4 },
+  routeDesc: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.md },
+
+  statsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.sm },
+  stat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
+  diffBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.sm },
+  diffText: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
+
+  streets: { ...typography.micro, color: colors.textTertiary },
+
+  saveBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.xs, marginTop: spacing.md,
+    paddingVertical: spacing.sm, borderRadius: radius.sm,
+    backgroundColor: colors.accentMuted, borderWidth: 1, borderColor: colors.accent + '30',
+  },
+  saveBtnSaved: { backgroundColor: colors.success + '15', borderColor: colors.success + '30' },
+  saveBtnText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
 });

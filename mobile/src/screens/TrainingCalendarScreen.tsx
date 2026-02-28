@@ -22,6 +22,17 @@ const RUN_TYPE_COLORS: Record<string, string> = {
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+// Weekly gym schedule — matches WorkoutScreen DAY_LABELS
+const WEEKLY_SCHEDULE = ['push', 'pull', 'legs', 'rest', 'cardio', 'basketball', 'rest'] as const;
+const DAY_TYPE_LABELS: Record<string, string> = {
+  push: 'Push Day', pull: 'Pull Day', legs: 'Legs + Core',
+  cardio: 'Cardio', basketball: 'Basketball', rest: 'Rest Day',
+};
+const DAY_TYPE_COLORS: Record<string, string> = {
+  push: '#3B82F6', pull: '#8B5CF6', legs: '#EF4444',
+  cardio: '#10B981', basketball: '#F59E0B', rest: '#6B7280',
+};
+
 interface PlannedRun {
   id: number;
   week_number: number;
@@ -151,25 +162,40 @@ export default function TrainingCalendarScreen({ navigation }: any) {
       {/* Day cards */}
       {DAY_NAMES.map((day, dayIdx) => {
         const run = weekRuns.find(r => r.day_of_week === dayIdx);
-        const typeColor = run ? (RUN_TYPE_COLORS[run.run_type] || colors.accent) : colors.textTertiary;
+        const gymType = WEEKLY_SCHEDULE[dayIdx];
+        const gymColor = DAY_TYPE_COLORS[gymType] || colors.textTertiary;
+        const gymLabel = DAY_TYPE_LABELS[gymType] || gymType;
+        const isRest = gymType === 'rest';
+        const runColor = run ? (RUN_TYPE_COLORS[run.run_type] || colors.accent) : undefined;
 
         return (
-          <View key={dayIdx} style={[styles.dayCard, !run && styles.dayCardEmpty]}>
+          <View key={dayIdx} style={[styles.dayCard, isRest && !run && styles.dayCardEmpty]}>
             <View style={styles.dayLeft}>
-              <Text style={[styles.dayName, !run && { color: colors.textTertiary }]}>{day}</Text>
-              {run && (
-                <View style={[styles.typeDot, { backgroundColor: typeColor }]} />
-              )}
+              <Text style={[styles.dayName, isRest && !run && { color: colors.textTertiary }]}>{day}</Text>
+              <View style={[styles.typeDot, { backgroundColor: gymColor }]} />
             </View>
 
-            {run ? (
-              <View style={styles.dayCenter}>
-                <View style={styles.dayTopRow}>
-                  <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
-                    <Text style={[styles.typeBadgeText, { color: typeColor }]}>
+            <View style={styles.dayCenter}>
+              {/* Always show the gym day type */}
+              <View style={styles.dayTopRow}>
+                <View style={[styles.typeBadge, { backgroundColor: gymColor + '15' }]}>
+                  <Text style={[styles.typeBadgeText, { color: gymColor }]}>
+                    {gymLabel.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Show planned run below if one exists */}
+              {run && (
+                <View style={[styles.dayTopRow, { marginTop: 4 }]}>
+                  <View style={[styles.typeBadge, { backgroundColor: (runColor || colors.accent) + '15' }]}>
+                    <Text style={[styles.typeBadgeText, { color: runColor || colors.accent }]}>
                       {run.run_type.toUpperCase()}
                     </Text>
                   </View>
+                  <Text style={styles.dayDescription} numberOfLines={1}>
+                    {run.description || `${run.target_distance_miles || '?'} mi`}
+                  </Text>
                   {run.status === 'completed' && (
                     <Ionicons name="checkmark-circle" size={18} color={colors.success} />
                   )}
@@ -177,15 +203,8 @@ export default function TrainingCalendarScreen({ navigation }: any) {
                     <Ionicons name="close-circle" size={18} color={colors.error} />
                   )}
                 </View>
-                <Text style={styles.dayDescription} numberOfLines={1}>
-                  {run.description || `${run.target_distance_miles || '?'} mi`}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.dayCenter}>
-                <Text style={styles.restText}>Rest</Text>
-              </View>
-            )}
+              )}
+            </View>
 
             {run && (
               <View style={styles.dayRight}>

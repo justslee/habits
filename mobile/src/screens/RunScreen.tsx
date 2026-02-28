@@ -210,6 +210,9 @@ export default function RunScreen({ navigation }: any) {
         <View style={s.preHeader}>
           <Text style={s.screenTitle}>Run</Text>
           <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+            <TouchableOpacity onPress={() => navigation?.navigate?.('RouteSuggestions')} style={s.historyBtn}>
+              <Ionicons name="compass-outline" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate?.('RouteLibrary')} style={s.historyBtn}>
               <Ionicons name="map-outline" size={20} color={colors.textSecondary} />
             </TouchableOpacity>

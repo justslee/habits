@@ -110,7 +110,9 @@ export function processGpsPoint(state: RunState, point: GpsPoint): RunState {
   const newState = { ...state };
   const prevPoint = state.points.length > 0 ? state.points[state.points.length - 1] : null;
 
-  newState.points = [...state.points, point];
+  // Mutate the points array in-place to avoid O(n) copy every GPS tick
+  state.points.push(point);
+  newState.points = state.points;
 
   if (prevPoint) {
     // Distance
@@ -147,10 +149,13 @@ export function processGpsPoint(state: RunState, point: GpsPoint): RunState {
       }
     }
 
-    // Current pace (rolling ~30 second window)
-    const recentPoints = newState.points.filter(
-      (p) => point.timestamp - p.timestamp < 30000 && point.timestamp - p.timestamp > 0
-    );
+    // Current pace (rolling ~30 second window) — scan from end to avoid O(n) filter
+    const recentPoints: GpsPoint[] = [];
+    for (let i = newState.points.length - 2; i >= 0; i--) {
+      const dt = point.timestamp - newState.points[i].timestamp;
+      if (dt > 30000) break;
+      if (dt > 0) recentPoints.unshift(newState.points[i]);
+    }
     if (recentPoints.length > 0) {
       const first = recentPoints[0];
       const segDist = haversineMeters(
@@ -243,7 +248,7 @@ if (Platform.OS !== 'web') {
 export async function startBackgroundTracking(): Promise<void> {
   if (Platform.OS === 'web') return;
   await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-    accuracy: Location.Accuracy.BestForNavigation,
+    accuracy: Location.Accuracy.High,
     timeInterval: 3000,
     distanceInterval: 5, // meters
     showsBackgroundLocationIndicator: true,
@@ -274,7 +279,7 @@ export async function watchLocation(
 ): Promise<{ remove: () => void }> {
   if (Platform.OS === 'web') return { remove: () => {} };
   const sub = await Location.watchPositionAsync(
-    { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
+    { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
     loc => {
       onPoint({
         latitude: loc.coords.latitude,
