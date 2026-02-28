@@ -1,17 +1,18 @@
-"""Workout API endpoints — Phase 2."""
+"""Workout API endpoints — Phase 2 + Unified Training Hub."""
 
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.user import User
 from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
+from app.models.run import RunSession
 from app.schemas.workout import (
     ChatMessage,
     ChatResponse,
@@ -122,7 +123,10 @@ def list_workout_sessions(
     if not user:
         return []
 
-    q = db.query(WorkoutSession).filter(WorkoutSession.user_id == user.id)
+    q = db.query(WorkoutSession).filter(
+        WorkoutSession.user_id == user.id,
+        WorkoutSession.deleted_at.is_(None),
+    )
     if day_type:
         q = q.filter(WorkoutSession.day_type == day_type)
     sessions = q.order_by(WorkoutSession.session_date.desc()).limit(limit).all()
@@ -145,6 +149,7 @@ async def get_today_plan(db: Session = Depends(get_db)):
         .filter(
             WorkoutSession.user_id == user.id,
             WorkoutSession.session_date == today,
+            WorkoutSession.deleted_at.is_(None),
         )
         .first()
     )
@@ -185,7 +190,10 @@ async def get_today_plan(db: Session = Depends(get_db)):
 @router.get("/{session_id}", response_model=WorkoutSessionResponse)
 def get_workout_session(session_id: int, db: Session = Depends(get_db)):
     """Get a single workout session with all exercises."""
-    session = db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return _session_to_response(session)
@@ -198,7 +206,10 @@ def add_exercise_log(
     db: Session = Depends(get_db),
 ):
     """Log an individual set to an existing session."""
-    session = db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -247,7 +258,10 @@ async def chat_with_coach(
     db: Session = Depends(get_db),
 ):
     """Send a message during a live workout and get coach feedback."""
-    session = db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -274,7 +288,7 @@ async def chat_with_coach(
 
 @router.get("/exercises/profiles", response_model=list[ExerciseProfileResponse])
 def list_exercise_profiles(db: Session = Depends(get_db)):
-    """List all exercise profiles."""
+    """List all exercise profiles. Auto-seeds if none exist for the user."""
     user = db.query(User).first()
     if not user:
         return []
@@ -284,6 +298,16 @@ def list_exercise_profiles(db: Session = Depends(get_db)):
         .order_by(ExerciseProfile.muscle_group, ExerciseProfile.exercise_name)
         .all()
     )
+    # Auto-seed exercise profiles if none exist
+    if not profiles:
+        from app.db.seed_exercises import seed_exercise_profiles
+        seed_exercise_profiles(user.id, db)
+        profiles = (
+            db.query(ExerciseProfile)
+            .filter(ExerciseProfile.user_id == user.id)
+            .order_by(ExerciseProfile.muscle_group, ExerciseProfile.exercise_name)
+            .all()
+        )
     return [ExerciseProfileResponse.model_validate(p) for p in profiles]
 
 
@@ -303,6 +327,8 @@ def get_exercise_history(
         .join(WorkoutSession)
         .filter(
             WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            ExerciseLog.deleted_at.is_(None),
             ExerciseLog.exercise_name == exercise_name,
             ExerciseLog.is_warmup == False,
         )
@@ -344,6 +370,174 @@ def get_volume_summary(db: Session = Depends(get_db)):
     from app.services.progressive_overload import get_weekly_volume
     groups = ["push", "pull", "legs"]
     return [get_weekly_volume(user.id, g, db) for g in groups]
+
+
+@router.delete("/{session_id}", status_code=200)
+def soft_delete_workout(session_id: int, db: Session = Depends(get_db)):
+    """Soft-delete a workout session and cascade to exercise logs (D-019, P5-5)."""
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.is_(None),
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    now = datetime.utcnow()
+    session.deleted_at = now
+
+    # Cascade to exercise logs
+    for log in session.exercises:
+        log.deleted_at = now
+
+    db.commit()
+    return {"detail": "Workout deleted", "id": session_id}
+
+
+@router.post("/{session_id}/restore", response_model=WorkoutSessionResponse)
+def restore_workout(session_id: int, db: Session = Depends(get_db)):
+    """Restore a soft-deleted workout session and its exercise logs."""
+    session = db.query(WorkoutSession).filter(
+        WorkoutSession.id == session_id,
+        WorkoutSession.deleted_at.isnot(None),
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Deleted session not found")
+
+    session.deleted_at = None
+    for log in session.exercises:
+        log.deleted_at = None
+
+    db.commit()
+    db.refresh(session)
+    return _session_to_response(session)
+
+
+# --- Unified Training Hub Endpoints ---
+
+@router.get("/training/recent")
+def get_recent_training(
+    days: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Get merged workout + run activity, sorted by date desc.
+
+    Returns a unified feed for the Train hub showing both lift sessions and runs.
+    """
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    cutoff = date.today() - timedelta(days=days)
+
+    # Fetch workouts
+    workouts = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            WorkoutSession.session_date >= cutoff,
+        )
+        .all()
+    )
+
+    # Fetch runs
+    runs = (
+        db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.deleted_at.is_(None),
+            RunSession.run_date >= cutoff,
+        )
+        .all()
+    )
+
+    items = []
+    for w in workouts:
+        exercise_count = len(set(e.exercise_name for e in w.exercises if not e.is_warmup))
+        total_volume = sum(e.volume_load for e in w.exercises if not e.is_warmup)
+        total_sets = len([e for e in w.exercises if not e.is_warmup])
+        items.append({
+            "id": w.id,
+            "type": "workout",
+            "date": w.session_date.isoformat(),
+            "label": w.day_type.replace("_", " ").title(),
+            "detail": f"{total_sets} sets • {total_volume:,.0f} lb vol" if total_volume else f"{exercise_count} exercises",
+            "status": w.status,
+            "rpe": w.overall_rpe,
+            "day_type": w.day_type,
+            "exercise_count": exercise_count,
+            "total_volume": round(total_volume),
+        })
+
+    for r in runs:
+        items.append({
+            "id": r.id,
+            "type": "run",
+            "date": r.run_date.isoformat(),
+            "label": (r.run_type or "run").title(),
+            "detail": f"{r.distance_miles:.1f} mi • {r.avg_pace_formatted}/mi",
+            "status": r.status,
+            "rpe": r.rpe,
+            "run_type": r.run_type,
+            "distance_miles": r.distance_miles,
+            "pace_formatted": r.avg_pace_formatted,
+            "duration_seconds": r.duration_seconds,
+            "is_pr": r.is_pr,
+        })
+
+    items.sort(key=lambda x: x["date"], reverse=True)
+    return items
+
+
+@router.get("/training/week-summary")
+def get_week_summary(db: Session = Depends(get_db)):
+    """Get this week's training summary (workouts + runs combined)."""
+    user = db.query(User).first()
+    if not user:
+        return {"workouts": 0, "runs": 0, "total_hours": 0, "avg_rpe": 0}
+
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+
+    workouts = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            WorkoutSession.session_date >= week_start,
+            WorkoutSession.status.in_(["completed", "in_progress"]),
+        )
+        .all()
+    )
+
+    runs = (
+        db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.deleted_at.is_(None),
+            RunSession.run_date >= week_start,
+            RunSession.status == "completed",
+        )
+        .all()
+    )
+
+    # Estimate workout duration: ~45 min each (no exact time tracked)
+    workout_hours = len(workouts) * 0.75
+    run_hours = sum(r.duration_seconds for r in runs) / 3600.0
+    total_hours = round(workout_hours + run_hours, 1)
+
+    rpe_values = [w.overall_rpe for w in workouts if w.overall_rpe] + [r.rpe for r in runs if r.rpe]
+    avg_rpe = round(sum(rpe_values) / len(rpe_values), 1) if rpe_values else 0
+
+    run_miles = round(sum(r.distance_miles for r in runs), 1)
+
+    return {
+        "workouts": len(workouts),
+        "runs": len(runs),
+        "total_hours": total_hours,
+        "avg_rpe": avg_rpe,
+        "run_miles": run_miles,
+    }
 
 
 def _update_profiles_from_session(session: WorkoutSession, db: Session) -> None:

@@ -35,7 +35,8 @@ def _hours(minutes: Optional[int]) -> float:
 def _sum_hours(db: Session, user_id: int, since: date | None = None) -> float:
     """Sum time_invested_minutes for a user, optionally since a date."""
     q = db.query(func.coalesce(func.sum(DailyEntry.time_invested_minutes), 0)).filter(
-        DailyEntry.user_id == user_id
+        DailyEntry.user_id == user_id,
+        DailyEntry.deleted_at.is_(None),
     )
     if since:
         q = q.filter(DailyEntry.entry_date >= since)
@@ -57,6 +58,8 @@ def _compute_trend(db: Session, user_id: int) -> str:
             .join(DailyEntry, Evaluation.entry_id == DailyEntry.id)
             .filter(
                 DailyEntry.user_id == user_id,
+                DailyEntry.deleted_at.is_(None),
+                Evaluation.deleted_at.is_(None),
                 DailyEntry.entry_date >= start,
                 DailyEntry.entry_date <= end,
             )
@@ -112,6 +115,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             db.query(DailyEntry)
             .filter(
                 DailyEntry.user_id == user.id,
+                DailyEntry.deleted_at.is_(None),
                 DailyEntry.pillar_tags.contains(str(p.id)),
             )
             .all()
@@ -124,7 +128,10 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         if entry_ids:
             avg_depth = (
                 db.query(func.avg(Evaluation.depth_score))
-                .filter(Evaluation.entry_id.in_(entry_ids))
+                .filter(
+                    Evaluation.entry_id.in_(entry_ids),
+                    Evaluation.deleted_at.is_(None),
+                )
                 .scalar()
             )
             if avg_depth is not None:
@@ -144,7 +151,11 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     overall_avg = (
         db.query(func.avg(Evaluation.depth_score))
         .join(DailyEntry, Evaluation.entry_id == DailyEntry.id)
-        .filter(DailyEntry.user_id == user.id)
+        .filter(
+            DailyEntry.user_id == user.id,
+            DailyEntry.deleted_at.is_(None),
+            Evaluation.deleted_at.is_(None),
+        )
         .scalar()
     )
     if overall_avg is not None:
@@ -196,7 +207,11 @@ def get_heatmap(days: int = 365, db: Session = Depends(get_db)):
             DailyEntry.entry_date,
             func.count(DailyEntry.id).label("count"),
         )
-        .filter(DailyEntry.user_id == user.id, DailyEntry.entry_date >= since)
+        .filter(
+            DailyEntry.user_id == user.id,
+            DailyEntry.deleted_at.is_(None),
+            DailyEntry.entry_date >= since,
+        )
         .group_by(DailyEntry.entry_date)
         .all()
     )
@@ -207,7 +222,11 @@ def get_heatmap(days: int = 365, db: Session = Depends(get_db)):
     # Also get pillar tags per day for color coding
     pillar_entries = (
         db.query(DailyEntry.entry_date, DailyEntry.pillar_tags)
-        .filter(DailyEntry.user_id == user.id, DailyEntry.entry_date >= since)
+        .filter(
+            DailyEntry.user_id == user.id,
+            DailyEntry.deleted_at.is_(None),
+            DailyEntry.entry_date >= since,
+        )
         .all()
     )
     pillar_map: dict[date, list[int]] = {}
@@ -255,7 +274,12 @@ def get_depth_progression(
     query = (
         db.query(DailyEntry, Evaluation)
         .join(Evaluation, Evaluation.entry_id == DailyEntry.id)
-        .filter(DailyEntry.user_id == user.id, DailyEntry.entry_date >= since)
+        .filter(
+            DailyEntry.user_id == user.id,
+            DailyEntry.deleted_at.is_(None),
+            Evaluation.deleted_at.is_(None),
+            DailyEntry.entry_date >= since,
+        )
         .order_by(DailyEntry.entry_date)
     )
 

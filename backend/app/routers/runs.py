@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.run import PersonalRecord, PlannedRun, RunSession, RunSplit, TrainingPlan
+from app.models.run import PersonalRecord, PlannedRun, RunSegmentLog, RunSession, RunSplit, TrainingPlan
 from app.models.user import User
 from app.schemas.run import (
     PersonalRecordResponse,
@@ -128,7 +128,10 @@ def list_runs(
     if not user:
         return []
 
-    q = db.query(RunSession).filter(RunSession.user_id == user.id)
+    q = db.query(RunSession).filter(
+        RunSession.user_id == user.id,
+        RunSession.deleted_at.is_(None),
+    )
     if run_type:
         q = q.filter(RunSession.run_type == run_type)
     runs = q.order_by(RunSession.run_date.desc()).limit(limit).all()
@@ -147,7 +150,9 @@ def get_run_stats(db: Session = Depends(get_db)):
         )
 
     runs = db.query(RunSession).filter(
-        RunSession.user_id == user.id, RunSession.status == "completed"
+        RunSession.user_id == user.id,
+        RunSession.status == "completed",
+        RunSession.deleted_at.is_(None),
     ).all()
 
     if not runs:
@@ -330,7 +335,10 @@ async def get_today_plan(db: Session = Depends(get_db)):
 @router.post("/{run_id}/feedback", response_model=PostRunFeedbackResponse)
 async def generate_feedback(run_id: int, db: Session = Depends(get_db)):
     """Generate AI post-run feedback."""
-    run = db.query(RunSession).filter(RunSession.id == run_id).first()
+    run = db.query(RunSession).filter(
+        RunSession.id == run_id,
+        RunSession.deleted_at.is_(None),
+    ).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -380,10 +388,108 @@ def _planned_run_to_response(r: PlannedRun) -> PlannedRunResponse:
 @router.get("/{run_id}", response_model=RunSessionResponse)
 def get_run(run_id: int, db: Session = Depends(get_db)):
     """Get a single run with splits."""
-    run = db.query(RunSession).filter(RunSession.id == run_id).first()
+    run = db.query(RunSession).filter(
+        RunSession.id == run_id,
+        RunSession.deleted_at.is_(None),
+    ).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return _run_to_response(run)
+
+
+@router.delete("/{run_id}", status_code=200)
+def soft_delete_run(run_id: int, db: Session = Depends(get_db)):
+    """Soft-delete a run session and cascade to splits + segments (D-019, P5-5)."""
+    run = db.query(RunSession).filter(
+        RunSession.id == run_id,
+        RunSession.deleted_at.is_(None),
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    now = datetime.utcnow()
+    run.deleted_at = now
+
+    # Cascade to splits
+    for split in run.splits:
+        split.deleted_at = now
+
+    # Cascade to segment logs
+    segments = db.query(RunSegmentLog).filter(RunSegmentLog.run_id == run_id).all()
+    for seg in segments:
+        seg.deleted_at = now
+
+    # If this run held a PR, recalculate PRs
+    prs_from_this_run = db.query(PersonalRecord).filter(
+        PersonalRecord.run_id == run_id
+    ).all()
+    if prs_from_this_run:
+        _recalculate_prs_after_delete(run, prs_from_this_run, db)
+
+    db.commit()
+    return {"detail": "Run deleted", "id": run_id}
+
+
+@router.post("/{run_id}/restore", response_model=RunSessionResponse)
+def restore_run(run_id: int, db: Session = Depends(get_db)):
+    """Restore a soft-deleted run session and its splits + segments."""
+    run = db.query(RunSession).filter(
+        RunSession.id == run_id,
+        RunSession.deleted_at.isnot(None),
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Deleted run not found")
+
+    run.deleted_at = None
+    for split in run.splits:
+        split.deleted_at = None
+
+    segments = db.query(RunSegmentLog).filter(RunSegmentLog.run_id == run_id).all()
+    for seg in segments:
+        seg.deleted_at = None
+
+    db.commit()
+    db.refresh(run)
+
+    # Re-check PRs since this run is back
+    _check_and_update_prs(run, db)
+
+    return _run_to_response(run)
+
+
+def _recalculate_prs_after_delete(
+    deleted_run: RunSession,
+    affected_prs: list[PersonalRecord],
+    db: Session,
+) -> None:
+    """Recalculate PRs when a run that held records is deleted."""
+    for pr in affected_prs:
+        label = pr.distance_label
+        dist = PR_DISTANCES.get(label)
+        if not dist:
+            db.delete(pr)
+            continue
+
+        # Find next best run for this distance
+        best_run = (
+            db.query(RunSession)
+            .filter(
+                RunSession.user_id == deleted_run.user_id,
+                RunSession.id != deleted_run.id,
+                RunSession.deleted_at.is_(None),
+                RunSession.status == "completed",
+                RunSession.distance_miles >= dist,
+                RunSession.avg_pace_seconds.isnot(None),
+            )
+            .order_by(RunSession.avg_pace_seconds.asc())
+            .first()
+        )
+        if best_run:
+            pr.time_seconds = int(best_run.avg_pace_seconds * dist)
+            pr.record_date = best_run.run_date
+            pr.run_id = best_run.id
+        else:
+            db.delete(pr)
 
 
 def _check_and_update_prs(run: RunSession, db: Session) -> list[str]:

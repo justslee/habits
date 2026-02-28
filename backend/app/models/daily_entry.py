@@ -1,7 +1,7 @@
 """DailyEntry model - the core daily check-in."""
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -16,9 +16,9 @@ if TYPE_CHECKING:
 class DailyEntry(Base, TimestampMixin):
     """
     A daily check-in entry.
-    
+
     Captures what the user worked on, time invested, difficulty,
-    and key takeaways. Append-only - no deletions allowed.
+    and key takeaways. Supports soft delete (D-019).
     """
 
     __tablename__ = "daily_entries"
@@ -50,7 +50,10 @@ class DailyEntry(Base, TimestampMixin):
     
     # Key takeaway - one sentence (AC-1.7)
     key_takeaway: Mapped[str] = mapped_column(Text, nullable=True)
-    
+
+    # Soft delete (D-019, AC-P5-5.1)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Timestamp is automatic via TimestampMixin (AC-1.9)
 
     # Relationships

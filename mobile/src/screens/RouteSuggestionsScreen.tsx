@@ -173,6 +173,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
 
       {/* Route Cards */}
       {!loading && routes.map((route, idx) => {
+        if (!route.polyline || route.polyline.length === 0) return null;
         const diffColor = DIFFICULTY_COLORS[route.difficulty] || colors.textTertiary;
         const isSaved = savedIdxs.has(idx);
 
@@ -235,7 +236,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
               </View>
 
               {/* Street Names */}
-              {route.street_names.length > 0 && (
+              {route.street_names && route.street_names.length > 0 && (
                 <Text style={styles.streets} numberOfLines={1}>
                   {route.street_names.join(' · ')}
                 </Text>
