@@ -48,10 +48,8 @@ function CountUp({ value, duration = 800, style }: { value: number | null; durat
 }
 
 const MUSCLE_GROUPS = [
-  { key: 'chest', label: 'Chest', icon: 'fitness-outline' as const },
-  { key: 'shoulders', label: 'Shoulders', icon: 'body-outline' as const },
-  { key: 'back', label: 'Back', icon: 'arrow-up-outline' as const },
-  { key: 'arms', label: 'Arms', icon: 'barbell-outline' as const },
+  { key: 'push', label: 'Push', icon: 'fitness-outline' as const },
+  { key: 'pull', label: 'Pull', icon: 'arrow-up-outline' as const },
   { key: 'legs', label: 'Legs', icon: 'walk-outline' as const },
   { key: 'core', label: 'Core', icon: 'ellipse-outline' as const },
 ];
@@ -206,7 +204,7 @@ export default function ProgressScreen() {
 
   const trend = stats ? (TREND_CONFIG[stats.trend] || { icon: 'ellipse' as const, color: colors.textTertiary }) : null;
   const heatmapGrid = buildHeatmapGrid(heatmap);
-  const grouped = MUSCLE_GROUPS.map(mg => ({ ...mg, exercises: profiles.filter(p => p.muscle_group === mg.key) })).filter(mg => mg.exercises.length > 0);
+  const grouped = MUSCLE_GROUPS.map(mg => ({ ...mg, exercises: profiles.filter(p => p.muscle_group === mg.key) }));
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -451,12 +449,7 @@ export default function ProgressScreen() {
 
       {/* STRENGTH */}
       {activeSection === 'strength' && (
-        grouped.length === 0 ? (
-          <View style={s.empty}>
-            <Ionicons name="barbell-outline" size={48} color={colors.textTertiary} />
-            <Text style={s.emptyTitle}>No data yet</Text>
-          </View>
-        ) : grouped.map(mg => (
+        grouped.map(mg => (
           <View key={mg.key} style={s.card}>
             <TouchableOpacity style={s.groupHeader} onPress={() => toggleGroup(mg.key)}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
@@ -467,7 +460,14 @@ export default function ProgressScreen() {
               <Ionicons name={expandedGroups.has(mg.key) ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textTertiary} />
             </TouchableOpacity>
 
-            {expandedGroups.has(mg.key) ? mg.exercises.map((ex, i) => (
+            {mg.exercises.length === 0 ? (
+              <View style={{ paddingTop: spacing.md, paddingBottom: spacing.xs }}>
+                <Text style={{ ...typography.caption, color: colors.textTertiary }}>No exercises tracked yet</Text>
+                <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 2 }}>
+                  Log a {mg.label.toLowerCase()} workout to see progress
+                </Text>
+              </View>
+            ) : expandedGroups.has(mg.key) ? mg.exercises.map((ex, i) => (
               <View key={ex.id} style={[s.exItem, i < mg.exercises.length - 1 && s.divider]}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.exName}>{ex.exercise_name}</Text>

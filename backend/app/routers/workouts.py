@@ -288,7 +288,7 @@ async def chat_with_coach(
 
 @router.get("/exercises/profiles", response_model=list[ExerciseProfileResponse])
 def list_exercise_profiles(db: Session = Depends(get_db)):
-    """List all exercise profiles."""
+    """List all exercise profiles. Auto-seeds if none exist for the user."""
     user = db.query(User).first()
     if not user:
         return []
@@ -298,6 +298,16 @@ def list_exercise_profiles(db: Session = Depends(get_db)):
         .order_by(ExerciseProfile.muscle_group, ExerciseProfile.exercise_name)
         .all()
     )
+    # Auto-seed exercise profiles if none exist
+    if not profiles:
+        from app.db.seed_exercises import seed_exercise_profiles
+        seed_exercise_profiles(user.id, db)
+        profiles = (
+            db.query(ExerciseProfile)
+            .filter(ExerciseProfile.user_id == user.id)
+            .order_by(ExerciseProfile.muscle_group, ExerciseProfile.exercise_name)
+            .all()
+        )
     return [ExerciseProfileResponse.model_validate(p) for p in profiles]
 
 

@@ -15,9 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getPillarConcepts, seedPillarConcepts, updateConcept, addConcept, deleteConcept,
-  ConceptTreeData, ConceptData, TierGroup,
+  getConceptLinks, getCrossPillarLinks, createConceptLink,
+  ConceptTreeData, ConceptData, TierGroup, ConceptLinkData,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
+import ConceptGraph from '../components/ConceptGraph';
 import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
 
 const STATUS_CYCLE: ConceptData['status'][] = ['not_started', 'in_progress', 'mastered'];
@@ -53,11 +55,17 @@ export default function PillarDetailScreen({ route, navigation }: any) {
   const [addingToTier, setAddingToTier] = useState<number | null>(null);
   const [newConceptName, setNewConceptName] = useState('');
   const [seedMode, setSeedMode] = useState<'quick' | 'research'>('quick');
+  const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
+  const [crossLinks, setCrossLinks] = useState<ConceptLinkData[]>([]);
 
   const fetchTree = useCallback(async () => {
     try {
-      const data = await getPillarConcepts(pillarId);
+      const [data, links] = await Promise.all([
+        getPillarConcepts(pillarId),
+        getCrossPillarLinks().catch(() => [] as ConceptLinkData[]),
+      ]);
       setTree(data);
+      setCrossLinks(links);
       // Auto-expand tiers that have concepts
       const nonEmpty = new Set(data.tiers.filter(t => t.concepts.length > 0).map(t => t.tier));
       if (nonEmpty.size > 0) setExpandedTiers(nonEmpty);
@@ -321,8 +329,45 @@ export default function PillarDetailScreen({ route, navigation }: any) {
         </View>
       )}
 
-      {/* Tier sections */}
-      {!isEmpty && tree && tree.tiers.map(tierGroup => (
+      {/* View toggle: List | Graph */}
+      {!isEmpty && tree && (
+        <View style={st.viewToggle}>
+          <TouchableOpacity
+            style={[st.viewToggleBtn, viewMode === 'list' && st.viewToggleBtnActive]}
+            onPress={() => { setViewMode('list'); haptic.selection(); }}
+          >
+            <Ionicons name="list-outline" size={16} color={viewMode === 'list' ? colors.accent : colors.textTertiary} />
+            <Text style={[st.viewToggleText, viewMode === 'list' && st.viewToggleTextActive]}>List</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[st.viewToggleBtn, viewMode === 'graph' && st.viewToggleBtnActive]}
+            onPress={() => { setViewMode('graph'); haptic.selection(); }}
+          >
+            <Ionicons name="git-network-outline" size={16} color={viewMode === 'graph' ? colors.accent : colors.textTertiary} />
+            <Text style={[st.viewToggleText, viewMode === 'graph' && st.viewToggleTextActive]}>Graph</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Graph view */}
+      {!isEmpty && tree && viewMode === 'graph' && (
+        <ConceptGraph
+          concepts={tree.tiers.flatMap(t => t.concepts)}
+          pillarColor={pillarColor}
+          crossLinks={crossLinks}
+          onConceptTap={(concept) => setExpandedConcept(expandedConcept === concept.id ? null : concept.id)}
+          onStatusChange={async (conceptId, newStatus) => {
+            const concept = tree.tiers.flatMap(t => t.concepts).find(c => c.id === conceptId);
+            if (concept) {
+              await updateConcept(pillarId, conceptId, { status: newStatus as any });
+              fetchTree();
+            }
+          }}
+        />
+      )}
+
+      {/* Tier sections (list view) */}
+      {!isEmpty && tree && viewMode === 'list' && tree.tiers.map(tierGroup => (
         <TierSection
           key={tierGroup.tier}
           tierGroup={tierGroup}
@@ -340,6 +385,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
           newConceptName={newConceptName}
           onChangeNewName={setNewConceptName}
           onSubmitAdd={handleAddConcept}
+          crossLinks={crossLinks}
         />
       ))}
 
@@ -354,6 +400,7 @@ function TierSection({
   tierGroup, pillarId, pillarColor, expanded, onToggle,
   expandedConcept, onToggleConcept, onCycleStatus, onDelete,
   addingToTier, onStartAdd, onCancelAdd, newConceptName, onChangeNewName, onSubmitAdd,
+  crossLinks,
 }: {
   tierGroup: TierGroup;
   pillarId: number;
@@ -370,6 +417,7 @@ function TierSection({
   newConceptName: string;
   onChangeNewName: (t: string) => void;
   onSubmitAdd: (tier: number) => void;
+  crossLinks?: ConceptLinkData[];
 }) {
   const count = tierGroup.concepts.length;
   const mastered = tierGroup.concepts.filter(c => c.status === 'mastered').length;
@@ -406,17 +454,24 @@ function TierSection({
 
       {expanded && (
         <>
-          {tierGroup.concepts.map((concept) => (
-            <ConceptRow
-              key={concept.id}
-              concept={concept}
-              expanded={expandedConcept === concept.id}
-              onToggle={() => onToggleConcept(concept.id)}
-              onCycleStatus={() => onCycleStatus(concept)}
-              onDelete={() => onDelete(concept)}
-              pillarColor={pillarColor}
-            />
-          ))}
+          {tierGroup.concepts.map((concept) => {
+            // Find cross-pillar links for this concept
+            const conceptLinks = (crossLinks || []).filter(
+              l => l.concept_id_a === concept.id || l.concept_id_b === concept.id,
+            );
+            return (
+              <ConceptRow
+                key={concept.id}
+                concept={concept}
+                expanded={expandedConcept === concept.id}
+                onToggle={() => onToggleConcept(concept.id)}
+                onCycleStatus={() => onCycleStatus(concept)}
+                onDelete={() => onDelete(concept)}
+                pillarColor={pillarColor}
+                crossLinks={conceptLinks}
+              />
+            );
+          })}
 
           {/* Add concept */}
           {addingToTier === tierGroup.tier ? (
@@ -453,7 +508,7 @@ function TierSection({
 // --- Concept Row Component ---
 
 function ConceptRow({
-  concept, expanded, onToggle, onCycleStatus, onDelete, pillarColor,
+  concept, expanded, onToggle, onCycleStatus, onDelete, pillarColor, crossLinks,
 }: {
   concept: ConceptData;
   expanded: boolean;
@@ -461,8 +516,16 @@ function ConceptRow({
   onCycleStatus: () => void;
   onDelete: () => void;
   pillarColor: string;
+  crossLinks?: ConceptLinkData[];
 }) {
   const statusColor = STATUS_COLORS[concept.status] || colors.textTertiary;
+
+  // Cross-pillar link badges
+  const linkedPillars = (crossLinks || []).map(link => {
+    // Show the "other" pillar name
+    if (link.concept_id_a === concept.id) return link.pillar_b_name;
+    return link.pillar_a_name;
+  }).filter(Boolean);
 
   return (
     <View style={st.conceptItem}>
@@ -487,6 +550,17 @@ function ConceptRow({
           ]}>
             {concept.name}
           </Text>
+          {/* Cross-pillar badges */}
+          {linkedPillars.length > 0 && (
+            <View style={{ flexDirection: 'row', gap: 4, marginTop: 2 }}>
+              {linkedPillars.map((pName, i) => (
+                <View key={i} style={st.crossLinkBadge}>
+                  <Ionicons name="link" size={9} color="#F59E0B" />
+                  <Text style={st.crossLinkText}>Also in: {pName}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </TouchableOpacity>
 
         {/* Status label */}
@@ -810,5 +884,51 @@ const st = StyleSheet.create({
   addBtnText: {
     ...typography.caption,
     color: colors.textTertiary,
+  },
+
+  // View toggle
+  viewToggle: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+    overflow: 'hidden',
+  },
+  viewToggleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  viewToggleBtnActive: {
+    backgroundColor: colors.accentMuted,
+  },
+  viewToggleText: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    fontWeight: '600',
+  },
+  viewToggleTextActive: {
+    color: colors.accent,
+  },
+
+  // Cross-pillar link badges
+  crossLinkBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+  },
+  crossLinkText: {
+    fontSize: 9,
+    color: '#F59E0B',
+    fontWeight: '600',
   },
 });

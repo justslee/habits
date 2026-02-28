@@ -1,9 +1,25 @@
 /**
  * API client for Mastery Tracker backend.
+ * API_URL resolution order:
+ * 1. Runtime config from /config.json (updated without rebuild)
+ * 2. Build-time env var EXPO_PUBLIC_API_URL
+ * 3. Fallback to localhost:8000
  */
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+let API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
+
+const _configPromise: Promise<void> = (async () => {
+  try {
+    const res = await fetch('/config.json', { cache: 'no-store' });
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg.apiUrl) API_URL = cfg.apiUrl;
+    }
+  } catch {
+    // config.json not available — use build-time value
+  }
+})();
 
 export interface EntryCreatePayload {
   description: string;
@@ -49,20 +65,35 @@ export interface EntryResponse {
   };
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  await _configPromise;
+  const { timeoutMs, ...fetchOptions } = options ?? {};
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
   };
-  const res = await fetch(`${API_URL}${path}`, {
-    headers,
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${body}`);
+
+  // Default 30s timeout; LLM endpoints can override with timeoutMs
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs ?? 30_000);
+
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      headers,
+      signal: controller.signal,
+      ...fetchOptions,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`API ${res.status}: ${body}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 /** Build headers for raw fetch calls (used by screens not yet migrated to client functions). */
@@ -76,9 +107,11 @@ export function apiHeaders(): Record<string, string> {
 export { API_URL };
 
 export function createEntry(payload: EntryCreatePayload): Promise<EntryResponse> {
+  // Entry creation triggers LLM evaluation (~30-60s)
   return request('/api/v1/entries', {
     method: 'POST',
     body: JSON.stringify(payload),
+    timeoutMs: 120_000,
   });
 }
 
@@ -345,7 +378,6 @@ export function createTrainingPlan(data: {
 }): Promise<TrainingPlanData> {
   return request('/api/v1/runs/plans', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 }
@@ -363,7 +395,78 @@ export function getDepthProgression(
   return request(url);
 }
 
-// --- Route Discovery ---
+// --- Entries list ---
+
+export function getRecentEntries(days: number = 14): Promise<EntryResponse[]> {
+  const start = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+  return request(`/api/v1/entries?start_date=${start}`);
+}
+
+// --- Soft Delete / Restore ---
+
+export function deleteEntry(entryId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/entries/${entryId}`, { method: 'DELETE' });
+}
+
+export function restoreEntry(entryId: number): Promise<EntryResponse> {
+  return request(`/api/v1/entries/${entryId}/restore`, { method: 'POST' });
+}
+
+export function deleteWorkout(sessionId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/workouts/${sessionId}`, { method: 'DELETE' });
+}
+
+export function restoreWorkout(sessionId: number): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/restore`, { method: 'POST' });
+}
+
+export function deleteRun(runId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/runs/${runId}`, { method: 'DELETE' });
+}
+
+export function restoreRun(runId: number): Promise<RunSessionData> {
+  return request(`/api/v1/runs/${runId}/restore`, { method: 'POST' });
+}
+
+// --- Unified Training Hub ---
+
+export interface TrainingItem {
+  id: number;
+  type: 'workout' | 'run';
+  date: string;
+  label: string;
+  detail: string;
+  status: string;
+  rpe: number | null;
+  // Workout-specific
+  day_type?: string;
+  exercise_count?: number;
+  total_volume?: number;
+  // Run-specific
+  run_type?: string;
+  distance_miles?: number;
+  pace_formatted?: string;
+  duration_seconds?: number;
+  is_pr?: boolean;
+}
+
+export interface WeekSummary {
+  workouts: number;
+  runs: number;
+  total_hours: number;
+  avg_rpe: number;
+  run_miles: number;
+}
+
+export function getRecentTraining(days: number = 14): Promise<TrainingItem[]> {
+  return request(`/api/v1/workouts/training/recent?days=${days}`);
+}
+
+export function getWeekSummary(): Promise<WeekSummary> {
+  return request('/api/v1/workouts/training/week-summary');
+}
+
+// --- Route Discovery (GraphHopper) ---
 
 export interface DiscoveredRoute {
   name: string;
@@ -381,6 +484,20 @@ export interface RouteDiscoverResponse {
   cached: boolean;
 }
 
+export function discoverRoutes(
+  latitude: number,
+  longitude: number,
+  distanceMiles: number = 3.0,
+): Promise<RouteDiscoverResponse> {
+  return request('/api/v1/routes/discover', {
+    method: 'POST',
+    body: JSON.stringify({ latitude, longitude, distance_miles: distanceMiles }),
+    timeoutMs: 60_000,
+  });
+}
+
+// --- Saved Routes ---
+
 export interface SavedRouteData {
   id: number;
   name: string;
@@ -394,15 +511,8 @@ export interface SavedRouteData {
   last_run_date: string | null;
 }
 
-export function discoverRoutes(
-  latitude: number,
-  longitude: number,
-  distanceMiles: number = 3.0,
-): Promise<RouteDiscoverResponse> {
-  return request('/api/v1/routes/discover', {
-    method: 'POST',
-    body: JSON.stringify({ latitude, longitude, distance_miles: distanceMiles }),
-  });
+export function getSavedRoutes(): Promise<SavedRouteData[]> {
+  return request('/api/v1/routes/');
 }
 
 export function saveDiscoveredRoute(route: DiscoveredRoute): Promise<SavedRouteData> {
@@ -420,6 +530,132 @@ export function saveDiscoveredRoute(route: DiscoveredRoute): Promise<SavedRouteD
   });
 }
 
-export function getSavedRoutes(): Promise<SavedRouteData[]> {
-  return request('/api/v1/routes/');
+// --- Vision Statement ---
+
+export interface VisionData {
+  id: number;
+  vision_text: string | null;
+  pillar_targets: Record<string, string> | null;
+  time_horizon: Array<{ title: string; target_date: string }> | null;
+  anti_goals: string[] | null;
+}
+
+export function getVision(): Promise<VisionData | null> {
+  return request('/api/v1/vision');
+}
+
+export function saveVision(data: Partial<VisionData>): Promise<VisionData> {
+  return request('/api/v1/vision', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// --- Concept Trees ---
+
+export interface ConceptData {
+  id: number;
+  pillar_id: number;
+  name: string;
+  tier: number;
+  description: string | null;
+  prerequisites: string[] | null;
+  status: 'not_started' | 'in_progress' | 'mastered';
+  notes: string | null;
+  key_resources: string | null;
+  sort_order: number;
+}
+
+export interface TierGroup {
+  tier: number;
+  tier_name: string;
+  concepts: ConceptData[];
+}
+
+export interface ConceptTreeData {
+  pillar_id: number;
+  total: number;
+  mastered: number;
+  in_progress: number;
+  tiers: TierGroup[];
+}
+
+export function getPillarConcepts(pillarId: number): Promise<ConceptTreeData> {
+  return request(`/api/v1/pillars/${pillarId}/concepts`);
+}
+
+export function seedPillarConcepts(
+  pillarId: number,
+  mode: 'quick' | 'research' = 'quick',
+): Promise<ConceptTreeData> {
+  // LLM generates 40-80 concepts — quick ~120s, research ~180s
+  const timeoutMs = mode === 'research' ? 300_000 : 180_000;
+  return request(`/api/v1/pillars/${pillarId}/concepts/seed`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+    timeoutMs,
+  });
+}
+
+export function addConcept(
+  pillarId: number,
+  data: { name: string; tier: number; description?: string; key_resources?: string },
+): Promise<ConceptData> {
+  return request(`/api/v1/pillars/${pillarId}/concepts`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateConcept(
+  pillarId: number,
+  conceptId: number,
+  data: Partial<Pick<ConceptData, 'name' | 'tier' | 'description' | 'status' | 'notes' | 'key_resources' | 'sort_order'>>,
+): Promise<ConceptData> {
+  return request(`/api/v1/pillars/${pillarId}/concepts/${conceptId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteConcept(pillarId: number, conceptId: number): Promise<{ detail: string; id: number }> {
+  return request(`/api/v1/pillars/${pillarId}/concepts/${conceptId}`, { method: 'DELETE' });
+}
+
+// --- Cross-Pillar Concept Links ---
+
+export interface ConceptLinkData {
+  id: number;
+  concept_id_a: number;
+  concept_id_b: number;
+  concept_a_name?: string;
+  concept_b_name?: string;
+  pillar_a_name?: string;
+  pillar_b_name?: string;
+  link_type: 'shared_skill' | 'prerequisite' | 'related';
+  description: string | null;
+}
+
+export function createConceptLink(data: {
+  concept_id_a: number;
+  concept_id_b: number;
+  link_type: string;
+  description?: string;
+}): Promise<ConceptLinkData> {
+  return request('/api/v1/concepts/links/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function getConceptLinks(conceptId: number): Promise<ConceptLinkData[]> {
+  return request(`/api/v1/concepts/${conceptId}/links`);
+}
+
+export function deleteConceptLink(linkId: number): Promise<{ detail: string }> {
+  return request(`/api/v1/concepts/links/${linkId}`, { method: 'DELETE' });
+}
+
+export function getCrossPillarLinks(): Promise<ConceptLinkData[]> {
+  return request('/api/v1/concepts/cross-pillar');
 }

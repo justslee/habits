@@ -23,35 +23,21 @@ import {
 } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
+import {
+  DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
+} from '../constants/trainingSchedule';
 
-type Segment = 'lift' | 'run' | 'plan';
+type Segment = 'train' | 'run' | 'plan';
 
 const SEGMENTS: { key: Segment; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'lift', label: 'Lift', icon: 'barbell-outline' },
+  { key: 'train', label: 'Train', icon: 'barbell-outline' },
   { key: 'run', label: 'Run', icon: 'footsteps-outline' },
   { key: 'plan', label: 'Plan', icon: 'calendar-outline' },
 ];
 
-const DAY_TYPE_COLORS: Record<string, string> = {
-  push: '#3B82F6', pull: '#8B5CF6', legs: '#10B981',
-  cardio: '#F59E0B', basketball: '#EC4899', rest: '#6B7280',
-};
-
-const RUN_TYPE_COLORS: Record<string, string> = {
-  easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
-  long: '#10B981', recovery: '#6B7280', fartlek: '#EC4899', progression: '#8B5CF6',
-};
-
-const DAY_LABELS: Record<string, string> = {
-  push: 'Push Day', pull: 'Pull Day', legs: 'Legs + Core',
-  cardio: 'Cardio', basketball: 'Basketball', rest: 'Rest Day',
-};
-
-const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 export default function TrainHomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const [segment, setSegment] = useState<Segment>('lift');
+  const [segment, setSegment] = useState<Segment>('train');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -177,7 +163,7 @@ export default function TrainHomeScreen({ navigation }: any) {
       {/* Recent Lifts */}
       {liftItems.length > 0 && (
         <>
-          <Text style={styles.sectionTitle}>RECENT LIFT SESSIONS</Text>
+          <Text style={styles.sectionTitle}>RECENT SESSIONS</Text>
           <Text style={styles.swipeHint}>← swipe to delete</Text>
           {liftItems.slice(0, 7).map(item => {
             const typeColor = DAY_TYPE_COLORS[item.day_type || 'push'] || colors.accent;
@@ -226,7 +212,7 @@ export default function TrainHomeScreen({ navigation }: any) {
       {liftItems.length === 0 && !loading && (
         <View style={styles.emptyState}>
           <Ionicons name="barbell-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No lift sessions yet</Text>
+          <Text style={styles.emptyText}>No training sessions yet</Text>
           <Text style={styles.emptySubtext}>Start today's workout above</Text>
         </View>
       )}
@@ -380,69 +366,106 @@ export default function TrainHomeScreen({ navigation }: any) {
     const today = new Date();
     const todayDay = (today.getDay() + 6) % 7; // 0=Mon
 
+    // Find completed workouts/runs this week from recentTraining
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - todayDay);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const thisWeekItems = recentTraining.filter(t => {
+      const d = new Date(t.date + 'T12:00:00');
+      return d >= weekStart;
+    });
+
+    // Map completed items by day of week (0=Mon)
+    const completedByDay: Record<number, TrainingItem[]> = {};
+    thisWeekItems.forEach(item => {
+      const d = new Date(item.date + 'T12:00:00');
+      const dow = (d.getDay() + 6) % 7;
+      if (!completedByDay[dow]) completedByDay[dow] = [];
+      completedByDay[dow].push(item);
+    });
+
+    // Check for a planned run on each day from activePlan
+    const getPlannedRun = (dayIdx: number) => {
+      if (!activePlan?.planned_runs) return null;
+      return activePlan.planned_runs.find(
+        r => r.week_number === activePlan.current_week && r.day_of_week === dayIdx
+      ) || null;
+    };
+
     return (
       <>
-        {/* Active Plan Info */}
-        {activePlan ? (
-          <View style={styles.planHeader}>
-            <Text style={styles.planTitle}>
-              WEEK {activePlan.current_week} OF {activePlan.total_weeks}
-            </Text>
-            <Text style={styles.planSubtitle}>
-              {activePlan.goal_type.replace(/_/g, ' ').toUpperCase()} PLAN
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.planHeader}>
-            <Text style={styles.planTitle}>NO ACTIVE PLAN</Text>
-            <Text style={styles.planSubtitle}>
-              Create a training plan from the Run segment
-            </Text>
-          </View>
-        )}
+        {/* Plan Header */}
+        <View style={styles.planHeader}>
+          <Text style={styles.planTitle}>WEEKLY TRAINING SCHEDULE</Text>
+          <Text style={styles.planSubtitle}>
+            Push · Pull · Legs · Rest · Cardio · Basketball · Rest
+          </Text>
+        </View>
 
-        {/* Week View */}
-        {activePlan && activePlan.planned_runs && (
-          <View style={styles.weekGrid}>
-            {DAYS_OF_WEEK.map((dayName, dayIdx) => {
-              const planned = activePlan.planned_runs.find(
-                r => r.week_number === activePlan.current_week && r.day_of_week === dayIdx
-              );
-              const isToday = dayIdx === todayDay;
-              const isCompleted = planned?.status === 'completed';
-              const isMissed = planned?.status === 'missed';
+        {/* Full Week Grid */}
+        <View style={styles.weekGridFull}>
+          {DAYS_OF_WEEK.map((dayName, dayIdx) => {
+            const schedule = WEEKLY_SCHEDULE[dayIdx];
+            const plannedRun = getPlannedRun(dayIdx);
+            const completed = completedByDay[dayIdx] || [];
+            const isToday = dayIdx === todayDay;
+            const isPast = dayIdx < todayDay;
+            const hasCompletion = completed.length > 0;
+            const typeColor = DAY_TYPE_COLORS[schedule.type] || colors.textTertiary;
 
-              return (
-                <View
-                  key={dayIdx}
-                  style={[
-                    styles.weekDay,
-                    isToday && styles.weekDayToday,
-                  ]}
-                >
-                  <Text style={[styles.weekDayName, isToday && styles.weekDayNameToday]}>
-                    {dayName}
-                  </Text>
-                  {planned ? (
-                    <>
-                      <Text style={[styles.weekDayType, isToday && { color: colors.accent }]}>
-                        {(planned.run_type || '').charAt(0).toUpperCase() + (planned.run_type || '').slice(1)}
-                      </Text>
-                      {planned.target_distance_miles != null && (
-                        <Text style={styles.weekDayMiles}>
-                          {planned.target_distance_miles.toFixed(0)}mi
-                        </Text>
-                      )}
-                    </>
-                  ) : (
-                    <Text style={styles.weekDayType}>Rest</Text>
-                  )}
-                  <Text style={styles.weekDayStatus}>
-                    {isCompleted ? '✅' : isMissed ? '❌' : isToday ? '🔵' : dayIdx < todayDay ? '⬜' : '⬜'}
-                  </Text>
+            return (
+              <View
+                key={dayIdx}
+                style={[
+                  styles.weekDayFull,
+                  isToday && styles.weekDayTodayFull,
+                ]}
+              >
+                {/* Day name */}
+                <Text style={[styles.weekDayName, isToday && styles.weekDayNameToday]}>
+                  {dayName}
+                </Text>
+
+                {/* Day icon */}
+                <View style={[styles.weekDayIcon, { backgroundColor: typeColor + '15' }]}>
+                  <Ionicons name={schedule.icon} size={14} color={typeColor} />
                 </View>
-              );
-            })}
+
+                {/* Activity label */}
+                <Text style={[styles.weekDayType, isToday && { color: colors.accent }]} numberOfLines={1}>
+                  {schedule.label}
+                </Text>
+
+                {/* Planned run overlay */}
+                {plannedRun && (
+                  <Text style={styles.weekDayMiles} numberOfLines={1}>
+                    {plannedRun.target_distance_miles?.toFixed(0) || ''}mi {plannedRun.run_type?.charAt(0).toUpperCase() || ''}
+                  </Text>
+                )}
+
+                {/* Status */}
+                <Text style={styles.weekDayStatus}>
+                  {hasCompletion ? '✅' : isToday ? '🔵' : isPast ? '⬜' : '⬜'}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Active Run Plan info */}
+        {activePlan && (
+          <View style={[styles.weekSummaryCard, { marginTop: 0 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
+              <Ionicons name="footsteps-outline" size={16} color={colors.accent} />
+              <Text style={styles.sectionTitle}>RUN PLAN</Text>
+            </View>
+            <Text style={{ ...typography.body, color: colors.text }}>
+              {activePlan.goal_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+            </Text>
+            <Text style={{ ...typography.caption, color: colors.textSecondary, marginTop: 2 }}>
+              Week {activePlan.current_week} of {activePlan.total_weeks}
+            </Text>
           </View>
         )}
 
@@ -453,7 +476,7 @@ export default function TrainHomeScreen({ navigation }: any) {
             <View style={styles.weekSummaryRow}>
               <View style={styles.weekSummaryStat}>
                 <Text style={styles.weekSummaryValue}>{weekSummary.workouts}</Text>
-                <Text style={styles.weekSummaryLabel}>LIFTS</Text>
+                <Text style={styles.weekSummaryLabel}>WORKOUTS</Text>
               </View>
               <View style={styles.weekSummaryStat}>
                 <Text style={styles.weekSummaryValue}>{weekSummary.runs}</Text>
@@ -541,7 +564,7 @@ export default function TrainHomeScreen({ navigation }: any) {
         </View>
 
         {/* Segment Content */}
-        {segment === 'lift' && renderLiftSegment()}
+        {segment === 'train' && renderLiftSegment()}
         {segment === 'run' && renderRunSegment()}
         {segment === 'plan' && renderPlanSegment()}
       </ScrollView>
@@ -674,11 +697,25 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
     padding: spacing.sm, marginBottom: spacing.lg,
   },
+  weekGridFull: {
+    flexDirection: 'row', marginHorizontal: spacing.lg,
+    backgroundColor: colors.card, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+    padding: spacing.sm, marginBottom: spacing.lg,
+  },
   weekDay: {
     flex: 1, alignItems: 'center', paddingVertical: spacing.sm,
     borderRadius: radius.sm,
   },
+  weekDayFull: {
+    flex: 1, alignItems: 'center', paddingVertical: spacing.sm,
+    borderRadius: radius.sm, gap: 3,
+  },
   weekDayToday: { backgroundColor: colors.accentMuted },
+  weekDayTodayFull: { backgroundColor: colors.accentMuted },
+  weekDayIcon: {
+    width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+  },
   weekDayName: { ...typography.micro, color: colors.textTertiary, marginBottom: 4 },
   weekDayNameToday: { color: colors.accent },
   weekDayType: { ...typography.micro, color: colors.textSecondary, fontSize: 9 },
