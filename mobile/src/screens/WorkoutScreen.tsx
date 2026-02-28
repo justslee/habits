@@ -139,7 +139,7 @@ export default function WorkoutScreen() {
             </View>
             {/* Recovery bar */}
             <View style={s.recoveryBarTrack}>
-              <View style={[s.recoveryBarFill, { width: `${session!.whoop_recovery_score}%`, backgroundColor: recoveryColor }]} />
+              <View style={[s.recoveryBarFill, { width: `${session!.whoop_recovery_score ?? 0}%`, backgroundColor: recoveryColor }]} />
             </View>
           </View>
         )}
