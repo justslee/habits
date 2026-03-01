@@ -14,6 +14,7 @@ from app.models.daily_entry import DailyEntry
 from app.models.evaluation import Evaluation
 from app.models.pillar import Pillar
 from app.models.streak import Streak
+from app.models.daily_todo import DailyTodo
 from app.models.user import User
 from app.schemas.dashboard import (
     DashboardStatsResponse,
@@ -122,6 +123,20 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         )
         total_minutes = sum(e.time_invested_minutes for e in entries)
 
+        # Also count completed todos linked to this pillar
+        completed_todos = (
+            db.query(DailyTodo)
+            .filter(
+                DailyTodo.user_id == user.id,
+                DailyTodo.pillar_id == p.id,
+                DailyTodo.completed == True,
+            )
+            .all()
+        )
+        todo_minutes = sum(t.estimated_minutes or 0 for t in completed_todos)
+        total_minutes += todo_minutes
+        todo_entry_count = len(completed_todos)
+
         # Avg depth from evaluations on these entries
         entry_ids = [e.id for e in entries]
         avg_depth = None
@@ -143,7 +158,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
                 pillar_name=p.name,
                 total_hours=_hours(total_minutes),
                 avg_depth_score=avg_depth,
-                entry_count=len(entries),
+                entry_count=len(entries) + todo_entry_count,
             )
         )
 

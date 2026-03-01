@@ -299,7 +299,6 @@ export default function DailyScreen() {
           <Text style={st.dateLabel}>
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </Text>
-          <Text style={st.title}>Today</Text>
         </View>
         {totalItems > 0 && (
           <View style={st.progressPill}>
@@ -311,7 +310,6 @@ export default function DailyScreen() {
       {/* Quote card */}
       {summary && (
         <View style={st.quoteCard}>
-          <Ionicons name="flame-outline" size={16} color={colors.accent} style={{ marginBottom: 6 }} />
           <Text style={st.quoteText}>"{summary.quote}"</Text>
           <Text style={st.quoteAuthor}>— {summary.quote_author}</Text>
         </View>
@@ -428,7 +426,7 @@ export default function DailyScreen() {
       )}
 
       {/* HABITS section */}
-      <View style={[st.sectionHeader, { marginTop: spacing.xl }]}>
+      <View style={[st.sectionHeader, { marginTop: spacing.lg }]}>
         <Ionicons name="flame-outline" size={16} color={colors.textSecondary} />
         <Text style={st.sectionTitle}>HABITS</Text>
         <Text style={st.sectionCount}>{habitsComplete}/{habits.length}</Text>
@@ -576,12 +574,12 @@ export default function DailyScreen() {
 const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
-  scrollContent: { padding: spacing.lg, paddingTop: spacing.md },
+  scrollContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
 
   // Tab bar — paddingTop is set dynamically via insets
   tabBar: {
     flexDirection: 'row', paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.xs,
     backgroundColor: colors.bg, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
@@ -590,7 +588,7 @@ const st = StyleSheet.create({
   tabTextActive: { color: colors.accent },
 
   // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.lg },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
   dateLabel: { ...typography.caption, color: colors.textTertiary, marginBottom: 2 },
   title: { ...typography.title1, color: colors.text },
   progressPill: {
@@ -602,13 +600,13 @@ const st = StyleSheet.create({
   // Quote
   quoteCard: {
     backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
-    padding: spacing.lg, marginBottom: spacing.lg,
+    padding: spacing.lg, marginBottom: spacing.md,
   },
   quoteText: { ...typography.body, color: colors.textSecondary, fontStyle: 'italic', lineHeight: 22, marginBottom: 8 },
   quoteAuthor: { ...typography.caption, color: colors.textTertiary },
 
   // Context row
-  contextRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg, flexWrap: 'wrap' },
+  contextRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md, flexWrap: 'wrap' },
   contextChip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: colors.card, borderRadius: radius.pill, borderWidth: 1,
@@ -619,7 +617,7 @@ const st = StyleSheet.create({
   // Section
   sectionHeader: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   sectionTitle: { ...typography.micro, color: colors.textTertiary, letterSpacing: 1 },
   sectionCount: { ...typography.micro, color: colors.textTertiary },
@@ -647,7 +645,7 @@ const st = StyleSheet.create({
   addRow: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card,
     borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
-    paddingHorizontal: spacing.md, marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm,
   },
   addInput: {
     flex: 1, paddingVertical: 14, fontSize: 15, color: colors.text,
