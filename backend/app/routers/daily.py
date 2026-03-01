@@ -582,9 +582,14 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
             evaluation = await evaluate_entry(entry, db)
             evaluated.append({
                 "pillar_id": pillar_id,
+                "pillar_name": db.query(Pillar).filter(Pillar.id == pillar_id).first().name if db.query(Pillar).filter(Pillar.id == pillar_id).first() else f"Pillar {pillar_id}",
                 "entry_id": entry.id,
                 "depth_score": evaluation.depth_score,
+                "relevance_score": evaluation.relevance_score,
                 "one_percent_better": evaluation.one_percent_better,
+                "verdict_explanation": evaluation.verdict_explanation,
+                "commentary": evaluation.commentary,
+                "time_invested_minutes": entry.time_invested_minutes,
             })
         except Exception as e:
             logger.error(f"End-of-day evaluation failed for pillar {pillar_id}: {e}")
