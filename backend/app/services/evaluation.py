@@ -21,7 +21,7 @@ from app.services.adaptive import build_adaptive_context_block, calculate_consis
 logger = logging.getLogger(__name__)
 
 CLAWDBOT_URL = "http://localhost:18789/v1/chat/completions"
-CLAWDBOT_MODEL = "claude-sonnet-4-20250514"
+CLAWDBOT_MODEL = "claude-opus-4-6"
 
 # IMPORTANT: Do not hardcode tokens in the repo.
 # Set CLAWDBOT_TOKEN (or OPENCLAW_GATEWAY_TOKEN) in the environment.
