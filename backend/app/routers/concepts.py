@@ -371,6 +371,104 @@ def delete_concept_link(link_id: int, db: Session = Depends(get_db)):
     return {"detail": "Link deleted", "id": link_id}
 
 
+@link_router.get("/progress/overview")
+def concept_progress_overview(db: Session = Depends(get_db)):
+    """Get mastery map overview: per-pillar concept counts and progress."""
+    from app.models.concept_touch import ConceptTouch
+    from sqlalchemy import func
+
+    user = db.query(User).first()
+    if not user:
+        return []
+
+    pillars = db.query(Pillar).order_by(Pillar.display_order).all()
+    result = []
+    for p in pillars:
+        concepts = (
+            db.query(PillarConcept)
+            .filter(PillarConcept.pillar_id == p.id, PillarConcept.user_id == user.id)
+            .all()
+        )
+        total = len(concepts)
+        mastered = sum(1 for c in concepts if c.status == "mastered")
+        in_progress = sum(1 for c in concepts if c.status == "in_progress")
+
+        # Recently touched (last 7 days)
+        from datetime import date, timedelta
+        week_ago = date.today() - timedelta(days=7)
+        concept_ids = [c.id for c in concepts]
+        recently_touched = 0
+        if concept_ids:
+            recently_touched = (
+                db.query(func.count(func.distinct(ConceptTouch.concept_id)))
+                .filter(
+                    ConceptTouch.concept_id.in_(concept_ids),
+                    ConceptTouch.touch_date >= week_ago,
+                )
+                .scalar()
+            ) or 0
+
+        result.append({
+            "pillar_id": p.id,
+            "pillar_name": p.name,
+            "total_concepts": total,
+            "mastered": mastered,
+            "in_progress": in_progress,
+            "not_started": total - mastered - in_progress,
+            "recently_touched": recently_touched,
+            "mastery_pct": round(mastered / max(total, 1) * 100, 1),
+        })
+    return result
+
+
+@link_router.get("/{concept_id}/progress")
+def concept_detail_progress(concept_id: int, db: Session = Depends(get_db)):
+    """Get detailed progress for a single concept: touch history and stats."""
+    from app.models.concept_touch import ConceptTouch
+    from sqlalchemy import func
+
+    concept = db.query(PillarConcept).filter(PillarConcept.id == concept_id).first()
+    if not concept:
+        raise HTTPException(status_code=404, detail="Concept not found")
+
+    touches = (
+        db.query(ConceptTouch)
+        .filter(ConceptTouch.concept_id == concept_id)
+        .order_by(ConceptTouch.touch_date.desc())
+        .limit(20)
+        .all()
+    )
+
+    touch_count = len(touches)
+    avg_depth = None
+    if touches:
+        depths = [t.depth_score for t in touches if t.depth_score is not None]
+        if depths:
+            avg_depth = round(sum(depths) / len(depths), 1)
+
+    # Get entry descriptions for context
+    from app.models.daily_entry import DailyEntry
+    touch_history = []
+    for t in touches:
+        entry = db.query(DailyEntry).filter(DailyEntry.id == t.entry_id).first()
+        touch_history.append({
+            "date": t.touch_date.isoformat(),
+            "depth_score": t.depth_score,
+            "description": entry.description[:100] if entry else None,
+        })
+
+    return {
+        "concept_id": concept.id,
+        "name": concept.name,
+        "tier": concept.tier,
+        "status": concept.status,
+        "touch_count": touch_count,
+        "avg_depth": avg_depth,
+        "last_touched": touches[0].touch_date.isoformat() if touches else None,
+        "history": touch_history,
+    }
+
+
 @link_router.get("/cross-pillar", response_model=list[ConceptLinkResponse])
 def get_cross_pillar_links(db: Session = Depends(get_db)):
     """Get all cross-pillar concept links (for graph view)."""

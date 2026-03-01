@@ -17,6 +17,7 @@ from app.models.workout import ExerciseLog, ExerciseProfile, WhoopSnapshot, Work
 from app.models.daily_todo import DailyHabit, DailyHabitLog, DailyTodo
 from app.models.vision import Vision
 from app.models.concept import PillarConcept
+from app.models.concept_touch import ConceptTouch
 
 __all__ = [
     "Base",
@@ -45,4 +46,5 @@ __all__ = [
     "DailyHabitLog",
     "Vision",
     "PillarConcept",
+    "ConceptTouch",
 ]

@@ -118,6 +118,7 @@ export default function ProgressScreen() {
     visible: boolean; message: string; entryId: number; snapshot: EntryResponse | null;
   }>({ visible: false, message: '', entryId: 0, snapshot: null });
   const [heatTooltip, setHeatTooltip] = useState<{ date: string; count: number } | null>(null);
+  const [conceptProgress, setConceptProgress] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -147,6 +148,12 @@ export default function ProgressScreen() {
         const v = await getVision();
         setVision(v);
       } catch (err) { console.warn('Failed to fetch vision', err); }
+
+      // Fetch concept mastery overview
+      try {
+        const cpResp = await fetch(`${API_URL}/api/v1/concepts/progress/overview`, { headers: apiHeaders() });
+        if (cpResp.ok) setConceptProgress(await cpResp.json());
+      } catch (err) { console.warn('Failed to fetch concept progress', err); }
 
       // Fetch discipline analytics
       try {
@@ -434,6 +441,53 @@ export default function ProgressScreen() {
               AI-generated board meeting — grade, analysis, and next week's focus
             </Text>
           </TouchableOpacity>
+
+          {/* Concept Mastery Map */}
+          {conceptProgress.length > 0 && conceptProgress.some((cp: any) => cp.total_concepts > 0) && (
+            <View style={s.card}>
+              <Text style={s.cardLabel}>MASTERY MAP</Text>
+              {conceptProgress.filter((cp: any) => cp.total_concepts > 0).map((cp: any) => {
+                const pillarColor = PILLAR_COLORS[cp.pillar_id] || colors.textTertiary;
+                const masteredPct = cp.total_concepts > 0 ? (cp.mastered / cp.total_concepts) * 100 : 0;
+                const inProgressPct = cp.total_concepts > 0 ? (cp.in_progress / cp.total_concepts) * 100 : 0;
+                return (
+                  <TouchableOpacity
+                    key={cp.pillar_id}
+                    style={[s.pillarCard, { paddingVertical: spacing.sm }]}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      haptic.selection();
+                      navigation.navigate('PillarDetail', { pillarId: cp.pillar_id, pillarName: cp.pillar_name });
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                        <View style={[s.dot, { backgroundColor: pillarColor }]} />
+                        <Text style={s.pillarName}>{cp.pillar_name}</Text>
+                      </View>
+                      <Text style={{ ...typography.micro, color: colors.textTertiary }}>
+                        {cp.mastered}/{cp.total_concepts}
+                        {cp.recently_touched > 0 ? ` · ${cp.recently_touched} active` : ''}
+                      </Text>
+                    </View>
+                    {/* Stacked progress bar: mastered + in_progress */}
+                    <View style={[s.pillarBarTrack, { height: 6 }]}>
+                      <View style={[s.pillarBarFill, {
+                        width: `${masteredPct + inProgressPct}%` as any,
+                        backgroundColor: pillarColor + '40',
+                        position: 'absolute', left: 0, top: 0, bottom: 0,
+                        borderRadius: 3,
+                      }]} />
+                      <View style={[s.pillarBarFill, {
+                        width: `${masteredPct}%` as any,
+                        backgroundColor: pillarColor,
+                      }]} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {/* Recent Sessions — swipe to delete */}
           {recentEntries.length > 0 && (

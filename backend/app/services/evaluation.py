@@ -60,6 +60,11 @@ Ask: "If they did exactly this every day for a year, would they be meaningfully 
 - YES only if the session had genuine depth AND moved the needle.
 - NO if it was maintenance, busy work, or comfort zone activity.
 
+### Concept Identification
+You will also receive a list of the user's tracked concepts for relevant pillars.
+Identify which specific concepts were touched/practiced in this session.
+Return their names EXACTLY as listed (case-sensitive match required).
+
 ## Response Format
 You MUST respond with valid JSON only. No markdown, no explanation outside the JSON.
 {
@@ -67,11 +72,12 @@ You MUST respond with valid JSON only. No markdown, no explanation outside the J
   "relevance_score": <int 0-100>,
   "one_percent_better": <true|false>,
   "verdict_explanation": "<1-2 sentences explaining the verdict>",
-  "commentary": "<2-4 sentences of brutally honest feedback>"
+  "commentary": "<2-4 sentences of brutally honest feedback>",
+  "concepts_touched": ["<exact concept name 1>", "<exact concept name 2>"]
 }"""
 
 
-def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar]) -> str:
+def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar], db: Session = None) -> str:
     """Build the user prompt from an entry."""
     pillar_names = []
     pillar_map = {p.id: p for p in pillars}
@@ -79,6 +85,27 @@ def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar]) -> str:
         p = pillar_map.get(pid)
         if p:
             pillar_names.append(f"{p.name} (target: {p.depth_target})")
+
+    # Include available concepts for concept identification
+    concepts_block = ""
+    if db and entry.pillar_tag_list:
+        from app.models.concept import PillarConcept
+        concepts = (
+            db.query(PillarConcept)
+            .filter(
+                PillarConcept.pillar_id.in_(entry.pillar_tag_list),
+                PillarConcept.user_id == entry.user_id,
+            )
+            .order_by(PillarConcept.tier, PillarConcept.sort_order)
+            .all()
+        )
+        if concepts:
+            concept_lines = []
+            for c in concepts:
+                pname = pillar_map.get(c.pillar_id, None)
+                pname = pname.name if pname else f"Pillar {c.pillar_id}"
+                concept_lines.append(f"- [{pname}] Tier {c.tier}: {c.name}")
+            concepts_block = "\n\n**Available concepts (identify which were touched):**\n" + "\n".join(concept_lines)
 
     return f"""Evaluate this learning session:
 
@@ -89,7 +116,7 @@ def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar]) -> str:
 **Energy/focus level:** {entry.energy_level}/10
 **Key takeaway:** {entry.key_takeaway or 'None provided'}
 
-Be brutally honest. No sugar coating."""
+Be brutally honest. No sugar coating.{concepts_block}"""
 
 
 async def call_clawdbot(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
@@ -133,12 +160,17 @@ def parse_llm_response(raw_response: dict[str, Any]) -> dict[str, Any]:
     depth = max(0, min(100, int(parsed["depth_score"])))
     relevance = max(0, min(100, int(parsed["relevance_score"])))
 
+    concepts_touched = parsed.get("concepts_touched", [])
+    if not isinstance(concepts_touched, list):
+        concepts_touched = []
+
     return {
         "depth_score": depth,
         "relevance_score": relevance,
         "one_percent_better": bool(parsed["one_percent_better"]),
         "verdict_explanation": str(parsed["verdict_explanation"]),
         "commentary": str(parsed["commentary"]),
+        "concepts_touched": concepts_touched,
     }
 
 
@@ -207,7 +239,7 @@ async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
     # Load pillars for context
     pillars = db.query(Pillar).all()
 
-    user_prompt = _build_user_prompt(entry, pillars)
+    user_prompt = _build_user_prompt(entry, pillars, db)
 
     # TASK-006: Adaptive calibration — inject user level context
     adaptive_block = build_adaptive_context_block(
@@ -244,6 +276,62 @@ async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
     )
 
     db.add(evaluation)
+    db.flush()
+
+    # Record concept touches and auto-update statuses
+    concepts_touched_names = parsed.get("concepts_touched", [])
+    if concepts_touched_names and entry.pillar_tag_list:
+        from app.models.concept import PillarConcept
+        from app.models.concept_touch import ConceptTouch
+        from sqlalchemy import func
+
+        for name in concepts_touched_names:
+            concept = (
+                db.query(PillarConcept)
+                .filter(
+                    PillarConcept.user_id == entry.user_id,
+                    PillarConcept.pillar_id.in_(entry.pillar_tag_list),
+                    PillarConcept.name == name,
+                )
+                .first()
+            )
+            if not concept:
+                continue
+
+            touch = ConceptTouch(
+                concept_id=concept.id,
+                entry_id=entry.id,
+                evaluation_id=evaluation.id,
+                touch_date=entry.entry_date,
+                depth_score=evaluation.depth_score,
+            )
+            db.add(touch)
+
+            # Auto-update concept status based on touch history
+            touch_count = (
+                db.query(func.count(ConceptTouch.id))
+                .filter(ConceptTouch.concept_id == concept.id)
+                .scalar()
+            ) + 1  # include current touch
+
+            avg_depth = (
+                db.query(func.avg(ConceptTouch.depth_score))
+                .filter(
+                    ConceptTouch.concept_id == concept.id,
+                    ConceptTouch.depth_score.isnot(None),
+                )
+                .scalar()
+            )
+            # Weight in current depth
+            if avg_depth is not None and evaluation.depth_score:
+                total_existing = touch_count - 1
+                avg_depth = ((avg_depth * total_existing) + evaluation.depth_score) / touch_count
+
+            if concept.status == "not_started" and touch_count >= 1:
+                concept.status = "in_progress"
+            if concept.status == "in_progress" and touch_count >= 3 and avg_depth and avg_depth >= 70:
+                concept.status = "mastered"
+
     db.commit()
     db.refresh(evaluation)
 
