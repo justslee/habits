@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, Animated, ActivityIndicator,
+  View, Text, ScrollView, StyleSheet, Animated, ActivityIndicator, LayoutAnimation, Platform, UIManager,
   RefreshControl, TouchableOpacity, TextInput,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -97,6 +97,10 @@ function fmtPace(s: number | null): string {
   return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
@@ -118,6 +122,7 @@ export default function ProgressScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<Section>('mastery');
+  const [compoundExpanded, setCompoundExpanded] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -154,7 +159,8 @@ export default function ProgressScreen() {
       // Fetch recent entries for delete capability
       try {
         const entries = await getRecentEntries(14);
-        setRecentEntries(entries);
+        // Filter out rest-day reflections (no pillars = not a learning session)
+        setRecentEntries(entries.filter(e => (e.pillar_tags || []).length > 0));
       } catch (err) { console.warn('Failed to fetch recent entries', err); }
     } catch (err) { console.warn('Failed to fetch progress data', err); } finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -211,20 +217,25 @@ export default function ProgressScreen() {
     <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
-      <Text style={s.screenTitle}>Progress</Text>
-
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         style={s.sectionTabsScroll}
         contentContainerStyle={s.sectionTabs}
       >
-        {(['mastery', 'strength', 'running', 'discipline', 'vision'] as Section[]).map(key => (
+        {([
+          { key: 'mastery' as Section, icon: 'school-outline' as const, label: 'Mastery' },
+          { key: 'strength' as Section, icon: 'barbell-outline' as const, label: 'Strength' },
+          { key: 'running' as Section, icon: 'footsteps-outline' as const, label: 'Running' },
+          { key: 'discipline' as Section, icon: 'flame-outline' as const, label: 'Discipline' },
+          { key: 'vision' as Section, icon: 'telescope-outline' as const, label: 'Vision' },
+        ]).map(({ key, icon, label }) => (
           <TouchableOpacity key={key}
             style={[s.tab, activeSection === key && s.tabActive]}
             onPress={() => { haptic.selection(); setActiveSection(key); }}>
+            <Ionicons name={icon} size={16} color={activeSection === key ? colors.accent : colors.textTertiary} />
             <Text style={[s.tabText, activeSection === key && s.tabTextActive]}>
-              {key.charAt(0).toUpperCase() + key.slice(1)}
+              {label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -246,21 +257,6 @@ export default function ProgressScreen() {
               <CountUp value={stats.avg_depth_score} style={[s.statCardValue, { color: trend?.color }]} />
               <Text style={s.statCardLabel}>AVG DEPTH</Text>
             </View>
-          </View>
-
-          <View style={s.card}>
-            <Text style={s.cardLabel}>PILLAR BALANCE</Text>
-            <View style={{ alignItems: 'center' }}>
-              <RadarChart data={stats.pillar_breakdown.map(p => ({
-                pillar_id: p.pillar_id, pillar_name: p.pillar_name,
-                score: Math.min(100, (p.total_hours * 2 + (p.avg_depth_score || 0)) / 3 * 1.5),
-              }))} />
-            </View>
-          </View>
-
-          <View style={s.card}>
-            <Text style={s.cardLabel}>DEPTH — 90 DAYS</Text>
-            <DepthChart data={depthData} />
           </View>
 
           <View style={s.card}>
@@ -302,6 +298,21 @@ export default function ProgressScreen() {
                 </TouchableOpacity>
               );
             })}
+          </View>
+
+          <View style={s.card}>
+            <Text style={s.cardLabel}>PILLAR BALANCE</Text>
+            <View style={{ alignItems: 'center' }}>
+              <RadarChart data={stats.pillar_breakdown.map(p => ({
+                pillar_id: p.pillar_id, pillar_name: p.pillar_name,
+                score: Math.min(100, (p.total_hours * 2 + (p.avg_depth_score || 0)) / 3 * 1.5),
+              }))} />
+            </View>
+          </View>
+
+          <View style={s.card}>
+            <Text style={s.cardLabel}>DEPTH — 90 DAYS</Text>
+            <DepthChart data={depthData} />
           </View>
 
           {stats.streaks.length > 0 && (
@@ -860,7 +871,8 @@ const s = StyleSheet.create({
   sectionTabsScroll: { flexGrow: 0, marginBottom: spacing.lg },
   sectionTabs: { flexDirection: 'row', gap: spacing.xs, paddingRight: spacing.lg },
   tab: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: radius.pill, backgroundColor: colors.card,
     borderWidth: 1, borderColor: colors.border,
   },
