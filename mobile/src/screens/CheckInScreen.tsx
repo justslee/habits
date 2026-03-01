@@ -53,6 +53,7 @@ export default function CheckInScreen() {
     if (!takeaway.trim()) return Alert.alert('Required', 'Add a key takeaway from today.');
     setSubmitting(true);
     try {
+      // Save the reflection entry
       await createEntry({
         description: `Daily reflection — ${todoSummary.completed}/${todoSummary.total} todos completed`,
         time_invested_minutes: todoSummary.totalMinutes || 30,
@@ -61,6 +62,15 @@ export default function CheckInScreen() {
         energy_level: energy,
         key_takeaway: takeaway.trim(),
       });
+      // Trigger end-of-day evaluation (consolidates todos + reflection)
+      try {
+        await fetch(`${API_URL}/api/v1/daily/end-of-day`, {
+          method: 'POST',
+          headers: apiHeaders(),
+        });
+      } catch (err) {
+        console.warn('End-of-day evaluation trigger failed:', err);
+      }
       haptic.success();
       setSubmitted(true);
     } catch (err: unknown) {
