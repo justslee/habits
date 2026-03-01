@@ -594,10 +594,26 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
         except Exception as e:
             logger.error(f"End-of-day evaluation failed for pillar {pillar_id}: {e}")
 
+    # Auto-trigger weekly review on Sundays
+    weekly_review = None
+    if today.weekday() == 6:  # Sunday
+        try:
+            from app.services.weekly_review import generate_weekly_review, get_current_week_bounds
+            ws, we = get_current_week_bounds(today)
+            review = await generate_weekly_review(user.id, ws, we, db)
+            weekly_review = {
+                "letter_grade": review.letter_grade,
+                "grade_justification": review.grade_justification,
+                "recommendations": review.recommendations,
+            }
+        except Exception as e:
+            logger.error(f"Sunday weekly review generation failed: {e}")
+
     return {
         "evaluated": len(evaluated),
         "results": evaluated,
         "reflection_applied": reflection is not None,
+        "weekly_review": weekly_review,
     }
 
 

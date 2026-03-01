@@ -417,6 +417,24 @@ export default function ProgressScreen() {
             </View>
           </View>
 
+          {/* Weekly Review card */}
+          <TouchableOpacity
+            style={s.card}
+            activeOpacity={0.7}
+            onPress={() => { haptic.selection(); navigation.navigate('WeeklyReview'); }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                <Ionicons name="document-text-outline" size={18} color={colors.accent} />
+                <Text style={s.cardLabel}>WEEKLY REVIEW</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </View>
+            <Text style={{ ...typography.caption, color: colors.textSecondary, marginTop: spacing.sm }}>
+              AI-generated board meeting — grade, analysis, and next week's focus
+            </Text>
+          </TouchableOpacity>
+
           {/* Recent Sessions — swipe to delete */}
           {recentEntries.length > 0 && (
             <View style={s.recentSection}>

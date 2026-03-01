@@ -13,9 +13,12 @@ import RunScreen from './src/screens/RunScreen';
 import RunHistoryScreen from './src/screens/RunHistoryScreen';
 import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
 import RouteLibraryScreen from './src/screens/RouteLibraryScreen';
+import WorkoutDetailScreen from './src/screens/WorkoutDetailScreen';
+import RouteMapScreen from './src/screens/RouteMapScreen';
 import RouteSuggestionsScreen from './src/screens/RouteSuggestionsScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import PillarDetailScreen from './src/screens/PillarDetailScreen';
+import WeeklyReviewScreen from './src/screens/WeeklyReviewScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
 
@@ -26,15 +29,26 @@ const ProgressStack = createStackNavigator();
 function TrainStackScreen() {
   return (
     <ErrorBoundary name="TrainStack">
-      <TrainStack.Navigator screenOptions={{ headerShown: false }}>
-        <TrainStack.Screen name="TrainHome" component={TrainHomeScreen} />
-        <TrainStack.Screen name="TodayWorkout" component={WorkoutScreen} />
-        <TrainStack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} />
-        <TrainStack.Screen name="RunGPS" component={RunScreen} />
-        <TrainStack.Screen name="RunHistory" component={RunHistoryScreen} />
-        <TrainStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} />
-        <TrainStack.Screen name="RouteLibrary" component={RouteLibraryScreen} />
-        <TrainStack.Screen name="RouteSuggestions" component={RouteSuggestionsScreen} />
+      <TrainStack.Navigator
+        screenOptions={{
+          headerShown: true,
+          headerBackTitle: ' ',
+          headerStyle: { backgroundColor: '#09090F', shadowColor: 'transparent', elevation: 0 },
+          headerTintColor: '#6366F1',
+          headerTitleStyle: { color: '#F0F0F5', fontFamily: 'Inter', fontWeight: '600', fontSize: 18 },
+          
+        }}
+      >
+        <TrainStack.Screen name="TrainHome" component={TrainHomeScreen} options={{ headerShown: false }} />
+        <TrainStack.Screen name="TodayWorkout" component={WorkoutScreen} options={{ title: '' }} />
+        <TrainStack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} options={{ title: 'History' }} />
+        <TrainStack.Screen name="WorkoutDetail" component={WorkoutDetailScreen} options={{ title: 'Workout Summary' }} />
+        <TrainStack.Screen name="RunGPS" component={RunScreen} options={{ title: 'Run' }} />
+        <TrainStack.Screen name="RunHistory" component={RunHistoryScreen} options={{ title: 'Run History' }} />
+        <TrainStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} options={{ title: 'Calendar' }} />
+        <TrainStack.Screen name="RouteLibrary" component={RouteLibraryScreen} options={{ title: 'Routes' }} />
+        <TrainStack.Screen name="RouteSuggestions" component={RouteSuggestionsScreen} options={{ title: 'Discover Routes' }} />
+        <TrainStack.Screen name="RouteMap" component={RouteMapScreen} options={{ title: '', headerTransparent: true }} />
       </TrainStack.Navigator>
     </ErrorBoundary>
   );
@@ -43,9 +57,19 @@ function TrainStackScreen() {
 function ProgressStackScreen() {
   return (
     <ErrorBoundary name="ProgressStack">
-      <ProgressStack.Navigator screenOptions={{ headerShown: false }}>
-        <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} />
-        <ProgressStack.Screen name="PillarDetail" component={PillarDetailScreen} />
+      <ProgressStack.Navigator
+        screenOptions={{
+          headerShown: true,
+          headerBackTitle: ' ',
+          headerStyle: { backgroundColor: '#09090F', shadowColor: 'transparent', elevation: 0 },
+          headerTintColor: '#6366F1',
+          headerTitleStyle: { color: '#F0F0F5', fontFamily: 'Inter', fontWeight: '600', fontSize: 18 },
+          
+        }}
+      >
+        <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} options={{ headerShown: false }} />
+        <ProgressStack.Screen name="PillarDetail" component={PillarDetailScreen} options={{ title: '' }} />
+        <ProgressStack.Screen name="WeeklyReview" component={WeeklyReviewScreen} options={{ title: '' }} />
       </ProgressStack.Navigator>
     </ErrorBoundary>
   );
