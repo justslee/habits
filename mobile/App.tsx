@@ -19,6 +19,7 @@ import RouteSuggestionsScreen from './src/screens/RouteSuggestionsScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import PillarDetailScreen from './src/screens/PillarDetailScreen';
 import WeeklyReviewScreen from './src/screens/WeeklyReviewScreen';
+import SpeakingScreen from './src/screens/SpeakingScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
 
@@ -78,6 +79,7 @@ function ProgressStackScreen() {
 const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
   Daily: { active: 'today', inactive: 'today-outline' },
   Train: { active: 'fitness', inactive: 'fitness-outline' },
+  Speak: { active: 'mic', inactive: 'mic-outline' },
   Progress: { active: 'stats-chart', inactive: 'stats-chart-outline' },
 };
 
@@ -121,6 +123,7 @@ export default function App() {
         >
           <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
           <Tab.Screen name="Train" component={TrainStackScreen} options={{ tabBarLabel: 'Train' }} />
+          <Tab.Screen name="Speak" component={SpeakingScreen} options={{ tabBarLabel: 'Speak' }} />
           <Tab.Screen name="Progress" component={ProgressStackScreen} options={{ tabBarLabel: 'Progress' }} />
         </Tab.Navigator>
         <StatusBar style="light" />

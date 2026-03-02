@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import concepts, daily, dashboard, entries, milestones, routes, runs, streaks, vision, weekly_reviews, workouts
+from app.routers import concepts, daily, dashboard, entries, milestones, routes, runs, speaking, streaks, vision, weekly_reviews, whoop, workouts
 
 app = FastAPI(
     title="Mastery Tracker API",
@@ -50,7 +50,9 @@ app.include_router(weekly_reviews.router)
 app.include_router(routes.router)
 app.include_router(runs.router)
 app.include_router(workouts.router)
+app.include_router(speaking.router)
 app.include_router(vision.router)
+app.include_router(whoop.router)
 app.include_router(concepts.router)
 app.include_router(concepts.link_router)
 
