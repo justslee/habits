@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.daily_entry import DailyEntry
+from app.models.daily_todo import DailyTodo
 from app.models.evaluation import Evaluation
 from app.models.pillar import Pillar
 from app.models.streak import Streak
@@ -73,36 +74,71 @@ def _build_week_summary(
         .all()
     )
 
-    if not entries:
-        return "NO ENTRIES THIS WEEK. The user did not log a single session."
+    # Also pull todos for the week
+    todos = (
+        db.query(DailyTodo)
+        .filter(
+            DailyTodo.user_id == user_id,
+            DailyTodo.todo_date >= week_start,
+            DailyTodo.todo_date <= week_end,
+        )
+        .order_by(DailyTodo.todo_date)
+        .all()
+    )
+
+    if not entries and not todos:
+        return "NO ENTRIES THIS WEEK. The user did not log a single session or complete any todos."
 
     pillars = {p.id: p for p in db.query(Pillar).all()}
     streaks = db.query(Streak).filter(Streak.user_id == user_id).all()
 
+    completed_todos = [t for t in todos if t.completed]
     lines = [f"Week: {week_start.isoformat()} to {week_end.isoformat()}"]
     lines.append(f"Total entries: {len(entries)}")
+    lines.append(f"Todos: {len(completed_todos)}/{len(todos)} completed")
 
-    # Per-entry detail
-    for entry in entries:
-        pillar_names = []
-        for pid in entry.pillar_tag_list:
-            p = pillars.get(pid)
-            if p:
-                pillar_names.append(p.name)
+    # Per-day todo summary
+    from collections import defaultdict
+    todos_by_date = defaultdict(list)  # type: ignore[var-annotated]
+    for t in todos:
+        todos_by_date[t.todo_date].append(t)
 
-        eval_info = ""
-        if entry.evaluation:
-            e = entry.evaluation
-            eval_info = (
-                f" | Depth: {e.depth_score}, Relevance: {e.relevance_score}, "
-                f"1% Better: {'YES' if e.one_percent_better else 'NO'}"
+    lines.append("\n== DAILY TODO LOG ==")
+    for d in sorted(todos_by_date.keys()):
+        day_todos = todos_by_date[d]
+        done = [t for t in day_todos if t.completed]
+        lines.append(f"\n{d.isoformat()} ({len(done)}/{len(day_todos)} done):")
+        for t in day_todos:
+            status = "✅" if t.completed else "❌"
+            pillar_name = pillars.get(t.pillar_id, None)
+            pname = pillar_name.name if pillar_name else "untagged"
+            mins = f" ({t.estimated_minutes}min)" if t.estimated_minutes else ""
+            lines.append(f"  {status} {t.text}{mins} [{pname}]")
+
+    # Per-entry detail (reflections / check-ins)
+    if entries:
+        lines.append("\n== DAILY REFLECTIONS ==")
+        for entry in entries:
+            pillar_names = []
+            for pid in entry.pillar_tag_list:
+                p = pillars.get(pid)
+                if p:
+                    pillar_names.append(p.name)
+
+            eval_info = ""
+            if entry.evaluation:
+                e = entry.evaluation
+                eval_info = (
+                    f" | Depth: {e.depth_score}, Relevance: {e.relevance_score}, "
+                    f"1% Better: {'YES' if e.one_percent_better else 'NO'}"
+                )
+
+            desc = entry.description[:100] if entry.description else "no description"
+            lines.append(
+                f"- {entry.entry_date}: {desc} "
+                f"({entry.time_invested_minutes}min, difficulty {entry.difficulty_rating}/10, "
+                f"pillars: {', '.join(pillar_names) or 'none'}){eval_info}"
             )
-
-        lines.append(
-            f"- {entry.entry_date}: {entry.description[:100]} "
-            f"({entry.time_invested_minutes}min, difficulty {entry.difficulty_rating}/10, "
-            f"pillars: {', '.join(pillar_names) or 'none'}){eval_info}"
-        )
 
     # Streak context
     lines.append("\nCurrent streaks:")

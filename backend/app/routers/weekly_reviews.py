@@ -14,6 +14,7 @@ from app.models.weekly_review import WeeklyReview
 from app.schemas.weekly_review import WeeklyReviewResponse
 from app.services.weekly_review import (
     generate_weekly_review,
+    get_current_week_bounds,
     get_last_week_bounds,
 )
 
@@ -34,7 +35,12 @@ async def generate_review(
         ws = date.fromisoformat(week_start)
         we = ws + timedelta(days=6)
     else:
-        ws, we = get_last_week_bounds()
+        # On Sunday, review the current (ending) week; otherwise last completed week
+        today = date.today()
+        if today.weekday() == 6:  # Sunday
+            ws, we = get_current_week_bounds(today)
+        else:
+            ws, we = get_last_week_bounds(today)
 
     review = await generate_weekly_review(user.id, ws, we, db)
     return WeeklyReviewResponse(

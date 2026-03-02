@@ -1,6 +1,9 @@
 """Mastery Tracker API - FastAPI Backend."""
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env before anything reads os.getenv
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

@@ -232,6 +232,10 @@ export function getTodayWorkout(): Promise<WorkoutSession> {
   return request('/api/v1/workouts/today');
 }
 
+export function getWorkoutSession(sessionId: number): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}`);
+}
+
 export function getWorkoutSessions(limit: number = 20): Promise<WorkoutSession[]> {
   return request(`/api/v1/workouts/?limit=${limit}`);
 }
@@ -496,6 +500,23 @@ export function discoverRoutes(
   });
 }
 
+export function routeThroughWaypoints(
+  waypoints: { lat: number; lng: number }[],
+): Promise<{
+  polyline: { lat: number; lng: number }[];
+  distance_miles: number;
+  elevation_gain_ft: number;
+  estimated_time_minutes: number;
+  street_names: string[];
+  difficulty: string;
+}> {
+  return request('/api/v1/routes/waypoint-route', {
+    method: 'POST',
+    body: JSON.stringify({ waypoints }),
+    timeoutMs: 30_000,
+  });
+}
+
 // --- Saved Routes ---
 
 export interface SavedRouteData {
@@ -658,4 +679,66 @@ export function deleteConceptLink(linkId: number): Promise<{ detail: string }> {
 
 export function getCrossPillarLinks(): Promise<ConceptLinkData[]> {
   return request('/api/v1/concepts/cross-pillar');
+}
+
+// --- Whoop ---
+
+export interface WhoopData {
+  recovery_score: number | null;
+  hrv: number | null;
+  resting_hr: number | null;
+  spo2: number | null;
+  skin_temp_celsius: number | null;
+
+  sleep_score: number | null;
+  sleep_consistency: number | null;
+  sleep_efficiency: number | null;
+  respiratory_rate: number | null;
+  total_sleep_minutes: number | null;
+  rem_minutes: number | null;
+  deep_sleep_minutes: number | null;
+  light_sleep_minutes: number | null;
+  awake_minutes: number | null;
+  sleep_cycles: number | null;
+  disturbances: number | null;
+  sleep_needed_minutes: number | null;
+  sleep_debt_minutes: number | null;
+
+  strain_score: number | null;
+  calories: number | null;
+  avg_hr: number | null;
+  max_hr: number | null;
+
+  workout_strain: number | null;
+  workout_sport: string | null;
+  workout_duration_minutes: number | null;
+  workout_avg_hr: number | null;
+  workout_max_hr: number | null;
+  workout_calories: number | null;
+  workout_hr_zones: {
+    zone_0_min: number;
+    zone_1_min: number;
+    zone_2_min: number;
+    zone_3_min: number;
+    zone_4_min: number;
+    zone_5_min: number;
+  } | null;
+
+  recent_workouts: {
+    sport: string;
+    strain: number;
+    avg_hr: number;
+    max_hr: number;
+    calories: number;
+    start: string;
+    end: string;
+  }[];
+}
+
+export function getWhoopData(): Promise<WhoopData> {
+  return request('/api/v1/whoop/');
+}
+
+export function getWhoopSnapshot(date: string): Promise<WhoopData> {
+  return request(`/api/v1/whoop/snapshot/${date}`);
 }

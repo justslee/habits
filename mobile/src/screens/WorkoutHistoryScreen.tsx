@@ -121,19 +121,11 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={{ paddingTop: insets.top + 12 }}
+        contentContainerStyle={{ paddingTop: 12 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation?.goBack?.()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Workout History</Text>
-        </View>
-
         {/* Filter chips */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
           {filters.map(f => {
@@ -175,7 +167,11 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
 
           return (
             <SwipeableRow key={w.id} onDelete={() => handleDelete(w)}>
-              <View style={styles.workoutCard}>
+              <TouchableOpacity
+                style={styles.workoutCard}
+                activeOpacity={0.7}
+                onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: w.id })}
+              >
                 <View style={styles.cardLeft}>
                   <View style={[styles.typeIcon, { backgroundColor: typeColor + '15' }]}>
                     <Ionicons name={typeIcon} size={18} color={typeColor} />
@@ -209,8 +205,9 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
                   <Text style={[styles.statusText, w.status === 'completed' && { color: colors.success }]}>
                     {w.status === 'completed' ? '✓' : w.status}
                   </Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={{ marginTop: 4 }} />
                 </View>
-              </View>
+              </TouchableOpacity>
             </SwipeableRow>
           );
         })}

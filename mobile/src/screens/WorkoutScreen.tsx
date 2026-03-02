@@ -101,7 +101,7 @@ export default function WorkoutScreen() {
 
   return (
     <KeyboardAvoidingView style={s.outer} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-      <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + 16 }]}
+      <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={[s.container, { paddingTop: 0 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchWorkout(); }} tintColor={colors.textTertiary} />}>
 
         <Text style={s.screenTitle}>{DAY_LABELS[session?.day_type || ''] || session?.day_type}</Text>
@@ -166,7 +166,7 @@ export default function WorkoutScreen() {
           </View>
         )}
 
-        {/* Completed Sets — grouped by exercise */}
+        {/* Workout Summary + Completed Sets — grouped by exercise */}
         {session?.exercises && session.exercises.length > 0 && (() => {
           // Group exercises by name, preserving first-seen order
           const groups: { name: string; sets: typeof session.exercises }[] = [];
@@ -180,28 +180,152 @@ export default function WorkoutScreen() {
               groups.push({ name: ex.exercise_name, sets: [ex] });
             }
           }
+
+          // Determine exercise type from data
+          const getExType = (sets: typeof session.exercises) => {
+            if (sets.some(s => s.duration_minutes || s.distance_miles)) return 'cardio';
+            if (sets.some(s => s.weight && s.weight > 0)) return 'strength';
+            return 'bodyweight';
+          };
+          const typeIcon = (t: string) =>
+            t === 'cardio' ? 'flash-outline' : t === 'strength' ? 'barbell-outline' : 'body-outline';
+          const rpeColor = (rpe: number) =>
+            rpe <= 6 ? colors.success : rpe <= 8 ? colors.warning : colors.error;
+
+          const totalSets = session.exercises.length;
+          const totalExercises = groups.length;
+
+          // Calculate total volume (weight × reps for strength sets)
+          const totalVolume = session.exercises.reduce((sum, ex) => {
+            if (ex.weight && ex.weight > 0 && ex.reps) return sum + ex.weight * ex.reps;
+            return sum;
+          }, 0);
+
+          // Calculate total distance & duration for cardio
+          const totalDistance = session.exercises.reduce((sum, ex) =>
+            sum + (ex.distance_miles || 0), 0);
+          const totalDuration = session.exercises.reduce((sum, ex) =>
+            sum + (ex.duration_minutes || 0), 0);
+
+          // Determine if primarily cardio
+          const hasStrength = session.exercises.some(ex => ex.weight && ex.weight > 0);
+          const hasCardio = session.exercises.some(ex => ex.distance_miles || ex.duration_minutes);
+
+          const formatVolume = (v: number) =>
+            v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${v}`;
+
           return (
-            <View style={s.card}>
-              <Text style={s.cardLabel}>COMPLETED</Text>
-              {groups.map((group, gi) => (
-                <View key={gi} style={[s.exerciseGroup, gi < groups.length - 1 && s.exerciseGroupBorder]}>
-                  <Text style={s.groupName}>{group.name}</Text>
-                  <View style={s.setsContainer}>
-                    {group.sets.map((set, si) => (
-                      <View key={si} style={[s.setChip, set.is_warmup && s.setChipWarmup]}>
-                        <Text style={s.setChipText}>
-                          {set.duration_minutes
-                            ? `${set.duration_minutes}min`
-                            : set.distance_miles
-                              ? `${set.distance_miles}mi`
-                              : `${set.weight || '—'}×${set.reps || '—'}`}
-                        </Text>
-                      </View>
-                    ))}
+            <>
+              {/* Workout Summary Card */}
+              <View style={s.card}>
+                <Text style={s.cardLabel}>WORKOUT SUMMARY</Text>
+                <View style={s.summaryGrid}>
+                  <View style={s.summaryStatItem}>
+                    <Text style={s.summaryStatValue}>{totalExercises}</Text>
+                    <Text style={s.summaryStatLabel}>Exercises</Text>
                   </View>
+                  <View style={s.summaryStatItem}>
+                    <Text style={s.summaryStatValue}>{totalSets}</Text>
+                    <Text style={s.summaryStatLabel}>Sets</Text>
+                  </View>
+                  {hasStrength && totalVolume > 0 && (
+                    <View style={s.summaryStatItem}>
+                      <Text style={s.summaryStatValue}>{formatVolume(totalVolume)}</Text>
+                      <Text style={s.summaryStatLabel}>Volume (lb)</Text>
+                    </View>
+                  )}
+                  {hasCardio && totalDistance > 0 && (
+                    <View style={s.summaryStatItem}>
+                      <Text style={s.summaryStatValue}>{totalDistance.toFixed(1)}</Text>
+                      <Text style={s.summaryStatLabel}>Miles</Text>
+                    </View>
+                  )}
+                  {hasCardio && totalDuration > 0 && !hasStrength && (
+                    <View style={s.summaryStatItem}>
+                      <Text style={s.summaryStatValue}>{Math.round(totalDuration)}</Text>
+                      <Text style={s.summaryStatLabel}>Minutes</Text>
+                    </View>
+                  )}
                 </View>
-              ))}
-            </View>
+              </View>
+
+              {/* Completed — Exercise Tables */}
+              <View style={s.card}>
+                <Text style={s.cardLabel}>COMPLETED</Text>
+                {groups.map((group, gi) => {
+                  const type = getExType(group.sets);
+                  return (
+                    <View key={gi} style={[s.exerciseGroup, gi < groups.length - 1 && s.exerciseGroupBorder]}>
+                      {/* Exercise header */}
+                      <View style={s.groupHeader}>
+                        <Ionicons name={typeIcon(type) as any} size={14} color={colors.textTertiary} />
+                        <Text style={s.groupName}>{group.name}</Text>
+                      </View>
+
+                      {/* Table header row */}
+                      <View style={s.tableHeaderRow}>
+                        <Text style={[s.tableHeaderCell, s.colSet]}>SET</Text>
+                        {type === 'strength' && (
+                          <>
+                            <Text style={[s.tableHeaderCell, s.colWeight]}>WEIGHT</Text>
+                            <Text style={[s.tableHeaderCell, s.colReps]}>REPS</Text>
+                          </>
+                        )}
+                        {type === 'cardio' && (
+                          <>
+                            <Text style={[s.tableHeaderCell, s.colWeight]}>DISTANCE</Text>
+                            <Text style={[s.tableHeaderCell, s.colReps]}>TIME</Text>
+                          </>
+                        )}
+                        {type === 'bodyweight' && (
+                          <>
+                            <Text style={[s.tableHeaderCell, s.colWeight]}>REPS</Text>
+                            <Text style={[s.tableHeaderCell, s.colReps]}>DURATION</Text>
+                          </>
+                        )}
+                        <Text style={[s.tableHeaderCell, s.colCheck]}>{'  '}</Text>
+                      </View>
+
+                      {/* Data rows */}
+                      {group.sets.map((set, si) => (
+                        <View key={si} style={[s.tableDataRow, set.is_warmup && { opacity: 0.55 }]}>
+                          <Text style={[s.colSet, s.setNumberCell]}>
+                            {set.is_warmup ? 'W' : si + 1 - group.sets.slice(0, si).filter(s => s.is_warmup).length}
+                          </Text>
+                          {type === 'strength' && (
+                            <>
+                              <Text style={[s.colWeight, s.tableDataCell]}>{set.weight ? `${set.weight} lb` : '—'}</Text>
+                              <Text style={[s.colReps, s.tableDataCell]}>{set.reps ?? '—'}</Text>
+                            </>
+                          )}
+                          {type === 'cardio' && (
+                            <>
+                              <Text style={[s.colWeight, s.tableDataCell]}>{set.distance_miles ? `${set.distance_miles} mi` : '—'}</Text>
+                              <Text style={[s.colReps, s.tableDataCell]}>{set.duration_minutes ? `${set.duration_minutes} min` : '—'}</Text>
+                            </>
+                          )}
+                          {type === 'bodyweight' && (
+                            <>
+                              <Text style={[s.colWeight, s.tableDataCell]}>{set.reps ?? '—'}</Text>
+                              <Text style={[s.colReps, s.tableDataCell]}>{set.duration_minutes ? `${set.duration_minutes}s` : '—'}</Text>
+                            </>
+                          )}
+                          <View style={s.colCheck}>
+                            {set.rpe != null ? (
+                              <View style={[s.rpeBadge, { backgroundColor: rpeColor(set.rpe) + '20' }]}>
+                                <Text style={[s.rpeText, { color: rpeColor(set.rpe) }]}>RPE {set.rpe}</Text>
+                              </View>
+                            ) : (
+                              <Ionicons name="checkmark" size={16} color={colors.accent} />
+                            )}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })}
+              </View>
+            </>
           );
         })()}
 
@@ -274,16 +398,40 @@ const s = StyleSheet.create({
   exerciseDetail: { ...typography.bodyBold, color: colors.accent },
   duration: { ...typography.caption, color: colors.textTertiary, marginTop: spacing.sm },
 
-  exerciseGroup: { paddingVertical: spacing.sm },
+  // Workout Summary
+  summaryGrid: { flexDirection: 'row', justifyContent: 'space-around' },
+  summaryStatItem: { alignItems: 'center' },
+  summaryStatValue: { ...typography.title2, color: colors.text },
+  summaryStatLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 2, textTransform: 'uppercase' },
+
+  // Exercise groups
+  exerciseGroup: { paddingVertical: spacing.md },
   exerciseGroupBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
-  groupName: { ...typography.bodyBold, color: colors.text, marginBottom: spacing.xs },
-  setsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  setChip: {
-    backgroundColor: colors.input, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 4,
+  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  groupName: { ...typography.bodyBold, color: colors.text, flex: 1 },
+
+  // Table layout
+  tableHeaderRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: spacing.xs, marginBottom: spacing.xs,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  setChipWarmup: { opacity: 0.5 },
-  setChipText: { ...typography.caption, color: colors.text, fontWeight: '600' },
+  tableHeaderCell: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase' },
+  tableDataRow: {
+    flexDirection: 'row', alignItems: 'center',
+    height: 40,
+  },
+  tableDataCell: { ...typography.body, color: colors.text },
+  setNumberCell: { ...typography.caption, color: colors.textTertiary, textAlign: 'center' },
+
+  // Column widths
+  colSet: { width: 40, textAlign: 'center' } as any,
+  colWeight: { flex: 1 } as any,
+  colReps: { flex: 1, textAlign: 'right' } as any,
+  colCheck: { width: 48, alignItems: 'center', justifyContent: 'center' } as any,
+
+  rpeBadge: { borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 },
+  rpeText: { ...typography.micro, fontWeight: '700' },
 
   bubble: { borderRadius: 16, padding: spacing.md, marginBottom: spacing.sm, maxWidth: '85%' },
   userBubble: { backgroundColor: colors.accent, alignSelf: 'flex-end', borderBottomRightRadius: 4 },

@@ -19,9 +19,10 @@ from app.services.evaluation import call_clawdbot
 logger = logging.getLogger(__name__)
 
 RUN_COACH_SYSTEM = """You are an elite running coach building progressive training plans for a hybrid
-athlete. Your client does strength training (Push/Pull/Legs Mon-Wed), rests Thursday,
-and plays competitive basketball on Saturday. Running fits around this schedule —
-primarily Tuesday evening, Friday, and Sunday for long runs.
+athlete. Your client does strength training (Push/Cardio/Legs+Core Mon-Wed), rests Thursday,
+does Pull+Core on Friday, and plays competitive basketball on Saturday.
+Sunday is ALWAYS a full rest day — no running, no exceptions.
+Running fits around this schedule on non-rest days only.
 
 Your coaching philosophy:
 - 80/20 rule: 80% of miles at easy/conversational pace, 20% at tempo or faster.

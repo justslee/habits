@@ -143,7 +143,7 @@ async def get_today_plan(db: Session = Depends(get_db)):
     today = date.today()
     day_type = get_day_type_for_date(today)
 
-    # Check for existing session
+    # Check for existing session (return first non-deleted one; clean up any dupes)
     existing = (
         db.query(WorkoutSession)
         .filter(
@@ -151,10 +151,16 @@ async def get_today_plan(db: Session = Depends(get_db)):
             WorkoutSession.session_date == today,
             WorkoutSession.deleted_at.is_(None),
         )
-        .first()
+        .order_by(WorkoutSession.id)
+        .all()
     )
     if existing:
-        return _session_to_response(existing)
+        # Clean up duplicates if any (race condition from rapid requests)
+        if len(existing) > 1:
+            for dupe in existing[1:]:
+                db.delete(dupe)
+            db.commit()
+        return _session_to_response(existing[0])
 
     # Fetch Whoop data
     whoop_data = {}

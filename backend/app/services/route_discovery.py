@@ -270,3 +270,53 @@ async def check_graphhopper_health() -> bool:
             return resp.status_code == 200
     except Exception:
         return False
+
+
+async def route_through_waypoints(
+    waypoints: list[dict],
+) -> Optional[dict]:
+    """Route through a list of waypoints [{lat, lng}, ...] using GraphHopper.
+    
+    Returns a route dict with: polyline, distance_miles, elevation_gain_ft,
+    estimated_time_minutes, street_names.
+    """
+    if len(waypoints) < 2:
+        return None
+
+    params: list[tuple[str, str]] = [
+        ("profile", "foot"),
+        ("details", "street_name"),
+        ("type", "json"),
+    ]
+    for wp in waypoints:
+        params.append(("point", f"{wp['lat']},{wp['lng']}"))
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{GRAPHHOPPER_URL}/route", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+
+            if not data.get("paths"):
+                return None
+
+            path = data["paths"][0]
+            raw_polyline = path.get("points", "")
+            is_3d = "points_encoded_multiplier" not in path  # GH default is 3D
+            decoded = _decode_polyline(raw_polyline, is_3d=is_3d) if isinstance(raw_polyline, str) else raw_polyline
+
+            distance_m = path.get("distance", 0)
+            ascend_m = path.get("ascend", 0)
+            time_ms = path.get("time", 0)
+
+            return {
+                "polyline": decoded,
+                "distance_miles": round(distance_m * METERS_TO_MILES, 2),
+                "elevation_gain_ft": round(ascend_m * METERS_TO_FEET),
+                "estimated_time_minutes": round(time_ms / 60000),
+                "street_names": _extract_street_names(path),
+                "difficulty": _classify_difficulty(ascend_m, distance_m),
+            }
+    except httpx.HTTPError as e:
+        logger.warning("GraphHopper waypoint route failed: %s", e)
+        return None

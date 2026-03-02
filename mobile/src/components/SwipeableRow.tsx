@@ -59,7 +59,6 @@ export default function SwipeableRow({
       >
         <Animated.View style={[styles.actionContent, { transform: [{ scale }], opacity }]}>
           <Ionicons name="trash-outline" size={20} color="#fff" />
-          <Text style={styles.actionText}>{label}</Text>
         </Animated.View>
       </RectButton>
     );
@@ -75,7 +74,9 @@ export default function SwipeableRow({
       friction={2}
       overshootFriction={8}
       rightThreshold={80}
+      overshootRight={false}
       renderRightActions={renderRightActions}
+      containerStyle={{ overflow: 'hidden' }}
       onSwipeableOpen={(direction) => {
         if (direction === 'right') {
           onDelete();
@@ -92,7 +93,8 @@ const styles = StyleSheet.create({
   rightAction: {
     backgroundColor: colors.error,
     justifyContent: 'center',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    width: 80,
     borderRadius: radius.lg,
     marginLeft: spacing.sm,
   },

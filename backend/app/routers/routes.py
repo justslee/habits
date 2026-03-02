@@ -167,26 +167,23 @@ def get_route_runs(route_id: int, limit: int = 20, db: Session = Depends(get_db)
     ]
 
 
-# --- Route Discovery ---
 
-class RouteDiscoverRequest(BaseModel):
-    latitude: float
-    longitude: float
-    target_miles: Optional[float] = None
-    preferences: Optional[list[str]] = None
+class WaypointRouteRequest(BaseModel):
+    waypoints: list[dict]  # [{lat: float, lng: float}, ...]
 
 
-@router.post("/discover")
-async def discover_routes_endpoint(payload: RouteDiscoverRequest):
-    """Generate AI-suggested running routes based on current location."""
-    from app.services.route_discovery import discover_routes
+@router.post("/waypoint-route")
+async def get_waypoint_route(payload: WaypointRouteRequest):
+    """Route through waypoints — for Strava-style route editing."""
+    from app.services.route_discovery import route_through_waypoints
 
-    result = await discover_routes(
-        latitude=payload.latitude,
-        longitude=payload.longitude,
-        target_miles=payload.target_miles,
-        preferences=payload.preferences,
-    )
+    if len(payload.waypoints) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 waypoints")
+
+    result = await route_through_waypoints(payload.waypoints)
+    if not result:
+        raise HTTPException(status_code=404, detail="No route found through these waypoints")
+
     return result
 
 

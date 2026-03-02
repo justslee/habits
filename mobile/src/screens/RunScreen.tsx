@@ -16,7 +16,7 @@ import {
 } from '../services/audioCoach';
 import { getTodayRun, TodayRunData, getPostRunFeedback, API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
-import MapView from '../components/MapView';
+import MapView, { Polyline } from '../components/MapView';
 import PacePolyline from '../components/PacePolyline';
 import { colors, spacing, typography, radius } from '../theme';
 
@@ -27,9 +27,9 @@ const RUN_TYPE_COLORS: Record<string, string> = {
 
 type Phase = 'pre' | 'countdown' | 'active' | 'paused' | 'rpe' | 'summary';
 
-export default function RunScreen({ navigation }: any) {
+export default function RunScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
-  const [phase, setPhase] = useState<Phase>('pre');
+  const [phase, setPhase] = useState<Phase>('countdown');
   const [runState, setRunState] = useState<RunState>(createRunState);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [todayRun, setTodayRun] = useState<TodayRunData | null>(null);
@@ -39,7 +39,12 @@ export default function RunScreen({ navigation }: any) {
   const [savedRunId, setSavedRunId] = useState<number | null>(null);
   const [isPR, setIsPR] = useState(false);
   const [prType, setPRType] = useState<string | null>(null);
-  const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
+  const [audioCoachEnabled, setAudioCoachEnabled] = useState(route?.params?.audioCoachEnabled ?? true);
+  const routeOverlay = route?.params?.route;
+  const routeOverlayCoords = useMemo(() => {
+    if (!routeOverlay?.polyline) return [];
+    return routeOverlay.polyline.map((p: any) => ({ latitude: p.lat, longitude: p.lng }));
+  }, [routeOverlay]);
   const countdownScale = useRef(new RNAnimated.Value(1)).current;
   const locationSub = useRef<{ remove: () => void } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -57,9 +62,33 @@ export default function RunScreen({ navigation }: any) {
   }, [planned?.structure]);
 
   useEffect(() => {
-    requestLocationPermissions().then(setPermissionGranted);
+    requestLocationPermissions().then((granted) => {
+      setPermissionGranted(granted);
+      if (!granted) { Alert.alert('Permission Required', 'Location access needed.'); setPhase('pre'); }
+    });
     getTodayRun().then(setTodayRun).catch((err) => { console.warn('Failed to fetch today run', err); });
     return () => { locationSub.current?.remove(); if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  // Auto-start countdown on mount
+  useEffect(() => {
+    if (phase !== 'countdown') return;
+    let count = 3;
+    setCountdownNum(3);
+    const iv = setInterval(() => {
+      count--;
+      if (count <= 0) {
+        clearInterval(iv);
+        beginTracking();
+      } else {
+        setCountdownNum(count);
+        RNAnimated.sequence([
+          RNAnimated.timing(countdownScale, { toValue: 1.3, duration: 150, useNativeDriver: true }),
+          RNAnimated.timing(countdownScale, { toValue: 1, duration: 150, useNativeDriver: true }),
+        ]).start();
+      }
+    }, 1000);
+    return () => clearInterval(iv);
   }, []);
 
   // Consume background GPS points when app returns to foreground
@@ -188,127 +217,12 @@ export default function RunScreen({ navigation }: any) {
   };
 
   const resetToPreRun = () => {
-    setRunState(createRunState());
-    setPhase('pre');
-    setFeedback(null);
-    setSavedRunId(null);
-    setSelectedRPE(5);
-    setIsPR(false);
-    setPRType(null);
-    getTodayRun().then(setTodayRun).catch((err) => { console.warn('Failed to refresh today run', err); });
+    navigation?.goBack?.();
   };
 
   const { distanceMiles, currentPaceSeconds, elapsedMs, elevationGainFt, splits, points } = runState;
   const lastPoint = points.length > 0 ? points[points.length - 1] : null;
   const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
-
-  // === PRE-RUN ===
-  if (phase === 'pre') {
-    return (
-      <ScrollView style={s.container} contentContainerStyle={[s.preContent, { paddingTop: insets.top + spacing.md }]}>
-        <View style={s.preHeader}>
-          <Text style={s.screenTitle}>Run</Text>
-          <View style={{ flexDirection: 'row', gap: spacing.xs }}>
-            <TouchableOpacity onPress={() => navigation?.navigate?.('RouteSuggestions')} style={s.historyBtn}>
-              <Ionicons name="compass-outline" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation?.navigate?.('RouteLibrary')} style={s.historyBtn}>
-              <Ionicons name="map-outline" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation?.navigate?.('TrainingCalendar')} style={s.historyBtn}>
-              <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation?.navigate?.('RunHistory')} style={s.historyBtn}>
-              <Ionicons name="time-outline" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {planned ? (
-          <View style={[s.card, { borderColor: runTypeColor + '40' }]}>
-            <View style={s.todayHeader}>
-              <View style={[s.typeBadge, { backgroundColor: runTypeColor + '20' }]}>
-                <Text style={[s.typeBadgeText, { color: runTypeColor }]}>{planned.run_type.toUpperCase()}</Text>
-              </View>
-              {todayRun?.plan_name && (
-                <Text style={s.planWeek}>
-                  {todayRun.plan_name} · Week {todayRun.week_number}/{todayRun.total_weeks}
-                </Text>
-              )}
-            </View>
-
-            {planned.description && <Text style={s.runDescription}>{planned.description}</Text>}
-
-            <View style={s.targetRow}>
-              {planned.target_distance_miles && (
-                <View style={s.targetStat}>
-                  <Text style={s.targetValue}>{planned.target_distance_miles}</Text>
-                  <Text style={s.targetLabel}>MILES</Text>
-                </View>
-              )}
-              {planned.target_pace_seconds && (
-                <View style={s.targetStat}>
-                  <Text style={s.targetValue}>{formatPace(planned.target_pace_seconds)}</Text>
-                  <Text style={s.targetLabel}>PACE</Text>
-                </View>
-              )}
-              {planned.target_duration_minutes && (
-                <View style={s.targetStat}>
-                  <Text style={s.targetValue}>{planned.target_duration_minutes}</Text>
-                  <Text style={s.targetLabel}>MIN</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Segment timeline */}
-            {segments.length > 0 && (
-              <View style={s.segmentTimeline}>
-                <Text style={s.segmentLabel}>STRUCTURE</Text>
-                {segments.map((seg: any, i: number) => (
-                  <View key={i} style={s.segmentRow}>
-                    <View style={[s.segmentDot, {
-                      backgroundColor: seg.type === 'warmup' || seg.type === 'cooldown' ? colors.textTertiary
-                        : seg.type === 'work' ? runTypeColor : colors.info
-                    }]} />
-                    <Text style={s.segmentText}>
-                      {seg.type === 'warmup' ? 'Warm up' : seg.type === 'cooldown' ? 'Cool down' : seg.type === 'work' ? 'Work' : seg.type}
-                      {seg.minutes ? ` · ${seg.minutes}min` : ''}
-                      {seg.pace ? ` · ${seg.pace}` : ''}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-        ) : (
-          <View style={s.card}>
-            <Text style={s.noRunTitle}>No planned run today</Text>
-            <Text style={s.noRunSub}>Start a free run or create a training plan</Text>
-          </View>
-        )}
-
-        {/* Audio Coach Toggle */}
-        <TouchableOpacity
-          style={s.coachToggle}
-          onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
-        >
-          <Ionicons
-            name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
-            size={20}
-            color={audioCoachEnabled ? colors.accent : colors.textTertiary}
-          />
-          <Text style={[s.coachToggleText, !audioCoachEnabled && { color: colors.textTertiary }]}>
-            Audio Coach {audioCoachEnabled ? 'On' : 'Off'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[s.startBtn, { backgroundColor: runTypeColor }]} onPress={startCountdown}>
-          <Ionicons name="play" size={28} color="#fff" />
-          <Text style={s.startBtnText}>{planned ? 'Start Run' : 'Free Run'}</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    );
-  }
 
   // === COUNTDOWN ===
   if (phase === 'countdown') {
@@ -325,7 +239,7 @@ export default function RunScreen({ navigation }: any) {
   // === RPE PROMPT ===
   if (phase === 'rpe') {
     return (
-      <View style={[s.rpeContainer, { paddingTop: insets.top + spacing.md }]}>
+      <View style={[s.rpeContainer, { paddingTop: spacing.md }]}>
         <Text style={s.rpeTitle}>How did it feel?</Text>
         <Text style={s.rpeSubtitle}>{distanceMiles.toFixed(2)} mi · {formatDuration(elapsedMs)}</Text>
 
@@ -360,7 +274,7 @@ export default function RunScreen({ navigation }: any) {
       : null;
 
     return (
-      <ScrollView style={s.container} contentContainerStyle={[s.summaryContent, { paddingTop: insets.top + spacing.md }]}>
+      <ScrollView style={s.container} contentContainerStyle={[s.summaryContent, { paddingTop: spacing.md }]}>
         {/* PR Badge */}
         {isPR && (
           <View style={s.prBanner}>
@@ -413,6 +327,16 @@ export default function RunScreen({ navigation }: any) {
               pitchEnabled={false} rotateEnabled={false}
               mapType="standard"
             >
+              {routeOverlayCoords.length > 1 && (
+                <Polyline
+                  coordinates={routeOverlayCoords}
+                  strokeColor={'#6366F1'}
+                  strokeWidth={4}
+                  lineDashPattern={[8, 4]}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              )}
               <PacePolyline
                 points={state.points}
                 targetPaceSeconds={planned?.target_pace_seconds || null}
@@ -516,6 +440,16 @@ export default function RunScreen({ navigation }: any) {
           region={{ latitude: lastPoint.latitude, longitude: lastPoint.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }}
           showsUserLocation mapType="standard"
         >
+          {routeOverlayCoords.length > 1 && (
+            <Polyline
+              coordinates={routeOverlayCoords}
+              strokeColor={'#6366F1'}
+              strokeWidth={4}
+              lineDashPattern={[8, 4]}
+              lineCap="round"
+              lineJoin="round"
+            />
+          )}
           <PacePolyline
             points={points}
             targetPaceSeconds={planned?.target_pace_seconds || null}

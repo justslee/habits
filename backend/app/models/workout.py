@@ -146,5 +146,8 @@ class WhoopSnapshot(Base, TimestampMixin):
     sleep_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     strain_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # Full Whoop API response as JSON (for historical detail views)
+    full_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     def __repr__(self) -> str:
         return f"<WhoopSnapshot(date={self.snapshot_date}, recovery={self.recovery_score})>"

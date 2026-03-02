@@ -1,12 +1,12 @@
-"""Whoop API integration service — read-only (D-014).
+"""Whoop API integration — pulls recovery, sleep, strain, workout, HR zones.
 
-Pulls recovery, sleep, strain data and caches locally.
-Handles token refresh and graceful fallback.
+Full data from all endpoints, auto-refreshes tokens.
 """
 
 import json
 import logging
 import os
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -21,42 +21,41 @@ logger = logging.getLogger(__name__)
 WHOOP_API_BASE = "https://api.prod.whoop.com/developer/v2"
 TOKEN_PATH = Path.home() / ".config" / "whoop" / "tokens.json"
 
+# Hardcoded credentials (same as whoop-auth.js)
+WHOOP_CLIENT_ID = os.getenv(
+    "WHOOP_CLIENT_ID", "1e8ae741-dd42-4119-ad04-30c9f259b28d"
+)
+WHOOP_CLIENT_SECRET = os.getenv(
+    "WHOOP_CLIENT_SECRET",
+    "f9ae26fe8c23a2b2ebced854b071e15fc329736b5e7b3b8748a5f5a81d75512a",
+)
+
 
 class WhoopUnavailableError(Exception):
-    """Raised when Whoop API is unreachable or auth fails."""
     pass
 
 
 def _load_tokens() -> dict[str, Any]:
-    """Load tokens from disk."""
     if not TOKEN_PATH.exists():
         raise WhoopUnavailableError("No Whoop token file found")
     return json.loads(TOKEN_PATH.read_text())
 
 
 def _save_tokens(tokens: dict[str, Any]) -> None:
-    """Save tokens to disk."""
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tokens["obtained_at"] = time.time()
     TOKEN_PATH.write_text(json.dumps(tokens, indent=2))
 
 
-WHOOP_CLIENT_ID = os.getenv("WHOOP_CLIENT_ID", "")
-WHOOP_CLIENT_SECRET = os.getenv("WHOOP_CLIENT_SECRET", "")
-
-
 async def _refresh_token(tokens: dict[str, Any]) -> dict[str, Any]:
-    """Attempt to refresh the access token."""
-    client_id = tokens.get("client_id", WHOOP_CLIENT_ID)
-    client_secret = tokens.get("client_secret", WHOOP_CLIENT_SECRET)
-
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             "https://api.prod.whoop.com/oauth/oauth2/token",
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": tokens["refresh_token"],
-                "client_id": client_id,
-                "client_secret": client_secret,
+                "client_id": WHOOP_CLIENT_ID,
+                "client_secret": WHOOP_CLIENT_SECRET,
             },
         )
         if resp.status_code != 200:
@@ -66,53 +65,189 @@ async def _refresh_token(tokens: dict[str, Any]) -> dict[str, Any]:
         tokens["access_token"] = new_data["access_token"]
         if "refresh_token" in new_data:
             tokens["refresh_token"] = new_data["refresh_token"]
+        tokens["expires_in"] = new_data.get("expires_in", 3600)
         _save_tokens(tokens)
         return tokens
 
 
+def _token_expired(tokens: dict[str, Any]) -> bool:
+    obtained = tokens.get("obtained_at", 0)
+    expires_in = tokens.get("expires_in", 3600)
+    return time.time() > obtained + expires_in - 60  # 60s buffer
+
+
 async def _api_get(path: str, tokens: dict[str, Any]) -> dict[str, Any]:
-    """Make authenticated GET request to Whoop API."""
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(f"{WHOOP_API_BASE}{path}", headers=headers)
         if resp.status_code == 401:
-            # Try refresh
             tokens = await _refresh_token(tokens)
             headers = {"Authorization": f"Bearer {tokens['access_token']}"}
             resp = await client.get(f"{WHOOP_API_BASE}{path}", headers=headers)
         if resp.status_code != 200:
-            raise WhoopUnavailableError(f"Whoop API error {resp.status_code}: {resp.text}")
+            raise WhoopUnavailableError(f"Whoop API {resp.status_code}: {resp.text}")
         return resp.json()
 
 
 async def fetch_whoop_data() -> dict[str, Any]:
-    """Fetch latest Whoop recovery, sleep, and strain data.
+    """Fetch comprehensive Whoop data: recovery, sleep, strain, workout, HR zones.
 
-    Returns dict with: recovery_score, hrv, resting_hr, sleep_score, strain_score
-    Raises WhoopUnavailableError if API unreachable.
+    Returns a rich dict with all available metrics.
     """
     tokens = _load_tokens()
 
+    # Auto-refresh if expired
+    if _token_expired(tokens):
+        tokens = await _refresh_token(tokens)
+
+    # Parallel-ish fetches (sequential for simplicity, could use asyncio.gather)
     recovery_data = await _api_get("/recovery?limit=1", tokens)
     sleep_data = await _api_get("/activity/sleep?limit=1", tokens)
+    cycle_data = await _api_get("/cycle?limit=1", tokens)
+    workout_data = await _api_get("/activity/workout?limit=3", tokens)
 
     result: dict[str, Any] = {
+        # Recovery
         "recovery_score": None,
         "hrv": None,
         "resting_hr": None,
+        "spo2": None,
+        "skin_temp_celsius": None,
+
+        # Sleep
         "sleep_score": None,
+        "sleep_consistency": None,
+        "sleep_efficiency": None,
+        "respiratory_rate": None,
+        "total_sleep_minutes": None,
+        "rem_minutes": None,
+        "deep_sleep_minutes": None,
+        "light_sleep_minutes": None,
+        "awake_minutes": None,
+        "sleep_cycles": None,
+        "disturbances": None,
+        "sleep_needed_minutes": None,
+        "sleep_debt_minutes": None,
+
+        # Strain / Cycle
         "strain_score": None,
+        "calories": None,
+        "avg_hr": None,
+        "max_hr": None,
+
+        # Latest workout
+        "workout_strain": None,
+        "workout_sport": None,
+        "workout_duration_minutes": None,
+        "workout_avg_hr": None,
+        "workout_max_hr": None,
+        "workout_calories": None,
+        "workout_hr_zones": None,  # dict of zone durations
+
+        # Recent workouts list
+        "recent_workouts": [],
     }
 
+    # --- Recovery ---
     if recovery_data.get("records"):
         rec = recovery_data["records"][0].get("score", {})
         result["recovery_score"] = rec.get("recovery_score")
         result["hrv"] = rec.get("hrv_rmssd_milli")
         result["resting_hr"] = rec.get("resting_heart_rate")
+        result["spo2"] = rec.get("spo2_percentage")
+        result["skin_temp_celsius"] = rec.get("skin_temp_celsius")
 
+    # --- Sleep ---
     if sleep_data.get("records"):
-        sleep = sleep_data["records"][0].get("score", {})
+        sleep_rec = sleep_data["records"][0]
+        sleep = sleep_rec.get("score", {})
+        stages = sleep.get("stage_summary", {})
+
         result["sleep_score"] = sleep.get("sleep_performance_percentage")
+        result["sleep_consistency"] = sleep.get("sleep_consistency_percentage")
+        result["sleep_efficiency"] = sleep.get("sleep_efficiency_percentage")
+        result["respiratory_rate"] = sleep.get("respiratory_rate")
+
+        # Convert millis to minutes
+        total_sleep = (
+            stages.get("total_light_sleep_time_milli", 0)
+            + stages.get("total_slow_wave_sleep_time_milli", 0)
+            + stages.get("total_rem_sleep_time_milli", 0)
+        )
+        result["total_sleep_minutes"] = round(total_sleep / 60000)
+        result["rem_minutes"] = round(stages.get("total_rem_sleep_time_milli", 0) / 60000)
+        result["deep_sleep_minutes"] = round(stages.get("total_slow_wave_sleep_time_milli", 0) / 60000)
+        result["light_sleep_minutes"] = round(stages.get("total_light_sleep_time_milli", 0) / 60000)
+        result["awake_minutes"] = round(stages.get("total_awake_time_milli", 0) / 60000)
+        result["sleep_cycles"] = stages.get("sleep_cycle_count")
+        result["disturbances"] = stages.get("disturbance_count")
+
+        # Sleep need
+        need = sleep.get("sleep_needed", {})
+        baseline = need.get("baseline_milli", 0)
+        debt = need.get("need_from_sleep_debt_milli", 0)
+        result["sleep_needed_minutes"] = round(baseline / 60000)
+        result["sleep_debt_minutes"] = round(debt / 60000)
+
+    # --- Cycle (daily strain) ---
+    if cycle_data.get("records"):
+        cycle = cycle_data["records"][0].get("score", {})
+        result["strain_score"] = cycle.get("strain")
+        result["calories"] = round(cycle.get("kilojoule", 0) / 4.184)  # kJ to kcal
+        result["avg_hr"] = cycle.get("average_heart_rate")
+        result["max_hr"] = cycle.get("max_heart_rate")
+
+    # --- Workouts ---
+    if workout_data.get("records"):
+        workouts = workout_data["records"]
+
+        # Most recent workout
+        latest = workouts[0]
+        score = latest.get("score", {})
+        zones = score.get("zone_durations", {})
+
+        start_ts = latest.get("start", "")
+        end_ts = latest.get("end", "")
+        duration_min = None
+        if start_ts and end_ts:
+            from datetime import datetime
+            try:
+                s = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+                e = datetime.fromisoformat(end_ts.replace("Z", "+00:00"))
+                duration_min = round((e - s).total_seconds() / 60)
+            except Exception:
+                pass
+
+        result["workout_strain"] = score.get("strain")
+        result["workout_sport"] = latest.get("sport_name")
+        result["workout_duration_minutes"] = duration_min
+        result["workout_avg_hr"] = score.get("average_heart_rate")
+        result["workout_max_hr"] = score.get("max_heart_rate")
+        result["workout_calories"] = round(score.get("kilojoule", 0) / 4.184)
+
+        # HR zone durations in minutes
+        result["workout_hr_zones"] = {
+            "zone_0_min": round(zones.get("zone_zero_milli", 0) / 60000, 1),
+            "zone_1_min": round(zones.get("zone_one_milli", 0) / 60000, 1),
+            "zone_2_min": round(zones.get("zone_two_milli", 0) / 60000, 1),
+            "zone_3_min": round(zones.get("zone_three_milli", 0) / 60000, 1),
+            "zone_4_min": round(zones.get("zone_four_milli", 0) / 60000, 1),
+            "zone_5_min": round(zones.get("zone_five_milli", 0) / 60000, 1),
+        }
+
+        # All recent workouts
+        result["recent_workouts"] = [
+            {
+                "sport": w.get("sport_name"),
+                "strain": w.get("score", {}).get("strain"),
+                "avg_hr": w.get("score", {}).get("average_heart_rate"),
+                "max_hr": w.get("score", {}).get("max_heart_rate"),
+                "calories": round(w.get("score", {}).get("kilojoule", 0) / 4.184),
+                "start": w.get("start"),
+                "end": w.get("end"),
+            }
+            for w in workouts
+        ]
 
     return result
 
@@ -122,8 +257,8 @@ def cache_whoop_snapshot(
 ) -> WhoopSnapshot:
     """Cache Whoop data as a snapshot for trend analysis."""
     d = snapshot_date or date.today()
+    full_json = json.dumps(data)
 
-    # Upsert: check if today's snapshot exists
     existing = (
         db.query(WhoopSnapshot)
         .filter(WhoopSnapshot.user_id == user_id, WhoopSnapshot.snapshot_date == d)
@@ -135,6 +270,7 @@ def cache_whoop_snapshot(
         existing.resting_hr = data.get("resting_hr")
         existing.sleep_score = data.get("sleep_score")
         existing.strain_score = data.get("strain_score")
+        existing.full_data = full_json
         db.commit()
         return existing
 
@@ -146,6 +282,7 @@ def cache_whoop_snapshot(
         resting_hr=data.get("resting_hr"),
         sleep_score=data.get("sleep_score"),
         strain_score=data.get("strain_score"),
+        full_data=full_json,
     )
     db.add(snapshot)
     db.commit()
@@ -153,8 +290,30 @@ def cache_whoop_snapshot(
     return snapshot
 
 
+def get_whoop_snapshot_by_date(
+    user_id: int, snapshot_date: date, db: Session
+) -> Optional[dict[str, Any]]:
+    """Get cached Whoop data for a specific date."""
+    snapshot = (
+        db.query(WhoopSnapshot)
+        .filter(WhoopSnapshot.user_id == user_id, WhoopSnapshot.snapshot_date == snapshot_date)
+        .first()
+    )
+    if not snapshot:
+        return None
+    if snapshot.full_data:
+        return json.loads(snapshot.full_data)
+    # Fallback to basic fields if full_data not available
+    return {
+        "recovery_score": snapshot.recovery_score,
+        "hrv": snapshot.hrv,
+        "resting_hr": snapshot.resting_hr,
+        "sleep_score": snapshot.sleep_score,
+        "strain_score": snapshot.strain_score,
+    }
+
+
 def detect_declining_recovery(user_id: int, db: Session, weeks: int = 2) -> bool:
-    """Detect if recovery has been declining for `weeks` consecutive weeks (AC-P2-5.6)."""
     since = date.today() - timedelta(days=weeks * 7)
     snapshots = (
         db.query(WhoopSnapshot)
@@ -162,57 +321,25 @@ def detect_declining_recovery(user_id: int, db: Session, weeks: int = 2) -> bool
         .order_by(WhoopSnapshot.snapshot_date)
         .all()
     )
-
-    if len(snapshots) < 7:  # Need at least a week of data
+    if len(snapshots) < 7:
         return False
-
     scores = [s.recovery_score for s in snapshots if s.recovery_score is not None]
     if len(scores) < 7:
         return False
-
-    # Compare first half avg vs second half avg
     mid = len(scores) // 2
     first_avg = sum(scores[:mid]) / mid
     second_avg = sum(scores[mid:]) / (len(scores) - mid)
-
-    return second_avg < first_avg - 10  # Declining by 10+ points
+    return second_avg < first_avg - 10
 
 
 def get_recovery_adjustment(recovery_score: Optional[float]) -> dict[str, Any]:
-    """Get workout adjustment based on Whoop recovery score."""
     if recovery_score is None:
-        return {
-            "level": "standard",
-            "note": "No Whoop data available — running standard intensity.",
-            "volume_modifier": 1.0,
-            "weight_modifier": 1.0,
-        }
-
+        return {"level": "standard", "note": "No Whoop data — standard intensity.", "volume_modifier": 1.0, "weight_modifier": 1.0}
     if recovery_score >= 85:
-        return {
-            "level": "green",
-            "note": "Recovery is excellent. Full send — progress as programmed.",
-            "volume_modifier": 1.1,
-            "weight_modifier": 1.0,
-        }
+        return {"level": "green", "note": "Recovery excellent. Full send.", "volume_modifier": 1.1, "weight_modifier": 1.0}
     elif recovery_score >= 67:
-        return {
-            "level": "yellow",
-            "note": "Standard recovery. Hit the plan, don't exceed it.",
-            "volume_modifier": 1.0,
-            "weight_modifier": 1.0,
-        }
+        return {"level": "yellow", "note": "Standard recovery. Hit the plan.", "volume_modifier": 1.0, "weight_modifier": 1.0}
     elif recovery_score >= 34:
-        return {
-            "level": "yellow_low",
-            "note": "Recovery is below average. Reducing volume 20-30%. Dropping accessories.",
-            "volume_modifier": 0.75,
-            "weight_modifier": 0.92,
-        }
+        return {"level": "yellow_low", "note": "Below average recovery. Reducing volume.", "volume_modifier": 0.75, "weight_modifier": 0.92}
     else:
-        return {
-            "level": "red",
-            "note": "Recovery is critically low. Active recovery only — no lifting today.",
-            "volume_modifier": 0,
-            "weight_modifier": 0,
-        }
+        return {"level": "red", "note": "Recovery critically low. Active recovery only.", "volume_modifier": 0, "weight_modifier": 0}

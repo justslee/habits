@@ -276,12 +276,29 @@ def get_plan_week(plan_id: int, week_num: int, db: Session = Depends(get_db)):
 
 @router.get("/today-plan", response_model=TodayRunResponse)
 async def get_today_plan(db: Session = Depends(get_db)):
-    """Get today's planned run (if any). Adjusts for Whoop recovery."""
+    """Get today's planned run (if any). Adjusts for Whoop recovery.
+
+    Skips the run plan if:
+    - Today already has a completed (non-run) workout session
+    - Today's schedule type doesn't include cardio/running
+    """
+    from app.models.workout import WorkoutSession as WS
+
     user = db.query(User).first()
     if not user:
         return TodayRunResponse(has_planned_run=False)
 
     today = date.today()
+
+    # If there's already a completed workout today, don't suggest a run
+    existing_workout = db.query(WS).filter(
+        WS.user_id == user.id,
+        WS.session_date == today,
+        WS.status == "completed",
+    ).first()
+    if existing_workout:
+        return TodayRunResponse(has_planned_run=False)
+
     plan = db.query(TrainingPlan).filter(
         TrainingPlan.user_id == user.id, TrainingPlan.status == "active"
     ).first()

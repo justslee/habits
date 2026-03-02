@@ -219,7 +219,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
   return (
     <ScrollView
       style={st.scroll}
-      contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]}
+      contentContainerStyle={[st.container, { paddingTop: spacing.sm }]}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchTree(); }} tintColor={colors.textTertiary} />
       }

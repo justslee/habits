@@ -23,9 +23,12 @@ import {
 } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
+import WhoopCard from '../components/WhoopCard';
+import { getWhoopData, WhoopData } from '../api/client';
 import {
   DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
 } from '../constants/trainingSchedule';
+import { formatPace } from '../services/gps';
 
 type Segment = 'train' | 'run' | 'plan';
 
@@ -47,6 +50,9 @@ export default function TrainHomeScreen({ navigation }: any) {
   const [todayWorkout, setTodayWorkout] = useState<WorkoutSession | null>(null);
   const [todayRun, setTodayRun] = useState<TodayRunData | null>(null);
   const [activePlan, setActivePlan] = useState<TrainingPlanData | null>(null);
+  const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
+
+  const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<{
@@ -56,18 +62,20 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [training, summary, workout, run, plan] = await Promise.allSettled([
+      const [training, summary, workout, run, plan, whoop] = await Promise.allSettled([
         getRecentTraining(14),
         getWeekSummary(),
         getTodayWorkout(),
         getTodayRun(),
         getActivePlan(),
+        getWhoopData(),
       ]);
       if (training.status === 'fulfilled') setRecentTraining(training.value);
       if (summary.status === 'fulfilled') setWeekSummary(summary.value);
       if (workout.status === 'fulfilled') setTodayWorkout(workout.value);
       if (run.status === 'fulfilled') setTodayRun(run.value);
       if (plan.status === 'fulfilled') setActivePlan(plan.value);
+      if (whoop.status === 'fulfilled') setWhoopData(whoop.value);
     } catch (err) {
       console.warn('TrainHome fetch error:', err);
     }
@@ -131,7 +139,10 @@ export default function TrainHomeScreen({ navigation }: any) {
       {todayWorkout && (
         <TouchableOpacity
           style={styles.heroCard}
-          onPress={() => navigation?.navigate?.('TodayWorkout')}
+          onPress={() => todayWorkout.status === 'completed'
+            ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
+            : navigation?.navigate?.('TodayWorkout')
+          }
           activeOpacity={0.8}
         >
           <View style={styles.heroHeader}>
@@ -160,6 +171,13 @@ export default function TrainHomeScreen({ navigation }: any) {
         </TouchableOpacity>
       )}
 
+            {/* Whoop Card — compact in train view */}
+      {whoopData && whoopData.recovery_score != null && (
+        <View style={{ marginHorizontal: spacing.lg }}>
+          <WhoopCard data={whoopData} compact />
+        </View>
+      )}
+
       {/* Recent Lifts */}
       {liftItems.length > 0 && (
         <>
@@ -172,7 +190,11 @@ export default function TrainHomeScreen({ navigation }: any) {
             });
             return (
               <SwipeableRow key={`w-${item.id}`} onDelete={() => handleDelete(item)}>
-                <View style={styles.sessionCard}>
+                <TouchableOpacity
+                  style={styles.sessionCard}
+                  activeOpacity={0.7}
+                  onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: item.id })}
+                >
                   <View style={styles.sessionLeft}>
                     <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
                       <Ionicons name="barbell-outline" size={18} color={typeColor} />
@@ -194,8 +216,9 @@ export default function TrainHomeScreen({ navigation }: any) {
                     {item.rpe != null && (
                       <Text style={styles.sessionRpe}>RPE {item.rpe}</Text>
                     )}
+                    <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
                   </View>
-                </View>
+                </TouchableOpacity>
               </SwipeableRow>
             );
           })}
@@ -219,148 +242,195 @@ export default function TrainHomeScreen({ navigation }: any) {
     </>
   );
 
-  const renderRunSegment = () => (
-    <>
-      {/* Today's Run Hero Card */}
-      {todayRun?.has_planned_run && todayRun.planned_run && (
-        <TouchableOpacity
-          style={styles.heroCard}
-          onPress={() => navigation?.navigate?.('RunGPS')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.heroHeader}>
-            <View style={[styles.heroIndicator, { backgroundColor: '#10B981' }]} />
-            <Text style={styles.heroLabel}>TODAY</Text>
-          </View>
-          <Text style={styles.heroTitle}>
-            {(todayRun.planned_run.run_type || 'Run').charAt(0).toUpperCase() + (todayRun.planned_run.run_type || 'Run').slice(1)} Run
-          </Text>
-          <View style={styles.heroMeta}>
-            {todayRun.planned_run.target_distance_miles != null && (
-              <Text style={styles.heroMetaText}>
-                {todayRun.planned_run.target_distance_miles.toFixed(1)} mi target
+  const renderRunSegment = () => {
+    const planned = todayRun?.planned_run;
+    const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
+    const segments: any[] = (() => {
+      if (!planned?.structure) return [];
+      try { return JSON.parse(planned.structure); } catch { return []; }
+    })();
+
+    return (
+      <>
+        {/* Planned run card or empty state */}
+        {planned ? (
+          <View style={[styles.runCard, { borderColor: runTypeColor + '40', marginHorizontal: spacing.lg }]}>  
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md }}>
+              <View style={[styles.typeBadge, { backgroundColor: runTypeColor + '20', paddingHorizontal: spacing.md, paddingVertical: spacing.xs }]}>
+                <Text style={[styles.typeBadgeText, { color: runTypeColor }]}>{planned.run_type.toUpperCase()}</Text>
+              </View>
+              {todayRun?.plan_name && (
+                <Text style={{ ...typography.caption, color: colors.textTertiary }}>
+                  {todayRun.plan_name} · Week {todayRun.week_number}/{todayRun.total_weeks}
+                </Text>
+              )}
+            </View>
+
+            {planned.description && (
+              <Text style={{ ...typography.body, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 22 }}>
+                {planned.description}
               </Text>
             )}
-            {todayRun.plan_name && (
-              <Text style={styles.heroMetaText}>{todayRun.plan_name}</Text>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+              {planned.target_distance_miles && (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] as any }}>{planned.target_distance_miles}</Text>
+                  <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 4 }}>MILES</Text>
+                </View>
+              )}
+              {planned.target_pace_seconds && (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] as any }}>{formatPace(planned.target_pace_seconds)}</Text>
+                  <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 4 }}>PACE</Text>
+                </View>
+              )}
+              {planned.target_duration_minutes && (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] as any }}>{planned.target_duration_minutes}</Text>
+                  <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 4 }}>MIN</Text>
+                </View>
+              )}
+            </View>
+
+            {segments.length > 0 && (
+              <View style={{ marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md }}>
+                <Text style={{ ...typography.micro, color: colors.textTertiary, marginBottom: spacing.sm }}>STRUCTURE</Text>
+                {segments.map((seg: any, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
+                    <View style={{
+                      width: 8, height: 8, borderRadius: 4,
+                      backgroundColor: seg.type === 'warmup' || seg.type === 'cooldown' ? colors.textTertiary
+                        : seg.type === 'work' ? runTypeColor : colors.info,
+                    }} />
+                    <Text style={{ ...typography.caption, color: colors.textSecondary }}>
+                      {seg.type === 'warmup' ? 'Warm up' : seg.type === 'cooldown' ? 'Cool down' : seg.type === 'work' ? 'Work' : seg.type}
+                      {seg.minutes ? ` · ${seg.minutes}min` : ''}
+                      {seg.pace ? ` · ${seg.pace}` : ''}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             )}
           </View>
-          <View style={styles.heroCta}>
-            <Text style={styles.heroCtaText}>Start Run</Text>
-            <Ionicons name="arrow-forward" size={16} color={colors.accent} />
+        ) : (
+          <View style={[styles.runCard, { marginHorizontal: spacing.lg }]}>
+            <Text style={{ ...typography.title3, color: colors.text, marginBottom: spacing.xs }}>No planned run today</Text>
+            <Text style={{ ...typography.body, color: colors.textTertiary }}>Start a free run or create a training plan</Text>
           </View>
-        </TouchableOpacity>
-      )}
+        )}
 
-      {!todayRun?.has_planned_run && (
+        {/* Audio Coach Toggle */}
         <TouchableOpacity
-          style={styles.heroCard}
-          onPress={() => navigation?.navigate?.('RunGPS')}
-          activeOpacity={0.8}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.md, marginHorizontal: spacing.lg }}
+          onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
         >
-          <View style={styles.heroHeader}>
-            <View style={[styles.heroIndicator, { backgroundColor: '#10B981' }]} />
-            <Text style={styles.heroLabel}>FREE RUN</Text>
-          </View>
-          <Text style={styles.heroTitle}>Go for a Run</Text>
-          <Text style={styles.heroMetaText}>No planned run today — run at your own pace</Text>
-          <View style={styles.heroCta}>
-            <Text style={styles.heroCtaText}>Start Run</Text>
-            <Ionicons name="arrow-forward" size={16} color={colors.accent} />
-          </View>
+          <Ionicons
+            name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
+            size={20}
+            color={audioCoachEnabled ? colors.accent : colors.textTertiary}
+          />
+          <Text style={{ ...typography.caption, color: audioCoachEnabled ? colors.accent : colors.textTertiary }}>
+            Audio Coach {audioCoachEnabled ? 'On' : 'Off'}
+          </Text>
         </TouchableOpacity>
-      )}
 
-      {/* This Week Stats */}
-      {weekSummary && (weekSummary.runs > 0 || weekSummary.run_miles > 0) && (
-        <View style={styles.weekStatsRow}>
-          <View style={styles.weekStat}>
-            <Text style={styles.weekStatValue}>{weekSummary.run_miles}</Text>
-            <Text style={styles.weekStatLabel}>MI THIS WEEK</Text>
-          </View>
-          <View style={styles.weekStat}>
-            <Text style={styles.weekStatValue}>{weekSummary.runs}</Text>
-            <Text style={styles.weekStatLabel}>RUNS</Text>
-          </View>
+        {/* Start / Free Run button */}
+        <TouchableOpacity
+          style={[styles.runStartBtn, { backgroundColor: planned ? runTypeColor : colors.accent }]}
+          onPress={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="play" size={22} color="#fff" />
+          <Text style={styles.runStartText}>{planned ? 'Start Run' : 'Free Run'}</Text>
+        </TouchableOpacity>
+
+        {/* Quick actions row */}
+        <View style={styles.runQuickRow}>
+          <TouchableOpacity style={styles.runQuickBtn} onPress={() => navigation?.navigate?.('RouteSuggestions')}>
+            <Ionicons name="compass-outline" size={20} color={colors.accent} />
+            <Text style={styles.runQuickLabel}>Discover</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.runQuickBtn} onPress={() => navigation?.navigate?.('RouteLibrary')}>
+            <Ionicons name="map-outline" size={20} color={colors.accent} />
+            <Text style={styles.runQuickLabel}>Routes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.runQuickBtn} onPress={() => navigation?.navigate?.('RunHistory')}>
+            <Ionicons name="time-outline" size={20} color={colors.accent} />
+            <Text style={styles.runQuickLabel}>History</Text>
+          </TouchableOpacity>
         </View>
-      )}
 
-      {/* Recent Runs */}
-      {runItems.length > 0 && (
-        <>
-          <Text style={styles.sectionTitle}>RECENT RUNS</Text>
-          <Text style={styles.swipeHint}>← swipe to delete</Text>
-          {runItems.slice(0, 7).map(item => {
-            const typeColor = RUN_TYPE_COLORS[item.run_type || 'easy'] || colors.accent;
-            const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
-              weekday: 'short', month: 'short', day: 'numeric',
-            });
-            return (
-              <SwipeableRow key={`r-${item.id}`} onDelete={() => handleDelete(item)}>
-                <View style={styles.sessionCard}>
-                  <View style={styles.sessionLeft}>
-                    <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
-                      <Ionicons name="footsteps-outline" size={18} color={typeColor} />
-                    </View>
-                  </View>
-                  <View style={styles.sessionCenter}>
-                    <View style={styles.sessionTop}>
-                      <Text style={styles.sessionLabel}>
-                        {item.distance_miles?.toFixed(1)} mi
-                      </Text>
-                      <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
-                        <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-                          {(item.run_type || 'EASY').toUpperCase()}
-                        </Text>
+        {/* This Week Stats */}
+        {weekSummary && (weekSummary.runs > 0 || weekSummary.run_miles > 0) && (
+          <View style={styles.weekStatsRow}>
+            <View style={styles.weekStat}>
+              <Text style={styles.weekStatValue}>{weekSummary.run_miles}</Text>
+              <Text style={styles.weekStatLabel}>MI THIS WEEK</Text>
+            </View>
+            <View style={styles.weekStat}>
+              <Text style={styles.weekStatValue}>{weekSummary.runs}</Text>
+              <Text style={styles.weekStatLabel}>RUNS</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Recent Runs */}
+        {runItems.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>RECENT RUNS</Text>
+            {runItems.slice(0, 5).map(item => {
+              const typeColor = RUN_TYPE_COLORS[item.run_type || 'easy'] || colors.accent;
+              const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
+                weekday: 'short', month: 'short', day: 'numeric',
+              });
+              return (
+                <SwipeableRow key={`r-${item.id}`} onDelete={() => handleDelete(item)}>
+                  <View style={styles.sessionCard}>
+                    <View style={styles.sessionLeft}>
+                      <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
+                        <Ionicons name="footsteps-outline" size={18} color={typeColor} />
                       </View>
-                      {item.is_pr && (
-                        <Text style={styles.prBadge}>🏆 PR!</Text>
-                      )}
                     </View>
-                    <Text style={styles.sessionDate}>{dateStr}</Text>
+                    <View style={styles.sessionCenter}>
+                      <View style={styles.sessionTop}>
+                        <Text style={styles.sessionLabel}>
+                          {item.distance_miles?.toFixed(1)} mi
+                        </Text>
+                        <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
+                          <Text style={[styles.typeBadgeText, { color: typeColor }]}>
+                            {(item.run_type || 'EASY').toUpperCase()}
+                          </Text>
+                        </View>
+                        {item.is_pr && (
+                          <Text style={styles.prBadge}>🏆 PR!</Text>
+                        )}
+                      </View>
+                      <Text style={styles.sessionDate}>{dateStr}</Text>
+                    </View>
+                    <View style={styles.sessionRight}>
+                      <Text style={[styles.sessionDetail, { color: colors.accent }]}>
+                        {item.pace_formatted}
+                      </Text>
+                      <Text style={styles.sessionRpe}>/mi</Text>
+                    </View>
                   </View>
-                  <View style={styles.sessionRight}>
-                    <Text style={[styles.sessionDetail, { color: colors.accent }]}>
-                      {item.pace_formatted}
-                    </Text>
-                    <Text style={styles.sessionRpe}>/mi</Text>
-                  </View>
-                </View>
-              </SwipeableRow>
-            );
-          })}
-        </>
-      )}
+                </SwipeableRow>
+              );
+            })}
+          </>
+        )}
 
-      {/* Navigation buttons */}
-      <View style={styles.navButtons}>
-        <TouchableOpacity
-          style={styles.navBtn}
-          onPress={() => navigation?.navigate?.('RunHistory')}
-        >
-          <Ionicons name="time-outline" size={18} color={colors.accent} />
-          <Text style={styles.navBtnText}>Run History</Text>
-          <Ionicons name="arrow-forward" size={14} color={colors.textTertiary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.navBtn}
-          onPress={() => navigation?.navigate?.('RouteSuggestions')}
-        >
-          <Ionicons name="compass-outline" size={18} color={colors.accent} />
-          <Text style={styles.navBtnText}>Discover Routes</Text>
-          <Ionicons name="arrow-forward" size={14} color={colors.textTertiary} />
-        </TouchableOpacity>
-      </View>
-
-      {runItems.length === 0 && !loading && (
-        <View style={styles.emptyState}>
-          <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No runs yet</Text>
-          <Text style={styles.emptySubtext}>Start your first run above</Text>
-        </View>
-      )}
-    </>
-  );
+        {runItems.length === 0 && !loading && (
+          <View style={[styles.emptyState, { paddingTop: spacing.xl }]}>
+            <Ionicons name="footsteps-outline" size={40} color={colors.textTertiary} />
+            <Text style={styles.emptyText}>No runs yet</Text>
+            <Text style={styles.emptySubtext}>Hit the button above and get moving</Text>
+          </View>
+        )}
+      </>
+    );
+  };
 
   const renderPlanSegment = () => {
     const today = new Date();
@@ -385,7 +455,7 @@ export default function TrainHomeScreen({ navigation }: any) {
       completedByDay[dow].push(item);
     });
 
-    // Check for a planned run on each day from activePlan
+    // Planned runs for the current week
     const getPlannedRun = (dayIdx: number) => {
       if (!activePlan?.planned_runs) return null;
       return activePlan.planned_runs.find(
@@ -393,129 +463,131 @@ export default function TrainHomeScreen({ navigation }: any) {
       ) || null;
     };
 
+    // Week selector for run plan
+    const weeks = activePlan
+      ? Array.from({ length: activePlan.total_weeks }, (_, i) => i + 1)
+      : [];
+    const selectedWeek = activePlan?.current_week || 1;
+    const weekRuns = activePlan?.planned_runs?.filter((r: any) => r.week_number === selectedWeek) || [];
+    const completedRuns = weekRuns.filter((r: any) => r.status === 'completed').length;
+    const weekMiles = weekRuns.reduce((sum: number, r: any) => sum + (r.target_distance_miles || 0), 0);
+
+    const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    // Compute actual dates for this week
+    const weekStartDate = new Date(today);
+    weekStartDate.setDate(today.getDate() - todayDay);
+    const dayDates = DAY_NAMES.map((_, i) => {
+      const d = new Date(weekStartDate);
+      d.setDate(weekStartDate.getDate() + i);
+      return d.getDate();
+    });
+    const GYM_LABELS: Record<string, string> = {
+      push: 'PUSH DAY', pull: 'PULL DAY', legs: 'LEGS + CORE',
+      cardio: 'CARDIO', basketball: 'BASKETBALL', rest: 'REST DAY',
+    };
+    const RUN_TYPE_COLORS_LOCAL: Record<string, string> = {
+      easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
+      long: '#10B981', recovery: '#6B7280', fartlek: '#EC4899', progression: '#8B5CF6',
+    };
+
     return (
-      <>
-        {/* Plan Header */}
-        <View style={styles.planHeader}>
-          <Text style={styles.planTitle}>WEEKLY TRAINING SCHEDULE</Text>
-          <Text style={styles.planSubtitle}>
-            Push · Pull · Legs · Rest · Cardio · Basketball · Rest
-          </Text>
-        </View>
-
-        {/* Full Week Grid */}
-        <View style={styles.weekGridFull}>
-          {DAYS_OF_WEEK.map((dayName, dayIdx) => {
-            const schedule = WEEKLY_SCHEDULE[dayIdx];
-            const plannedRun = getPlannedRun(dayIdx);
-            const completed = completedByDay[dayIdx] || [];
-            const isToday = dayIdx === todayDay;
-            const isPast = dayIdx < todayDay;
-            const hasCompletion = completed.length > 0;
-            const typeColor = DAY_TYPE_COLORS[schedule.type] || colors.textTertiary;
-
-            return (
-              <View
-                key={dayIdx}
-                style={[
-                  styles.weekDayFull,
-                  isToday && styles.weekDayTodayFull,
-                ]}
-              >
-                {/* Day name */}
-                <Text style={[styles.weekDayName, isToday && styles.weekDayNameToday]}>
-                  {dayName}
-                </Text>
-
-                {/* Day icon */}
-                <View style={[styles.weekDayIcon, { backgroundColor: typeColor + '15' }]}>
-                  <Ionicons name={schedule.icon} size={14} color={typeColor} />
-                </View>
-
-                {/* Activity label */}
-                <Text style={[styles.weekDayType, isToday && { color: colors.accent }]} numberOfLines={1}>
-                  {schedule.label}
-                </Text>
-
-                {/* Planned run overlay */}
-                {plannedRun && (
-                  <Text style={styles.weekDayMiles} numberOfLines={1}>
-                    {plannedRun.target_distance_miles?.toFixed(0) || ''}mi {plannedRun.run_type?.charAt(0).toUpperCase() || ''}
-                  </Text>
-                )}
-
-                {/* Status */}
-                <Text style={styles.weekDayStatus}>
-                  {hasCompletion ? '✅' : isToday ? '🔵' : isPast ? '⬜' : '⬜'}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Active Run Plan info */}
+      <View style={{ paddingHorizontal: spacing.lg, flex: 1 }}>
+        {/* Plan title + week info */}
         {activePlan && (
-          <View style={[styles.weekSummaryCard, { marginTop: 0 }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
-              <Ionicons name="footsteps-outline" size={16} color={colors.accent} />
-              <Text style={styles.sectionTitle}>RUN PLAN</Text>
-            </View>
-            <Text style={{ ...typography.body, color: colors.text }}>
-              {activePlan.goal_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+          <View style={{ marginBottom: spacing.sm, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <Text style={{ ...typography.title3, color: colors.text }}>
+              {activePlan.goal_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} Plan
             </Text>
-            <Text style={{ ...typography.caption, color: colors.textSecondary, marginTop: 2 }}>
-              Week {activePlan.current_week} of {activePlan.total_weeks}
+            <Text style={{ ...typography.caption, color: colors.textTertiary }}>
+              Week {activePlan.current_week}/{activePlan.total_weeks}
             </Text>
           </View>
         )}
 
-        {/* Week Summary Stats */}
-        {weekSummary && (
-          <View style={styles.weekSummaryCard}>
-            <Text style={styles.sectionTitle}>THIS WEEK</Text>
-            <View style={styles.weekSummaryRow}>
-              <View style={styles.weekSummaryStat}>
-                <Text style={styles.weekSummaryValue}>{weekSummary.workouts}</Text>
-                <Text style={styles.weekSummaryLabel}>WORKOUTS</Text>
+        {!activePlan && (
+          <View style={{ marginBottom: spacing.sm }}>
+            <Text style={{ ...typography.title3, color: colors.text }}>Weekly Schedule</Text>
+          </View>
+        )}
+
+        {/* Week selector (if run plan exists) */}
+        {activePlan && weeks.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            style={{ marginBottom: spacing.xs, maxHeight: 44 }}>
+            {weeks.map(w => {
+              const isActive = w === selectedWeek;
+              const wRuns = activePlan.planned_runs?.filter((r: any) => r.week_number === w) || [];
+              const wDone = wRuns.filter((r: any) => r.status === 'completed').length;
+              return (
+                <TouchableOpacity key={w} style={[
+                  styles.weekChip,
+                  isActive && { backgroundColor: colors.accent + '20', borderColor: colors.accent },
+                ]} onPress={() => haptic.selection()}>
+                  <Text style={[styles.weekChipNum, isActive && { color: colors.accent }]}>W{w}</Text>
+                  {wRuns.length > 0 && (
+                    <Text style={styles.weekChipProgress}>{wDone}/{wRuns.length}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {/* Week summary line */}
+        {activePlan && weekRuns.length > 0 && (
+          <Text style={{ ...typography.micro, color: colors.textTertiary, marginBottom: spacing.xs }}>
+            {completedRuns}/{weekRuns.length} runs  ·  {weekMiles.toFixed(1)} mi planned
+          </Text>
+        )}
+
+        {/* Day cards — calendar style */}
+        <View style={{ flex: 1 }}>
+        {DAY_NAMES.map((day, dayIdx) => {
+          const schedule = WEEKLY_SCHEDULE[dayIdx];
+          const gymType = schedule.type;
+          const gymColor = DAY_TYPE_COLORS[gymType] || colors.textTertiary;
+          const gymLabel = GYM_LABELS[gymType] || gymType.toUpperCase();
+          const isToday = dayIdx === todayDay;
+          const isRest = gymType === 'rest';
+          const completed = completedByDay[dayIdx] || [];
+          const hasCompletion = completed.length > 0;
+          const run = getPlannedRun(dayIdx);
+          const runColor = run ? (RUN_TYPE_COLORS_LOCAL[run.run_type] || colors.accent) : undefined;
+
+          return (
+            <View key={dayIdx} style={[
+              styles.calDayCard,
+              isRest && !run && { opacity: 0.45 },
+              isToday && { borderColor: colors.accent + '50' },
+            ]}>
+              <View style={styles.calDayLeft}>
+                <Text style={[styles.calDayName, isToday && { color: colors.accent }]}>{day}</Text>
+                <Text style={[styles.calDayDate, isToday && { color: colors.accent }]}>{dayDates[dayIdx]}</Text>
               </View>
-              <View style={styles.weekSummaryStat}>
-                <Text style={styles.weekSummaryValue}>{weekSummary.runs}</Text>
-                <Text style={styles.weekSummaryLabel}>RUNS</Text>
-              </View>
-              <View style={styles.weekSummaryStat}>
-                <Text style={styles.weekSummaryValue}>{weekSummary.total_hours}h</Text>
-                <Text style={styles.weekSummaryLabel}>TOTAL</Text>
-              </View>
-              {weekSummary.avg_rpe > 0 && (
-                <View style={styles.weekSummaryStat}>
-                  <Text style={styles.weekSummaryValue}>{weekSummary.avg_rpe}</Text>
-                  <Text style={styles.weekSummaryLabel}>AVG RPE</Text>
+
+              <View style={styles.calDayCenter}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <View style={[styles.calTypeBadge, { backgroundColor: gymColor + '15' }]}>
+                    <Text style={[styles.calTypeBadgeText, { color: gymColor }]}>{gymLabel}</Text>
+                  </View>
+                  {run && (
+                    <View style={[styles.calTypeBadge, { backgroundColor: (runColor || colors.accent) + '15' }]}>
+                      <Text style={[styles.calTypeBadgeText, { color: runColor || colors.accent }]}>
+                        {run.run_type.toUpperCase()} {run.target_distance_miles ? `${run.target_distance_miles}mi` : ''}
+                      </Text>
+                    </View>
+                  )}
                 </View>
+              </View>
+
+              {hasCompletion && (
+                <Ionicons name="checkmark-circle" size={18} color={colors.success} />
               )}
             </View>
-          </View>
-        )}
-
-        {/* Navigation */}
-        <View style={styles.navButtons}>
-          <TouchableOpacity
-            style={styles.navBtn}
-            onPress={() => navigation?.navigate?.('TrainingCalendar')}
-          >
-            <Ionicons name="calendar-outline" size={18} color={colors.accent} />
-            <Text style={styles.navBtnText}>Full Calendar</Text>
-            <Ionicons name="arrow-forward" size={14} color={colors.textTertiary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navBtn}
-            onPress={() => navigation?.navigate?.('RouteLibrary')}
-          >
-            <Ionicons name="map-outline" size={18} color={colors.accent} />
-            <Text style={styles.navBtnText}>Route Library</Text>
-            <Ionicons name="arrow-forward" size={14} color={colors.textTertiary} />
-          </TouchableOpacity>
+          );
+        })}
         </View>
-      </>
+      </View>
     );
   };
 
@@ -531,14 +603,11 @@ export default function TrainHomeScreen({ navigation }: any) {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40, flexGrow: 1 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {/* Header */}
-        <Text style={styles.screenTitle}>Train</Text>
-
         {/* Segmented Control */}
         <View style={styles.segmentRow}>
           {SEGMENTS.map(s => {
@@ -670,6 +739,56 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, gap: spacing.md,
   },
   navBtnText: { ...typography.body, color: colors.text, flex: 1 },
+
+  // Calendar-style plan
+  weekChip: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border, marginRight: 4,
+    backgroundColor: colors.card, alignItems: 'center', minWidth: 40,
+  },
+  weekChipNum: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+  weekChipProgress: { fontSize: 9, color: colors.textTertiary, marginTop: 1 },
+
+  calDayCard: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', marginBottom: 6,
+    paddingVertical: 10, paddingHorizontal: spacing.sm,
+    backgroundColor: colors.card, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  calDayLeft: { width: 36, alignItems: 'center' },
+  calDayName: { fontSize: 12, fontWeight: '600', color: colors.text },
+  calDayDate: { fontSize: 10, color: colors.textTertiary, marginTop: 1 },
+  calDayCenter: { flex: 1, marginLeft: spacing.sm },
+  calTypeBadge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 },
+  calTypeBadgeText: { fontSize: 8, fontWeight: '700', letterSpacing: 0.5 },
+
+  // Run segment
+  runCard: {
+    backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1,
+    borderColor: colors.border, padding: spacing.lg, marginBottom: spacing.md,
+  },
+  runStartBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm, paddingVertical: 18, borderRadius: radius.md,
+    backgroundColor: colors.accent, marginBottom: spacing.sm,
+    marginHorizontal: spacing.lg,
+  },
+  runStartText: { ...typography.title3, color: '#fff' },
+  runPlanContext: {
+    ...typography.caption, color: colors.textTertiary, textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  runQuickRow: {
+    flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg,
+    marginHorizontal: spacing.lg,
+  },
+  runQuickBtn: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: spacing.md, backgroundColor: colors.card,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    gap: 4,
+  },
+  runQuickLabel: { ...typography.micro, color: colors.textSecondary, fontWeight: '600' },
 
   // Week stats
   weekStatsRow: {

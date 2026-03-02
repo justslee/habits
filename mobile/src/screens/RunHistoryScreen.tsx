@@ -131,17 +131,9 @@ export default function RunHistoryScreen({ navigation }: any) {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12 }}
+      contentContainerStyle={{ paddingTop: 12 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Run History</Text>
-      </View>
-
       {/* Stats summary */}
       {stats && stats.total_runs > 0 && (
         <View style={styles.statsRow}>

@@ -93,7 +93,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
 
   if (!plan) {
     return (
-      <View style={[styles.container, styles.centered, { paddingTop: insets.top }]}>
+      <View style={[styles.container, styles.centered, { paddingTop: 0 }]}>
         <Ionicons name="calendar-outline" size={48} color={colors.textTertiary} />
         <Text style={styles.emptyTitle}>No Active Plan</Text>
         <Text style={styles.emptySubtext}>Create a training plan to see your calendar</Text>
@@ -116,7 +116,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      <View style={[styles.header, { paddingTop: 12 }]}>
         <TouchableOpacity onPress={() => navigation?.goBack?.()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>

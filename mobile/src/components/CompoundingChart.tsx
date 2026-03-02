@@ -16,6 +16,7 @@ interface CompoundingChartProps {
   firstEntryDate?: string;
   width?: number;
   height?: number;
+  compact?: boolean;
 }
 
 const TIMEFRAMES = [
@@ -24,13 +25,14 @@ const TIMEFRAMES = [
   { label: '1y', days: 365 },
 ];
 
-const PADDING = { top: 10, right: 10, bottom: 30, left: 45 };
+const PADDING = { top: 10, right: 10, bottom: 30, left: 28 };
 
 export default function CompoundingChart({
   stats,
   firstEntryDate,
   width: propWidth,
   height = 200,
+  compact = false,
 }: CompoundingChartProps) {
   const screenWidth = Dimensions.get('window').width - 72;
   const width = propWidth || screenWidth;
@@ -47,13 +49,13 @@ export default function CompoundingChart({
   const maxTheoretical = theoreticalValues[theoreticalValues.length - 1];
 
   // Actual progress
-  const totalEntries = stats.pillar_breakdown.reduce((s, p) => s + p.entry_count, 0);
+  const totalEntries = (stats.pillar_breakdown || []).reduce((s, p) => s + (p.entry_count || 0), 0);
   const avgDepth = stats.avg_depth_score || 0;
   const dailyRate = totalEntries > 0 ? totalEntries / days : 0;
   const actualCompound = dailyRate > 0 ? (1 + 0.01 * dailyRate * (avgDepth / 50)) : 1;
   const actualValues = Array.from({ length: days + 1 }, (_, i) => Math.pow(actualCompound, i));
-  const maxActual = actualValues[actualValues.length - 1];
-  const maxY = Math.max(maxTheoretical, maxActual, 1.1);
+  const maxActual = actualValues[actualValues.length - 1] || 1.1;
+  const maxY = Math.max(maxTheoretical || 1.1, maxActual, 1.1);
 
   const xScale = (i: number) => PADDING.left + (i / days) * chartW;
   const yScale = (v: number) => PADDING.top + chartH - ((v - 1) / (maxY - 1)) * chartH;
@@ -96,8 +98,8 @@ export default function CompoundingChart({
             <React.Fragment key={i}>
               <Line x1={PADDING.left} y1={yScale(v)} x2={width - PADDING.right} y2={yScale(v)}
                 stroke="#333" strokeWidth={1} opacity={0.4} />
-              <SvgText x={PADDING.left - 5} y={yScale(v) + 4} fill="#666" fontSize={10} textAnchor="end">
-                {v.toFixed(1)}x
+              <SvgText x={PADDING.left - 4} y={yScale(v) + 3} fill="#666" fontSize={9} textAnchor="end">
+                {(v ?? 0).toFixed(1)}
               </SvgText>
             </React.Fragment>
           ))}
@@ -129,40 +131,44 @@ export default function CompoundingChart({
         }]}>
           <Text style={styles.tooltipLabel}>Day {scrubDay}</Text>
           <Text style={[styles.tooltipVal, { color: '#6366F1' }]}>
-            Actual: {actualValues[scrubDay].toFixed(2)}x
+            Actual: {(actualValues[scrubDay] ?? 0).toFixed(2)}x
           </Text>
           <Text style={[styles.tooltipVal, { color: '#888' }]}>
-            Ideal: {theoreticalValues[scrubDay].toFixed(2)}x
+            Ideal: {(theoreticalValues[scrubDay] ?? 0).toFixed(2)}x
           </Text>
         </View>
       )}
 
       {/* Legend */}
-      <View style={styles.legend}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendLine, { backgroundColor: '#6366F1' }]} />
-          <Text style={styles.legendText}>Your progress</Text>
+      {!compact && (
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendLine, { backgroundColor: '#6366F1' }]} />
+            <Text style={styles.legendText}>Your progress</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendLine, { backgroundColor: '#666' }]} />
+            <Text style={styles.legendText}>1% daily (ideal)</Text>
+          </View>
         </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendLine, { backgroundColor: '#666' }]} />
-          <Text style={styles.legendText}>1% daily (ideal)</Text>
-        </View>
-      </View>
+      )}
 
       {/* Timeframe selector */}
-      <View style={styles.timeRow}>
-        {TIMEFRAMES.map((tf) => (
-          <TouchableOpacity
-            key={tf.days}
-            style={[styles.timeChip, timeframe === tf.days && styles.timeChipActive]}
-            onPress={() => setTimeframe(tf.days)}
-          >
-            <Text style={[styles.timeText, timeframe === tf.days && styles.timeTextActive]}>
-              {tf.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {!compact && (
+        <View style={styles.timeRow}>
+          {TIMEFRAMES.map((tf) => (
+            <TouchableOpacity
+              key={tf.days}
+              style={[styles.timeChip, timeframe === tf.days && styles.timeChipActive]}
+              onPress={() => setTimeframe(tf.days)}
+            >
+              <Text style={[styles.timeText, timeframe === tf.days && styles.timeTextActive]}>
+                {tf.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 }

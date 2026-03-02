@@ -87,16 +87,9 @@ export default function RouteLibraryScreen({ navigation }: any) {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12 }}
+      contentContainerStyle={{ paddingTop: 12 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Routes</Text>
-      </View>
-
       {routes.length === 0 && !loading && (
         <View style={styles.emptyState}>
           <Ionicons name="map-outline" size={48} color={colors.textTertiary} />

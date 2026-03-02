@@ -2,10 +2,10 @@
  * Route Discovery — discover loop routes from your current location.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Platform,
+  ActivityIndicator, Platform, TextInput, Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +15,7 @@ import { discoverRoutes, saveDiscoveredRoute, DiscoveredRoute } from '../api/cli
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
 import { haptic } from '../utils/haptics';
 
-const DISTANCE_OPTIONS = [
+const DISTANCE_PRESETS = [
   { label: '1 mi', value: 1 },
   { label: '2 mi', value: 2 },
   { label: '5K', value: 3.1 },
@@ -33,12 +33,15 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 export default function RouteSuggestionsScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const [distance, setDistance] = useState(3.1);
+  const [customInput, setCustomInput] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
   const [routes, setRoutes] = useState<DiscoveredRoute[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savingIdx, setSavingIdx] = useState<number | null>(null);
   const [savedIdxs, setSavedIdxs] = useState<Set<number>>(new Set());
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const customInputRef = useRef<TextInput>(null);
 
   const getLocation = useCallback(async () => {
     try {
@@ -113,34 +116,81 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40 }}
+      contentContainerStyle={{ paddingTop: 12, paddingBottom: 40 }}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Discover Routes</Text>
-      </View>
+      {/* Title is handled by stack header */}
 
-      {/* Distance Selector */}
+      {/* Distance Selector — presets + custom */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.pillRow}
       >
-        {DISTANCE_OPTIONS.map(opt => (
+        {DISTANCE_PRESETS.map(opt => (
           <TouchableOpacity
             key={opt.value}
-            style={[styles.pill, distance === opt.value && styles.pillActive]}
-            onPress={() => onDistanceChange(opt.value)}
+            style={[styles.pill, distance === opt.value && !showCustom && styles.pillActive]}
+            onPress={() => {
+              setShowCustom(false);
+              setCustomInput('');
+              onDistanceChange(opt.value);
+            }}
           >
-            <Text style={[styles.pillText, distance === opt.value && styles.pillTextActive]}>
+            <Text style={[styles.pillText, distance === opt.value && !showCustom && styles.pillTextActive]}>
               {opt.label}
             </Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={[styles.pill, showCustom && styles.pillActive]}
+          onPress={() => {
+            setShowCustom(true);
+            haptic.light();
+            setTimeout(() => customInputRef.current?.focus(), 100);
+          }}
+        >
+          <Ionicons name="options-outline" size={14} color={showCustom ? '#fff' : colors.textSecondary} />
+          <Text style={[styles.pillText, showCustom && styles.pillTextActive]}> Custom</Text>
+        </TouchableOpacity>
       </ScrollView>
+
+      {/* Custom distance input */}
+      {showCustom && (
+        <View style={styles.customRow}>
+          <TextInput
+            ref={customInputRef}
+            style={styles.customInput}
+            placeholder="e.g. 4.5"
+            placeholderTextColor={colors.textTertiary}
+            keyboardType="decimal-pad"
+            value={customInput}
+            onChangeText={setCustomInput}
+            returnKeyType="go"
+            onSubmitEditing={() => {
+              const val = parseFloat(customInput);
+              if (val > 0 && val <= 50) {
+                setDistance(val);
+                Keyboard.dismiss();
+                discover(val);
+              }
+            }}
+          />
+          <Text style={styles.customUnit}>miles</Text>
+          <TouchableOpacity
+            style={styles.customGoBtn}
+            onPress={() => {
+              const val = parseFloat(customInput);
+              if (val > 0 && val <= 50) {
+                setDistance(val);
+                Keyboard.dismiss();
+                discover(val);
+              }
+            }}
+          >
+            <Text style={styles.customGoText}>Go</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Loading State */}
       {loading && (
@@ -187,7 +237,12 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
         const padding = 0.002;
 
         return (
-          <View key={idx} style={styles.routeCard}>
+          <TouchableOpacity
+            key={idx}
+            style={styles.routeCard}
+            activeOpacity={0.85}
+            onPress={() => navigation?.navigate?.('RouteMap', { route })}
+          >
             {/* Mini Map */}
             {Platform.OS !== 'web' && route.polyline.length > 1 && (
               <MapView
@@ -205,8 +260,10 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
               >
                 <Polyline
                   coordinates={route.polyline.map(p => ({ latitude: p.lat, longitude: p.lng }))}
-                  strokeColor={colors.accent}
-                  strokeWidth={3}
+                  strokeColor={'#6366F1'}
+                  strokeWidth={4}
+                  lineCap="round"
+                  lineJoin="round"
                 />
               </MapView>
             )}
@@ -246,7 +303,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
             {/* Save Button */}
             <TouchableOpacity
               style={[styles.saveBtn, isSaved && styles.saveBtnSaved]}
-              onPress={() => saveRoute(route, idx)}
+              onPress={(e) => { e.stopPropagation?.(); saveRoute(route, idx); }}
               disabled={isSaved || savingIdx === idx}
             >
               {savingIdx === idx ? (
@@ -264,7 +321,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
                 </>
               )}
             </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         );
       })}
     </ScrollView>
@@ -293,6 +350,22 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   pillText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
   pillTextActive: { color: '#fff' },
+
+  customRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: spacing.lg, marginBottom: spacing.lg, gap: spacing.sm,
+  },
+  customInput: {
+    flex: 1, backgroundColor: colors.input, color: colors.text,
+    borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: 10,
+    ...typography.body, borderWidth: 1, borderColor: colors.border,
+  },
+  customUnit: { ...typography.caption, color: colors.textTertiary },
+  customGoBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: 10,
+    backgroundColor: colors.accent, borderRadius: radius.sm,
+  },
+  customGoText: { ...typography.bodyBold, color: '#fff' },
 
   loadingContainer: { alignItems: 'center', paddingHorizontal: spacing.lg },
   skeletonCard: {

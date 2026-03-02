@@ -8,10 +8,10 @@ export const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export const WEEKLY_SCHEDULE: { type: string; label: string; icon: string }[] = [
   { type: 'push', label: 'Push', icon: 'arrow-up-outline' },
-  { type: 'pull', label: 'Pull', icon: 'arrow-down-outline' },
-  { type: 'legs', label: 'Legs', icon: 'body-outline' },
-  { type: 'rest', label: 'Rest', icon: 'bed-outline' },
   { type: 'cardio', label: 'Cardio', icon: 'heart-outline' },
+  { type: 'legs', label: 'Legs + Core', icon: 'body-outline' },
+  { type: 'rest', label: 'Rest', icon: 'bed-outline' },
+  { type: 'pull', label: 'Pull + Core', icon: 'arrow-down-outline' },
   { type: 'basketball', label: 'Bball', icon: 'basketball-outline' },
   { type: 'rest', label: 'Rest', icon: 'bed-outline' },
 ];
@@ -37,7 +37,7 @@ export const RUN_TYPE_COLORS: Record<string, string> = {
 
 export const DAY_LABELS: Record<string, string> = {
   push: 'Push Day',
-  pull: 'Pull Day',
+  pull: 'Pull + Core',
   legs: 'Legs + Core',
   cardio: 'Cardio',
   basketball: 'Basketball',
