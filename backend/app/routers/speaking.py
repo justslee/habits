@@ -27,8 +27,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ==================== TRANSCRIPTION ====================
 
-async def transcribe_audio(audio_path: str) -> str:
-    """Transcribe audio using OpenAI gpt-4o-transcribe."""
+async def transcribe_audio(audio_path: str) -> dict:
+    """Transcribe audio using OpenAI gpt-4o-transcribe with timestamps for pause detection."""
     import httpx
 
     openai_key = os.getenv("OPENAI_API_KEY", "")
@@ -41,10 +41,39 @@ async def transcribe_audio(audio_path: str) -> str:
                 "https://api.openai.com/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {openai_key}"},
                 files={"file": (os.path.basename(audio_path), f, "audio/m4a")},
-                data={"model": "gpt-4o-transcribe", "response_format": "text"},
+                data={
+                    "model": "gpt-4o-transcribe",
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": "segment",
+                },
             )
             resp.raise_for_status()
-            return resp.text.strip()
+            data = resp.json()
+
+    # Extract transcript text
+    transcript = data.get("text", "").strip()
+
+    # Detect pauses from segment timestamps
+    pauses = []
+    segments = data.get("segments", [])
+    for i in range(1, len(segments)):
+        prev_end = segments[i - 1].get("end", 0)
+        curr_start = segments[i].get("start", 0)
+        gap = curr_start - prev_end
+        if gap >= 1.5:  # 1.5+ seconds = notable pause
+            pauses.append({
+                "after_text": segments[i - 1].get("text", "").strip()[-60:],
+                "before_text": segments[i].get("text", "").strip()[:60],
+                "duration": round(gap, 1),
+                "timestamp": round(prev_end, 1),
+            })
+
+    return {
+        "transcript": transcript,
+        "pauses": pauses,
+        "total_pause_seconds": round(sum(p["duration"] for p in pauses), 1),
+        "pause_count": len(pauses),
+    }
 
 
 # ==================== EVALUATION ====================
@@ -101,6 +130,14 @@ Return exact counts.
 Identify 3-5 specific passages from the transcript. For each, quote the exact text
 and provide targeted feedback. Mix strengths and improvements.
 
+## Pause Analysis
+You will also receive data about pauses detected in the recording (gaps ≥ 1.5s between speech segments).
+Evaluate whether pauses are:
+- **Strategic** — used for emphasis, letting a point land, transitioning between ideas (GOOD)
+- **Hesitation** — losing train of thought, unsure what to say next, freezing up (BAD)
+- **Excessive** — too many or too long, breaking flow and losing audience (BAD)
+Include pause assessment in your commentary and factor it into the confidence score.
+
 ## Response Format (JSON only)
 {
   "clarity_score": <int>,
@@ -111,6 +148,7 @@ and provide targeted feedback. Mix strengths and improvements.
   "overall_score": <int — weighted average: clarity 25%, accuracy 25%, structure 20%, conciseness 15%, confidence 15%>,
   "filler_words": {"um": <count>, "like": <count>, ...},
   "filler_count": <total filler count>,
+  "pause_assessment": "<1-2 sentences on pause usage — strategic vs hesitation>",
   "specific_feedback": [
     {"quote": "<exact text from transcript>", "feedback": "<targeted feedback>", "type": "improvement|strength"},
     ...
@@ -119,8 +157,15 @@ and provide targeted feedback. Mix strengths and improvements.
 }"""
 
 
-async def evaluate_speaking(transcript: str, topic: str, audience: str, duration_seconds: int) -> dict:
+async def evaluate_speaking(transcript: str, topic: str, audience: str, duration_seconds: int, pauses: list = None) -> dict:
     """Evaluate a speaking session transcript."""
+    pause_block = ""
+    if pauses:
+        pause_lines = []
+        for p in pauses:
+            pause_lines.append(f"  - {p['duration']}s pause at {p['timestamp']}s (after: \"{p['after_text']}\" → before: \"{p['before_text']}\")")
+        pause_block = f"\n\n**Pauses detected ({len(pauses)} pauses, {sum(p['duration'] for p in pauses):.1f}s total):**\n" + "\n".join(pause_lines)
+
     user_prompt = f"""Evaluate this spoken explanation:
 
 **Topic:** {topic}
@@ -128,7 +173,7 @@ async def evaluate_speaking(transcript: str, topic: str, audience: str, duration
 **Duration:** {duration_seconds} seconds ({duration_seconds // 60}m {duration_seconds % 60}s)
 
 **Transcript:**
-{transcript}
+{transcript}{pause_block}
 
 Be brutally honest. Reference specific parts of the transcript in your feedback."""
 
@@ -152,6 +197,7 @@ Be brutally honest. Reference specific parts of the transcript in your feedback.
         "filler_words": parsed.get("filler_words", {}),
         "filler_count": int(parsed.get("filler_count", 0)),
         "specific_feedback": parsed.get("specific_feedback", []),
+        "pause_assessment": str(parsed.get("pause_assessment", "")),
         "commentary": str(parsed["commentary"]),
         "raw": raw,
     }
@@ -184,7 +230,9 @@ async def create_speaking_session(
 
     # Transcribe
     try:
-        transcript = await transcribe_audio(audio_path)
+        transcription = await transcribe_audio(audio_path)
+        transcript = transcription["transcript"]
+        pauses = transcription["pauses"]
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
@@ -206,7 +254,7 @@ async def create_speaking_session(
 
     # Evaluate
     try:
-        result = await evaluate_speaking(transcript, topic, audience, actual_seconds or target_seconds)
+        result = await evaluate_speaking(transcript, topic, audience, actual_seconds or target_seconds, pauses)
         evaluation = SpeakingEvaluation(
             session_id=session.id,
             clarity_score=result["clarity_score"],
@@ -384,6 +432,20 @@ def _session_response(session: SpeakingSession) -> dict:
     }
     if session.evaluation:
         e = session.evaluation
+        # Extract pause_assessment from raw LLM response if available
+        pause_assessment = ""
+        if e.raw_llm_response:
+            try:
+                raw = json.loads(e.raw_llm_response)
+                content = raw.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+                parsed_raw = json.loads(content.strip())
+                pause_assessment = parsed_raw.get("pause_assessment", "")
+            except Exception:
+                pass
         resp["evaluation"] = {
             "clarity_score": e.clarity_score,
             "accuracy_score": e.accuracy_score,
@@ -394,6 +456,7 @@ def _session_response(session: SpeakingSession) -> dict:
             "filler_words": json.loads(e.filler_words) if e.filler_words else {},
             "filler_count": e.filler_count,
             "specific_feedback": json.loads(e.specific_feedback) if e.specific_feedback else [],
+            "pause_assessment": pause_assessment,
             "commentary": e.commentary,
         }
     return resp

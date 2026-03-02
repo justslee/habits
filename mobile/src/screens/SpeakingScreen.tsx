@@ -33,6 +33,7 @@ interface EvalResult {
   filler_words: Record<string, number>;
   filler_count: number;
   specific_feedback: Array<{ quote: string; feedback: string; type: string }>;
+  pause_assessment: string;
   commentary: string;
 }
 
@@ -500,6 +501,17 @@ export default function SpeakingScreen() {
                 </View>
               </View>
             )}
+
+            {/* Pause Assessment */}
+            {ev.pause_assessment ? (
+              <View style={st.card}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm }}>
+                  <Ionicons name="pause-circle-outline" size={14} color={colors.warning} />
+                  <Text style={st.cardLabel}>PAUSE ANALYSIS</Text>
+                </View>
+                <Text style={st.commentaryText}>{ev.pause_assessment}</Text>
+              </View>
+            ) : null}
 
             {/* Commentary */}
             <View style={st.card}>
