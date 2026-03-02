@@ -42,8 +42,9 @@ async def transcribe_audio(audio_path: str) -> dict:
                 headers={"Authorization": f"Bearer {openai_key}"},
                 files={"file": (os.path.basename(audio_path), f, "audio/m4a")},
                 data={
-                    "model": "gpt-4o-transcribe",
-                    "response_format": "json",
+                    "model": "whisper-1",
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": "segment",
                 },
             )
             resp.raise_for_status()
@@ -52,9 +53,20 @@ async def transcribe_audio(audio_path: str) -> dict:
     # Extract transcript text
     transcript = data.get("text", "").strip()
 
-    # gpt-4o-transcribe doesn't support verbose_json/segments,
-    # so pause detection is not available with this model
+    # Detect pauses from segment timestamps
     pauses = []
+    segments = data.get("segments", [])
+    for i in range(1, len(segments)):
+        prev_end = segments[i - 1].get("end", 0)
+        curr_start = segments[i].get("start", 0)
+        gap = curr_start - prev_end
+        if gap >= 1.5:  # 1.5+ seconds = notable pause
+            pauses.append({
+                "after_text": segments[i - 1].get("text", "").strip()[-60:],
+                "before_text": segments[i].get("text", "").strip()[:60],
+                "duration": round(gap, 1),
+                "timestamp": round(prev_end, 1),
+            })
 
     return {
         "transcript": transcript,
