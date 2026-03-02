@@ -419,6 +419,25 @@ export default function SpeakingScreen() {
               </View>
               {isExpanded && ev && (
                 <View style={{ marginTop: spacing.md }}>
+                  {/* Per-dimension scores */}
+                  <View style={{ marginBottom: spacing.md }}>
+                    {SCORE_DIMENSIONS.map(d => {
+                      const score = ev[d.key as keyof EvalResult] as number;
+                      return score != null ? (
+                        <View key={d.key} style={st.dimRow}>
+                          <Ionicons name={d.icon as any} size={14} color={colors.textTertiary} />
+                          <Text style={st.dimLabel}>{d.label}</Text>
+                          <View style={st.dimBarTrack}>
+                            <View style={[st.dimBarFill, {
+                              width: `${score}%` as any,
+                              backgroundColor: scoreColor(score),
+                            }]} />
+                          </View>
+                          <Text style={[st.dimValue, { color: scoreColor(score) }]}>{score}</Text>
+                        </View>
+                      ) : null;
+                    })}
+                  </View>
                   <Text style={st.commentaryText}>{ev.commentary}</Text>
                   {ev.specific_feedback.slice(0, 3).map((fb: any, i: number) => (
                     <View key={i} style={st.feedbackItem}>
