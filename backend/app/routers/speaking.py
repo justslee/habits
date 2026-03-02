@@ -62,7 +62,7 @@ async def transcribe_audio(audio_path: str) -> dict:
         prev_end = segments[i - 1].get("end", 0)
         curr_start = segments[i].get("start", 0)
         gap = curr_start - prev_end
-        if gap >= 1.5:  # 1.5+ seconds = notable pause
+        if gap >= 0.8:  # 0.8+ seconds = notable pause (diarize segments are coarse)
             pauses.append({
                 "after_text": segments[i - 1].get("text", "").strip()[-60:],
                 "before_text": segments[i].get("text", "").strip()[:60],
@@ -169,7 +169,7 @@ Identify 3-5 specific passages from the transcript. For each, quote the exact te
 and provide targeted feedback. Mix strengths and improvements.
 
 ## Pause Analysis
-You will also receive data about pauses detected in the recording (gaps ≥ 1.5s between speech segments).
+You will also receive data about pauses detected in the recording (gaps ≥ 0.8s between speech segments).
 Evaluate whether pauses are:
 - **Strategic** — used for emphasis, letting a point land, transitioning between ideas (GOOD)
 - **Hesitation** — losing train of thought, unsure what to say next, freezing up (BAD)
