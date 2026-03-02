@@ -449,6 +449,11 @@ export default function SpeakingScreen() {
     const ev = result.evaluation;
     return (
       <ScrollView style={st.scroll} contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]}>
+        {/* Back button */}
+        <TouchableOpacity onPress={resetToSetup} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md }}>
+          <Ionicons name="arrow-back" size={22} color={colors.accent} />
+          <Text style={{ ...typography.bodyBold, color: colors.accent, marginLeft: spacing.xs }}>Back</Text>
+        </TouchableOpacity>
         {ev ? (
           <>
             {/* Overall score */}
