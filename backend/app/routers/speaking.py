@@ -42,20 +42,22 @@ async def transcribe_audio(audio_path: str) -> dict:
                 headers={"Authorization": f"Bearer {openai_key}"},
                 files={"file": (os.path.basename(audio_path), f, "audio/m4a")},
                 data={
-                    "model": "whisper-1",
-                    "response_format": "verbose_json",
-                    "timestamp_granularities[]": "segment",
+                    "model": "gpt-4o-transcribe-diarize",
+                    "response_format": "diarized_json",
+                    "chunking_strategy": "auto",
                 },
             )
             resp.raise_for_status()
             data = resp.json()
 
-    # Extract transcript text
-    transcript = data.get("text", "").strip()
+    # Extract full transcript text
+    segments = data.get("segments", [])
+    transcript = " ".join(s.get("text", "").strip() for s in segments).strip()
+    if not transcript:
+        transcript = data.get("text", "").strip()
 
     # Detect pauses from segment timestamps
     pauses = []
-    segments = data.get("segments", [])
     for i in range(1, len(segments)):
         prev_end = segments[i - 1].get("end", 0)
         curr_start = segments[i].get("start", 0)
