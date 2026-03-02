@@ -25,102 +25,53 @@ router = APIRouter(prefix="/api/v1/speaking", tags=["speaking"])
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "speaking")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ==================== WHISPERX TRANSCRIPTION ====================
-
-# Lazy-loaded WhisperX models (heavy, load once)
-_whisperx_model = None
-_align_model = None
-_align_metadata = None
-
-
-def _get_whisperx_models():
-    """Lazy-load WhisperX and alignment models."""
-    global _whisperx_model, _align_model, _align_metadata
-
-    if _whisperx_model is None:
-        import torch
-        import functools
-
-        # Patch torch.load for PyTorch 2.6+ compatibility with pyannote checkpoints
-        _orig_load = torch.load
-        @functools.wraps(_orig_load)
-        def _safe_load(*a, **kw):
-            kw['weights_only'] = False
-            return _orig_load(*a, **kw)
-        torch.load = _safe_load
-
-        import whisperx
-
-        logger.info("Loading WhisperX model (large-v3)...")
-        _whisperx_model = whisperx.load_model(
-            'large-v3', device='cpu', compute_type='float32'
-        )
-        logger.info("Loading WhisperX alignment model...")
-        _align_model, _align_metadata = whisperx.load_align_model(
-            language_code='en', device='cpu'
-        )
-        logger.info("WhisperX models loaded.")
-
-    return _whisperx_model, _align_model, _align_metadata
-
+# ==================== TRANSCRIPTION ====================
 
 async def transcribe_audio(audio_path: str) -> dict:
-    """Transcribe audio using WhisperX with word-level timestamps and VAD-based pause detection."""
-    import asyncio
-    import whisperx
+    """Transcribe audio using OpenAI gpt-4o-transcribe with timestamps for pause detection."""
+    import httpx
 
-    def _run_whisperx():
-        model, align_model, align_metadata = _get_whisperx_models()
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise RuntimeError("OPENAI_API_KEY not set for transcription")
 
-        audio = whisperx.load_audio(audio_path)
-        result = model.transcribe(audio, batch_size=4)
-        segments = result.get("segments", [])
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        with open(audio_path, "rb") as f:
+            resp = await client.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {openai_key}"},
+                files={"file": (os.path.basename(audio_path), f, "audio/m4a")},
+                data={
+                    "model": "gpt-4o-transcribe-diarize",
+                    "response_format": "diarized_json",
+                    "chunking_strategy": "auto",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-        # Word-level alignment via wav2vec2
-        aligned = whisperx.align(
-            segments, align_model, align_metadata, audio, device='cpu'
-        )
-        word_segments = aligned.get("word_segments", [])
+    # Extract full transcript text
+    segments = data.get("segments", [])
+    transcript = " ".join(s.get("text", "").strip() for s in segments).strip()
+    if not transcript:
+        transcript = data.get("text", "").strip()
 
-        # Build transcript
-        transcript = " ".join(
-            s.get("text", "").strip() for s in segments
-        ).strip()
+    # Detect pauses from segment timestamps
+    pauses = []
+    for i in range(1, len(segments)):
+        prev_end = segments[i - 1].get("end", 0)
+        curr_start = segments[i].get("start", 0)
+        gap = curr_start - prev_end
+        if gap >= 1.5:  # 1.5+ seconds = notable pause
+            pauses.append({
+                "after_text": segments[i - 1].get("text", "").strip()[-60:],
+                "before_text": segments[i].get("text", "").strip()[:60],
+                "duration": round(gap, 1),
+                "timestamp": round(prev_end, 1),
+            })
 
-        # Detect pauses from word-level timestamps (gaps >= 1.5s)
-        pauses = []
-        for i in range(1, len(word_segments)):
-            prev_end = word_segments[i - 1].get("end", 0)
-            curr_start = word_segments[i].get("start", 0)
-            if prev_end and curr_start:
-                gap = curr_start - prev_end
-                if gap >= 1.5:
-                    pauses.append({
-                        "after_text": word_segments[i - 1].get("word", ""),
-                        "before_text": word_segments[i].get("word", ""),
-                        "duration": round(gap, 1),
-                        "timestamp": round(prev_end, 1),
-                    })
-
-        # Calculate total audio duration from segments
-        duration = 0.0
-        if segments:
-            duration = segments[-1].get("end", 0) - segments[0].get("start", 0)
-
-        return {
-            "transcript": transcript,
-            "pauses": pauses,
-            "word_count": len(word_segments),
-            "duration_seconds": round(duration, 1),
-        }
-
-    # Run CPU-heavy whisperx in a thread to not block the event loop
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, _run_whisperx)
-
-    pauses = result["pauses"]
     return {
-        "transcript": result["transcript"],
+        "transcript": transcript,
         "pauses": pauses,
         "total_pause_seconds": round(sum(p["duration"] for p in pauses), 1),
         "pause_count": len(pauses),
