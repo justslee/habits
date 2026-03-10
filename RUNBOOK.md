@@ -7,7 +7,7 @@
 
 ```bash
 # One-time setup (user runs these manually)
-brew install cloudflared node python@3.12
+brew install tailscale node python@3.12
 npm install -g eas-cli expo-cli
 ```
 
@@ -71,40 +71,61 @@ npm run ios
 
 ---
 
-## Cloudflare Tunnel (Expose Backend to iPhone)
+## Tailscale (Private Network — iPhone ↔ MacBook)
+
+Tailscale creates a private WireGuard mesh. No public tunnel, zero internet exposure.
 
 ```bash
-# One-time setup
-cloudflared tunnel login
-cloudflared tunnel create mastery-tracker
-cloudflared tunnel route dns mastery-tracker api.yourdomain.com
+# --- One-time setup ---
 
-# Run tunnel (connects localhost:8000 to your domain)
-cloudflared tunnel run --url http://localhost:8000 mastery-tracker
+# MacBook
+brew install tailscale
+tailscale up                          # Log in (creates Tailscale account if needed)
 
-# Quick tunnel (no domain needed, gives you a random URL)
-cloudflared tunnel --url http://localhost:8000
+# Get your hostname (e.g., macbook.tail12345.ts.net)
+tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))"
 
-# Verify
-curl https://api.yourdomain.com/health
+# Generate HTTPS cert for your hostname (optional but recommended for iOS ATS)
+tailscale cert justins-macbook-pro-2.tail173136.ts.net
+
+# iPhone
+# Install Tailscale from App Store → log in with same account
+# Both devices now share a private encrypted network
+
+# --- Update configs with your Tailscale hostname ---
+
+# backend/.env  →  ALLOWED_ORIGINS=...,https://justins-macbook-pro-2.tail173136.ts.net:8000
+# mobile/public/config.json  →  {"apiUrl":"https://justins-macbook-pro-2.tail173136.ts.net:8000"}
+# mobile/.env  →  EXPO_PUBLIC_API_URL=https://justins-macbook-pro-2.tail173136.ts.net:8000
+
+# --- Verify ---
+curl https://justins-macbook-pro-2.tail173136.ts.net:8000/health
 # Expected: {"status": "ok"}
 ```
+
+### Why Tailscale over Cloudflare Tunnel?
+- **Stable URL**: Tailscale hostname never changes across restarts
+- **Zero public exposure**: Only devices on your Tailscale network can connect
+- **No tunnel process**: One fewer process to manage (no cloudflared)
+- **WireGuard encryption**: Peer-to-peer, fast, low-latency
 
 ---
 
 ## Run Everything (Dev Mode)
 
-Open 3 terminals:
+Open 2 terminals (no tunnel needed with Tailscale):
 
 ```bash
-# Terminal 1: Backend
-cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
+# Terminal 1: Backend (reachable via Tailscale hostname automatically)
+cd backend && source venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Terminal 2: Mobile
 cd mobile && npm start
+```
 
-# Terminal 3: Tunnel (optional, for iPhone access outside dev mode)
-cloudflared tunnel --url http://localhost:8000
+Or use the all-in-one script:
+```bash
+./scripts/start-tunnel.sh   # starts backend + prints Tailscale URL
 ```
 
 ---
@@ -164,7 +185,8 @@ cd backend && source venv/bin/activate && pytest -v || echo "FAIL: backend tests
 | Problem | Fix |
 |---------|-----|
 | Port 8000 in use | `lsof -ti:8000 \| xargs kill` |
-| Tunnel auth expired | `cloudflared tunnel login` (re-auth) |
+| Tailscale not connected | `tailscale up` (reconnect) |
+| Tailscale hostname unknown | `tailscale status` (shows hostname + IP) |
 | Expo not starting | `cd mobile && npx expo start --clear` |
 | iOS Simulator not found | `xcrun simctl list devices` |
 | Python venv not activated | `source backend/venv/bin/activate` |
