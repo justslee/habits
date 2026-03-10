@@ -86,7 +86,7 @@ tailscale up                          # Log in (creates Tailscale account if nee
 tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))"
 
 # Generate HTTPS cert for your hostname (optional but recommended for iOS ATS)
-tailscale cert YOUR_MACBOOK.tail12345.ts.net
+tailscale cert justins-macbook-pro-2.tail173136.ts.net
 
 # iPhone
 # Install Tailscale from App Store → log in with same account
@@ -94,12 +94,12 @@ tailscale cert YOUR_MACBOOK.tail12345.ts.net
 
 # --- Update configs with your Tailscale hostname ---
 
-# backend/.env  →  ALLOWED_ORIGINS=...,https://YOUR_MACBOOK.tail12345.ts.net:8000
-# mobile/public/config.json  →  {"apiUrl":"https://YOUR_MACBOOK.tail12345.ts.net:8000"}
-# mobile/.env  →  EXPO_PUBLIC_API_URL=https://YOUR_MACBOOK.tail12345.ts.net:8000
+# backend/.env  →  ALLOWED_ORIGINS=...,https://justins-macbook-pro-2.tail173136.ts.net:8000
+# mobile/public/config.json  →  {"apiUrl":"https://justins-macbook-pro-2.tail173136.ts.net:8000"}
+# mobile/.env  →  EXPO_PUBLIC_API_URL=https://justins-macbook-pro-2.tail173136.ts.net:8000
 
 # --- Verify ---
-curl https://YOUR_MACBOOK.tail12345.ts.net:8000/health
+curl https://justins-macbook-pro-2.tail173136.ts.net:8000/health
 # Expected: {"status": "ok"}
 ```
 
