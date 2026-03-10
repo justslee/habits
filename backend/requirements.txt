@@ -18,5 +18,8 @@ httpx>=0.26.0
 # Migrations
 alembic>=1.13.0
 
+# Rate limiting
+slowapi>=0.1.9
+
 # Dev tools
 ruff>=0.2.0
