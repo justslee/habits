@@ -1,6 +1,5 @@
-"""AI Evaluation Engine — Claude integration via Clawdbot.
+"""AI Evaluation Engine — Claude integration via Anthropic SDK.
 
-Routes LLM calls through Clawdbot at localhost:18789 (D-012).
 Engineered for brutal honesty (D-003 — no participation trophies).
 """
 
@@ -9,7 +8,7 @@ import logging
 import os
 from typing import Any
 
-import httpx
+import anthropic
 from sqlalchemy.orm import Session
 
 from app.models.daily_entry import DailyEntry
@@ -20,12 +19,11 @@ from app.services.adaptive import build_adaptive_context_block, calculate_consis
 
 logger = logging.getLogger(__name__)
 
-CLAWDBOT_URL = "http://localhost:18789/v1/chat/completions"
-CLAWDBOT_MODEL = "claude-opus-4-6"
+ANTHROPIC_MODEL = "claude-opus-4-6"
 
-# IMPORTANT: Do not hardcode tokens in the repo.
-# Set CLAWDBOT_TOKEN (or OPENCLAW_GATEWAY_TOKEN) in the environment.
-CLAWDBOT_TOKEN = os.getenv("CLAWDBOT_TOKEN") or os.getenv("OPENCLAW_GATEWAY_TOKEN")
+# IMPORTANT: Do not hardcode API keys in the repo.
+# Set ANTHROPIC_API_KEY in the environment.
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 SYSTEM_PROMPT = """You are the Honest Mirror — a brutally honest AI evaluator for a personal mastery tracking system.
 
@@ -120,26 +118,20 @@ Be brutally honest. No sugar coating.{concepts_block}"""
 
 
 async def call_clawdbot(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
-    """Call Clawdbot's OpenAI-compatible chat completions endpoint."""
-    payload = {
-        "model": CLAWDBOT_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": temperature,
-    }
+    """Call Claude via Anthropic SDK. Returns an OpenAI-compatible dict for backward compatibility."""
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("Missing ANTHROPIC_API_KEY env var")
 
-    if not CLAWDBOT_TOKEN:
-        raise RuntimeError(
-            "Missing CLAWDBOT_TOKEN (or OPENCLAW_GATEWAY_TOKEN) env var for Clawdbot auth"
-        )
-
-    headers = {"Authorization": f"Bearer {CLAWDBOT_TOKEN}"}
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        response = await client.post(CLAWDBOT_URL, json=payload, headers=headers)
-        response.raise_for_status()
-        return response.json()
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    response = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=2048,
+        temperature=temperature,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    # Wrap in OpenAI-compatible shape so all callers work unchanged.
+    return {"choices": [{"message": {"content": response.content[0].text}}]}
 
 
 def parse_llm_response(raw_response: dict[str, Any]) -> dict[str, Any]:
