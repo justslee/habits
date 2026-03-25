@@ -132,10 +132,10 @@ DO NOT schedule runs on Mon/Tue/Wed (strength days) or Sat (basketball)."""
             system_prompt=RUN_COACH_SYSTEM,
             user_prompt=prompt,
         )
-        plan = json.loads(result)
+        plan = json.loads(result["choices"][0]["message"]["content"])
         return plan
     except (json.JSONDecodeError, Exception) as e:
-        logger.warning(f"Clawdbot plan generation failed: {e}, using fallback")
+        logger.warning(f"Plan generation failed: {e}, using fallback")
         return _fallback_plan(goal_type, fitness_level, weeks, available_days or [1, 4, 6])
 
 
@@ -285,10 +285,11 @@ Whoop recovery: {run.whoop_recovery_score or 'unknown'}%
 What went well? What to improve? How does this fit the training plan?"""
 
     try:
-        return await call_clawdbot(
+        result = await call_clawdbot(
             system_prompt=RUN_COACH_SYSTEM,
             user_prompt=prompt,
         )
+        return result["choices"][0]["message"]["content"]
     except Exception:
         return "Run logged successfully. Keep building consistency."
 
