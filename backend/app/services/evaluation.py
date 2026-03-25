@@ -6,7 +6,7 @@ Engineered for brutal honesty (D-003 — no participation trophies).
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import anthropic
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ ANTHROPIC_MODEL = "claude-opus-4-6"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 # Module-level singleton — reuses connection pool across all calls.
-_anthropic_client: anthropic.AsyncAnthropic | None = None
+_anthropic_client: Optional[anthropic.AsyncAnthropic] = None
 
 
 def _get_client() -> anthropic.AsyncAnthropic:
