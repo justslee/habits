@@ -25,6 +25,18 @@ ANTHROPIC_MODEL = "claude-opus-4-6"
 # Set ANTHROPIC_API_KEY in the environment.
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+# Module-level singleton — reuses connection pool across all calls.
+_anthropic_client: anthropic.AsyncAnthropic | None = None
+
+
+def _get_client() -> anthropic.AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        if not ANTHROPIC_API_KEY:
+            raise RuntimeError("Missing ANTHROPIC_API_KEY env var")
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
+
 SYSTEM_PROMPT = """You are the Honest Mirror — a brutally honest AI evaluator for a personal mastery tracking system.
 
 Your job: evaluate whether a learning/practice session actually made the user 1% better at their craft.
@@ -119,13 +131,10 @@ Be brutally honest. No sugar coating.{concepts_block}"""
 
 async def call_clawdbot(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
     """Call Claude via Anthropic SDK. Returns an OpenAI-compatible dict for backward compatibility."""
-    if not ANTHROPIC_API_KEY:
-        raise RuntimeError("Missing ANTHROPIC_API_KEY env var")
-
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    client = _get_client()
     response = await client.messages.create(
         model=ANTHROPIC_MODEL,
-        max_tokens=2048,
+        max_tokens=4096,
         temperature=temperature,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
