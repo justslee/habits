@@ -299,6 +299,25 @@ export default function ProgressScreen() {
   const heatmapGrid = buildHeatmapGrid(heatmap);
   const grouped = MUSCLE_GROUPS.map(mg => ({ ...mg, exercises: profiles.filter(p => p.muscle_group === mg.key) }));
 
+  // --- Discipline pre-calculations ---
+  const todayStr = new Date().toISOString().split('T')[0];
+  const discScore: number = disciplineData?.discipline_score ?? 0;
+  const discGrade = discScore >= 80 ? 'A' : discScore >= 60 ? 'B' : discScore >= 40 ? 'C' : discScore >= 20 ? 'D' : 'F';
+  const discGradeColor = discGrade === 'A' ? '#6366F1' : discGrade === 'B' ? '#22C55E' : discGrade === 'C' ? '#F59E0B' : discGrade === 'D' ? '#F97316' : '#EF4444';
+  const dates30 = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - 29 + i); return d.toISOString().split('T')[0];
+  });
+  const dailyMap30: Record<string, number[]> = disciplineData?.daily_map || {};
+  const totalHabitsCount: number = disciplineData?.habits?.length || 0;
+  const dots30 = dates30.map(date => {
+    const ids = dailyMap30[date] || [];
+    const status = ids.length === 0 ? 'empty' : ids.length >= totalHabitsCount ? 'perfect' : 'partial';
+    return { date, status } as { date: string; status: 'empty' | 'partial' | 'perfect' };
+  });
+  const perfectDayCount30 = dots30.filter(d => d.status === 'perfect').length;
+  const disc30StartDate = new Date(); disc30StartDate.setDate(disc30StartDate.getDate() - 29);
+  const disc30StartLabel = disc30StartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <ScreenBackground>
@@ -314,9 +333,9 @@ export default function ProgressScreen() {
       >
         {([
           { key: 'mastery' as Section, icon: 'school-outline' as const, label: 'Mastery' },
+          { key: 'discipline' as Section, icon: 'flame-outline' as const, label: 'Discipline' },
           { key: 'strength' as Section, icon: 'barbell-outline' as const, label: 'Strength' },
           { key: 'running' as Section, icon: 'footsteps-outline' as const, label: 'Running' },
-          { key: 'discipline' as Section, icon: 'flame-outline' as const, label: 'Discipline' },
           { key: 'vision' as Section, icon: 'telescope-outline' as const, label: 'Vision' },
         ]).map(({ key, icon, label }) => (
           <TouchableOpacity key={key}
@@ -624,66 +643,113 @@ export default function ProgressScreen() {
       {activeSection === 'discipline' && (
         disciplineData && disciplineData.habits.length > 0 ? (
           <>
-            <View style={s.statsGrid}>
-              <View style={s.statCard}>
-                <Text style={[s.statCardValue, { color: disciplineData.discipline_score >= 80 ? colors.success : disciplineData.discipline_score >= 60 ? colors.warning : colors.error }]}>
-                  {disciplineData.discipline_score}%
-                </Text>
-                <Text style={s.statCardLabel}>DISCIPLINE</Text>
+            {/* 1. Hero Grade */}
+            <View style={dsr.heroGradeCard}>
+              <Text style={[dsr.heroGradeLetter, { color: discGradeColor }]}>{discGrade}</Text>
+              <Text style={dsr.heroRateText}>{discScore.toFixed(1)}% completion rate</Text>
+              <Text style={dsr.heroBasisText}>Based on last 30 days</Text>
+            </View>
+
+            {/* 2. Perfect Days — Last 30 */}
+            <View style={s.card}>
+              <View style={dsr.rowBetween}>
+                <Text style={[s.cardLabel, { marginBottom: 0 }]}>PERFECT DAYS — LAST 30</Text>
+                <Text style={dsr.countLabel}>{perfectDayCount30} of 30</Text>
               </View>
-              <View style={s.statCard}>
-                <Text style={[s.statCardValue, { color: colors.accent }]}>{disciplineData.weekly_grade}</Text>
-                <Text style={s.statCardLabel}>GRADE</Text>
+              <View style={[dsr.dotsRow, { marginTop: spacing.md }]}>
+                {dots30.map(({ date, status }) => {
+                  const dotBg = status === 'perfect' ? '#6366F1' : status === 'partial' ? 'rgba(99,102,241,0.3)' : 'rgba(36,38,69,0.6)';
+                  return (
+                    <View
+                      key={date}
+                      style={[dsr.dot, { backgroundColor: dotBg }, date === todayStr && dsr.dotToday]}
+                    />
+                  );
+                })}
               </View>
-              <View style={s.statCard}>
-                <Text style={[s.statCardValue, { color: '#F59E0B' }]}>{disciplineData.perfect_day_count}</Text>
-                <Text style={s.statCardLabel}>PERFECT DAYS</Text>
+              <View style={dsr.dotLabels}>
+                <Text style={dsr.dotLabelText}>{disc30StartLabel}</Text>
+                <Text style={dsr.dotLabelText}>Today</Text>
               </View>
             </View>
 
+            {/* 3. Habits (read-only) */}
             <View style={s.card}>
-              <Text style={s.cardLabel}>HABIT STREAKS</Text>
-              {disciplineData.habits.map((h: any) => (
-                <View key={h.id} style={[ds.habitStatRow, { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={ds.habitName}>{h.name}</Text>
-                    <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: 4 }}>
-                      <Text style={ds.habitMeta}>{h.completion_rate}% rate</Text>
-                      <Text style={ds.habitMeta}>{h.rate_7d}% (7d)</Text>
-                    </View>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Ionicons name="flame" size={14} color="#F59E0B" />
-                      <Text style={ds.streakNum}>{h.current_streak}d</Text>
-                    </View>
-                    <Text style={ds.bestStreak}>best {h.longest_streak}d</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            <View style={s.card}>
-              <Text style={s.cardLabel}>COMPLETION MAP — 30 DAYS</Text>
-              {disciplineData.habits.map((h: any) => {
-                const habitColor = h.color || colors.accent;
+              <Text style={s.cardLabel}>HABITS</Text>
+              {disciplineData.habits.map((h: any, i: number) => {
+                const rateColor = h.completion_rate < 30 ? colors.error : h.completion_rate < 70 ? colors.warning : colors.success;
+                const streakActive = h.current_streak > 0;
+                const streakColor = streakActive ? '#F59E0B' : colors.textTertiary;
                 return (
-                  <View key={h.id} style={{ marginBottom: spacing.md }}>
-                    <Text style={ds.miniHabitLabel}>{h.name}</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
-                      {Object.entries(disciplineData.daily_map || {}).map(([dateStr, ids]: [string, any]) => {
-                        const completed = (ids as number[]).includes(h.id);
-                        return (
-                          <View
-                            key={dateStr}
-                            style={[ds.miniCell, { backgroundColor: completed ? habitColor : colors.input }]}
-                          />
-                        );
-                      })}
+                  <View key={h.id} style={[dsr.habitRow, i < disciplineData.habits.length - 1 && s.divider]}>
+                    <View style={[dsr.habitIcon, { backgroundColor: (h.color || colors.accent) + '30' }]}>
+                      <View style={[dsr.habitIconDot, { backgroundColor: h.color || colors.accent }]} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={dsr.habitNameText}>{h.name}</Text>
+                      <View style={dsr.habitStatsRow}>
+                        <Text style={[dsr.habitRate, { color: rateColor }]}>{h.completion_rate}%</Text>
+                        <Text style={dsr.habitRateSep}>·</Text>
+                        <Text style={dsr.habitRate7d}>{h.rate_7d}% 7d</Text>
+                      </View>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                        <Ionicons name="flame" size={14} color={streakColor} />
+                        <Text style={[dsr.streakCount, { color: streakColor }]}>{h.current_streak}</Text>
+                      </View>
+                      <Text style={dsr.bestStreakText}>
+                        {h.longest_streak > 0 ? `best ${h.longest_streak}d` : 'start today'}
+                      </Text>
                     </View>
                   </View>
                 );
               })}
+            </View>
+
+            {/* 4. Completion Map — 30 Days */}
+            <View style={s.card}>
+              <Text style={s.cardLabel}>COMPLETION MAP — 30 DAYS</Text>
+              {disciplineData.habits.map((h: any, hi: number) => {
+                const habitColor = h.color || colors.accent;
+                const isLast = hi === disciplineData.habits.length - 1;
+                return (
+                  <View key={h.id} style={{ marginBottom: isLast ? 0 : spacing.md }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <View style={[dsr.mapHabitDot, { backgroundColor: habitColor }]} />
+                      <Text style={dsr.mapHabitLabel}>{h.name}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+                      {dates30.map(date => {
+                        const completed = (dailyMap30[date] || []).includes(h.id);
+                        const isToday = date === todayStr;
+                        return (
+                          <View
+                            key={date}
+                            style={[dsr.mapCell, { backgroundColor: completed ? habitColor : colors.input }, isToday && dsr.mapCellToday]}
+                          />
+                        );
+                      })}
+                    </View>
+                    {isLast && (
+                      <View style={dsr.mapMonthLabels}>
+                        <Text style={dsr.mapMonthText}>{disc30StartLabel}</Text>
+                        <Text style={dsr.mapMonthText}>Today</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* 5. Motivational Nudge */}
+            <View style={dsr.nudgeCard}>
+              <Text style={dsr.nudgeQuote}>
+                "Every streak starts at 1. Pick one habit and protect it today — that's all it takes to turn an F into momentum."
+              </Text>
+              <TouchableOpacity onPress={() => { haptic.selection(); navigation.navigate('Daily'); }}>
+                <Text style={dsr.nudgeLink}>Go to Today →</Text>
+              </TouchableOpacity>
             </View>
           </>
         ) : (
@@ -1198,6 +1264,179 @@ const ds = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 2,
+  },
+});
+
+// ---- Discipline redesign styles ----
+
+const dsr = StyleSheet.create({
+  // Hero Grade
+  heroGradeCard: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  heroGradeLetter: {
+    fontSize: 64,
+    fontWeight: '700',
+    letterSpacing: -2,
+  },
+  heroRateText: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  heroBasisText: {
+    fontSize: 12,
+    color: colors.textTertiary,
+    marginTop: 4,
+  },
+
+  // Row between header + count
+  rowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  countLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+
+  // Perfect Days dots
+  dotsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 2.5,
+  },
+  dotToday: {
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+  },
+  dotLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+  },
+  dotLabelText: {
+    ...typography.micro,
+    color: colors.textTertiary,
+  },
+
+  // Habits rows (read-only)
+  habitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  habitIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  habitIconDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  habitNameText: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  habitStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  habitRate: {
+    ...typography.caption,
+    fontWeight: '700',
+  },
+  habitRateSep: {
+    ...typography.caption,
+    color: colors.textTertiary,
+  },
+  habitRate7d: {
+    ...typography.caption,
+    color: colors.textTertiary,
+  },
+  streakCount: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'] as any,
+  },
+  bestStreakText: {
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
+
+  // Completion Map
+  mapHabitDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  mapHabitLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
+  mapCell: {
+    width: 12,
+    height: 12,
+    borderRadius: 2,
+  },
+  mapCellToday: {
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+  },
+  mapMonthLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+  },
+  mapMonthText: {
+    ...typography.micro,
+    color: colors.textTertiary,
+  },
+
+  // Motivational Nudge
+  nudgeCard: {
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderLeftWidth: 3,
+    borderTopColor: 'rgba(99,102,241,0.15)',
+    borderRightColor: 'rgba(99,102,241,0.15)',
+    borderBottomColor: 'rgba(99,102,241,0.15)',
+    borderLeftColor: colors.accent,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(99,102,241,0.06)',
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  nudgeQuote: {
+    ...typography.body,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    lineHeight: 22,
+  },
+  nudgeLink: {
+    ...typography.caption,
+    color: colors.accentLight,
+    fontWeight: '600',
   },
 });
 
