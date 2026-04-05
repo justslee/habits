@@ -3,11 +3,12 @@
  *
  * Shows theoretical 1% daily compound curve vs actual cumulative progress.
  * Pan/scrub with floating tooltip + haptics.
+ * Gradient fill under actual progress line.
  */
 
 import React, { useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions, PanResponder } from 'react-native';
-import Svg, { Path, Line, Text as SvgText, Circle } from 'react-native-svg';
+import Svg, { Path, Line, Text as SvgText, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { DashboardStats } from '../api/client';
 import { haptic } from '../utils/haptics';
 
@@ -31,7 +32,7 @@ export default function CompoundingChart({
   stats,
   firstEntryDate,
   width: propWidth,
-  height = 200,
+  height = 240,
   compact = false,
 }: CompoundingChartProps) {
   const screenWidth = Dimensions.get('window').width - 72;
@@ -59,12 +60,19 @@ export default function CompoundingChart({
 
   const xScale = (i: number) => PADDING.left + (i / days) * chartW;
   const yScale = (v: number) => PADDING.top + chartH - ((v - 1) / (maxY - 1)) * chartH;
+  const bottomY = PADDING.top + chartH;
 
   const buildPath = (values: number[]): string =>
     values.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i)},${yScale(v)}`).join(' ');
 
+  const buildAreaPath = (values: number[]): string => {
+    const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i)},${yScale(v)}`).join(' ');
+    return `${line} L${xScale(days)},${bottomY} L${xScale(0)},${bottomY} Z`;
+  };
+
   const theoreticalPath = buildPath(theoreticalValues);
   const actualPath = buildPath(actualValues);
+  const actualAreaPath = buildAreaPath(actualValues);
 
   // Y labels
   const ySteps = 4;
@@ -93,6 +101,13 @@ export default function CompoundingChart({
     <View>
       <View {...panResponder.panHandlers}>
         <Svg width={width} height={height}>
+          <Defs>
+            <LinearGradient id="actualFill" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0%" stopColor="#6366F1" stopOpacity="0.35" />
+              <Stop offset="100%" stopColor="#6366F1" stopOpacity="0.02" />
+            </LinearGradient>
+          </Defs>
+
           {/* Y grid + labels */}
           {yLabels.map((v, i) => (
             <React.Fragment key={i}>
@@ -104,8 +119,11 @@ export default function CompoundingChart({
             </React.Fragment>
           ))}
 
+          {/* Gradient fill under actual line */}
+          <Path d={actualAreaPath} fill="url(#actualFill)" />
+
           {/* Theoretical (dashed) */}
-          <Path d={theoreticalPath} fill="none" stroke="#666" strokeWidth={1.5} strokeDasharray="6,3" />
+          <Path d={theoreticalPath} fill="none" stroke="#555" strokeWidth={1.5} strokeDasharray="6,3" />
 
           {/* Actual */}
           <Path d={actualPath} fill="none" stroke="#6366F1" strokeWidth={2.5} />
@@ -118,7 +136,7 @@ export default function CompoundingChart({
               <Circle cx={xScale(scrubDay)} cy={yScale(actualValues[scrubDay])}
                 r={5} fill="#6366F1" stroke="#fff" strokeWidth={2} />
               <Circle cx={xScale(scrubDay)} cy={yScale(theoreticalValues[scrubDay])}
-                r={4} fill="#666" stroke="#fff" strokeWidth={1.5} />
+                r={4} fill="#555" stroke="#fff" strokeWidth={1.5} />
             </>
           )}
         </Svg>
@@ -130,43 +148,41 @@ export default function CompoundingChart({
           left: Math.max(0, Math.min(xScale(scrubDay) - 55, width - 120)),
         }]}>
           <Text style={styles.tooltipLabel}>Day {scrubDay}</Text>
-          <Text style={[styles.tooltipVal, { color: '#6366F1' }]}>
-            Actual: {(actualValues[scrubDay] ?? 0).toFixed(2)}x
+          <Text style={[styles.tooltipVal, { color: '#818CF8' }]}>
+            Actual: {(actualValues[scrubDay] ?? 0).toFixed(2)}×
           </Text>
-          <Text style={[styles.tooltipVal, { color: '#888' }]}>
-            Ideal: {(theoreticalValues[scrubDay] ?? 0).toFixed(2)}x
+          <Text style={[styles.tooltipVal, { color: '#666' }]}>
+            Ideal: {(theoreticalValues[scrubDay] ?? 0).toFixed(2)}×
           </Text>
         </View>
       )}
 
-      {/* Legend */}
+      {/* Timeframe selector + legend row */}
       {!compact && (
-        <View style={styles.legend}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendLine, { backgroundColor: '#6366F1' }]} />
-            <Text style={styles.legendText}>Your progress</Text>
+        <View style={styles.bottomRow}>
+          <View style={styles.legend}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendLine, { backgroundColor: '#818CF8' }]} />
+              <Text style={styles.legendText}>Your progress</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendLine, { backgroundColor: '#555', opacity: 0.8 }]} />
+              <Text style={styles.legendText}>1% daily (ideal)</Text>
+            </View>
           </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendLine, { backgroundColor: '#666' }]} />
-            <Text style={styles.legendText}>1% daily (ideal)</Text>
+          <View style={styles.timeRow}>
+            {TIMEFRAMES.map((tf) => (
+              <TouchableOpacity
+                key={tf.days}
+                style={[styles.timeChip, timeframe === tf.days && styles.timeChipActive]}
+                onPress={() => setTimeframe(tf.days)}
+              >
+                <Text style={[styles.timeText, timeframe === tf.days && styles.timeTextActive]}>
+                  {tf.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        </View>
-      )}
-
-      {/* Timeframe selector */}
-      {!compact && (
-        <View style={styles.timeRow}>
-          {TIMEFRAMES.map((tf) => (
-            <TouchableOpacity
-              key={tf.days}
-              style={[styles.timeChip, timeframe === tf.days && styles.timeChipActive]}
-              onPress={() => setTimeframe(tf.days)}
-            >
-              <Text style={[styles.timeText, timeframe === tf.days && styles.timeTextActive]}>
-                {tf.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
         </View>
       )}
     </View>
@@ -181,16 +197,17 @@ const styles = StyleSheet.create({
   },
   tooltipLabel: { fontSize: 10, color: '#999', marginBottom: 2 },
   tooltipVal: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] as any },
-  legend: { flexDirection: 'row', gap: 16, marginTop: 8 },
+  bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
+  legend: { flexDirection: 'row', gap: 12 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendLine: { width: 16, height: 3, borderRadius: 1 },
   legendText: { fontSize: 11, color: '#666' },
-  timeRow: { flexDirection: 'row', gap: 6, marginTop: 12 },
+  timeRow: { flexDirection: 'row', gap: 6 },
   timeChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12,
     backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333',
   },
   timeChipActive: { backgroundColor: '#6366F122', borderColor: '#6366F1' },
   timeText: { fontSize: 12, color: '#aaa', fontWeight: '600' },
-  timeTextActive: { color: '#6366F1' },
+  timeTextActive: { color: '#818CF8' },
 });
