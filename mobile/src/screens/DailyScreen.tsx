@@ -701,28 +701,28 @@ function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
             {todo.completed && <Ionicons name="checkmark" size={13} color="#fff" />}
           </View>
 
-          {/* Text */}
-          <Text
-            style={[st.itemText, todo.completed && st.itemTextDone]}
-            numberOfLines={2}
-          >
-            {todo.text}
-          </Text>
+          {/* Text + metadata stacked in a column */}
+          <View style={st.itemContent}>
+            <Text style={[st.itemText, todo.completed && st.itemTextDone]}>
+              {todo.text}
+            </Text>
 
-          {/* Metadata: pillar tag + time */}
-          <View style={st.itemMeta}>
-            {pillarColor && (
-              <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
-                <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
-                <Text style={[st.pillarTagText, { color: pillarColor }]} numberOfLines={1}>
-                  {todo.pillar_name}
-                </Text>
-              </View>
-            )}
-            {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
-              <View style={st.estBadge}>
-                <Ionicons name="time-outline" size={10} color={colors.textTertiary} />
-                <Text style={st.estText}>{todo.estimated_minutes}m</Text>
+            {(pillarColor || (todo.estimated_minutes != null && todo.estimated_minutes > 0)) && (
+              <View style={st.itemMeta}>
+                {pillarColor && (
+                  <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
+                    <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
+                    <Text style={[st.pillarTagText, { color: pillarColor }]}>
+                      {todo.pillar_name}
+                    </Text>
+                  </View>
+                )}
+                {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
+                  <View style={st.estBadge}>
+                    <Ionicons name="time-outline" size={10} color={colors.textTertiary} />
+                    <Text style={st.estText}>{todo.estimated_minutes}m</Text>
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -858,7 +858,8 @@ const st = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     marginBottom: 2,
   },
-  itemText: { flex: 1, fontSize: 15, color: colors.text, lineHeight: 22 },
+  itemContent: { flex: 1 },
+  itemText: { fontSize: 15, color: colors.text, lineHeight: 22 },
   itemTextDone: { textDecorationLine: 'line-through', color: colors.textTertiary },
 
   // Task checkbox (square, rounded 5px)
@@ -885,7 +886,7 @@ const st = StyleSheet.create({
   },
 
   // Item metadata column (right side)
-  itemMeta: { alignItems: 'flex-end', gap: 3, marginLeft: spacing.sm },
+  itemMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap', marginTop: 4 },
 
   // Pillar tag
   pillarTag: {
