@@ -6,10 +6,10 @@
  * recent sessions, and navigation to deeper screens.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, Animated,
+  RefreshControl, Animated, AppState,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,6 +57,7 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
   const heroScale = usePressScale(0.97);
+  const appState = useRef(AppState.currentState);
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<{
@@ -93,6 +94,17 @@ export default function TrainHomeScreen({ navigation }: any) {
     const unsub = navigation?.addListener?.('focus', fetchData);
     return unsub;
   }, [navigation, fetchData]);
+
+  // Re-fetch WHOOP data when app returns to foreground (recovery score updates throughout the day)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', nextState => {
+      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        getWhoopData().then(setWhoopData).catch(() => {});
+      }
+      appState.current = nextState;
+    });
+    return () => sub.remove();
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
