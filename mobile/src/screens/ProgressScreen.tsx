@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, Animated, ActivityIndicator, LayoutAnimation, Platform, UIManager,
+  View, Text, ScrollView, StyleSheet, Animated, LayoutAnimation, Platform, UIManager,
   RefreshControl, TouchableOpacity, TextInput,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -18,10 +18,12 @@ import { haptic } from '../utils/haptics';
 import RadarChart from '../components/RadarChart';
 import DepthChart from '../components/DepthChart';
 import CompoundingChart from '../components/CompoundingChart';
-import { ProgressSkeleton } from '../components/Skeleton';
+import { ProgressSkeleton, Skeleton } from '../components/Skeleton';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
 import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
+import { usePressScale } from '../hooks/usePressScale';
 
 /** Animated counter that counts up from 0 to a target number. */
 function CountUp({ value, duration = 800, style }: { value: number | null; duration?: number; style?: any }) {
@@ -104,6 +106,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
+  const weeklyReviewScale = usePressScale(0.97);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
   const [depthData, setDepthData] = useState<DepthProgressionPoint[]>([]);
@@ -221,6 +224,7 @@ export default function ProgressScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <ScreenBackground>
     <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
@@ -273,38 +277,14 @@ export default function ProgressScreen() {
 
           <View style={s.card}>
             <Text style={s.cardLabel}>PILLARS</Text>
-            {stats.pillar_breakdown.map((p, i) => {
-              const pillarColor = PILLAR_COLORS[p.pillar_id] || colors.textTertiary;
-              const totalPct = stats.hours.all_time > 0 ? (p.total_hours / stats.hours.all_time) * 100 : 0;
-              return (
-                <TouchableOpacity
-                  key={p.pillar_id}
-                  style={[s.pillarCard, i < stats.pillar_breakdown.length - 1 && s.divider]}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    haptic.selection();
-                    navigation.navigate('PillarDetail', { pillarId: p.pillar_id, pillarName: p.pillar_name });
-                  }}
-                >
-                  <View style={s.pillarHeader}>
-                    <View style={[s.dot, { backgroundColor: pillarColor }]} />
-                    <Text style={s.pillarName}>{p.pillar_name}</Text>
-                    <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={{ marginLeft: 4 }} />
-                    <Text style={s.pillarHours}>{p.total_hours}h</Text>
-                  </View>
-                  {/* Progress bar showing share of total hours */}
-                  <View style={s.pillarBarTrack}>
-                    <View style={[s.pillarBarFill, { width: `${totalPct}%` as any, backgroundColor: pillarColor }]} />
-                  </View>
-                  <View style={s.pillarFooter}>
-                    <Text style={s.pillarMeta}>{p.entry_count} entries</Text>
-                    {p.avg_depth_score != null && (
-                      <Text style={s.pillarMeta}>depth {p.avg_depth_score}</Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+            {stats.pillar_breakdown.map((p, i) => (
+              <PillarCard key={p.pillar_id} pillar={p} totalHours={stats.hours.all_time}
+                isLast={i === stats.pillar_breakdown.length - 1}
+                onPress={() => {
+                  haptic.selection();
+                  navigation.navigate('PillarDetail', { pillarId: p.pillar_id, pillarName: p.pillar_name });
+                }} />
+            ))}
           </View>
 
           <View style={s.card}>
@@ -425,67 +405,38 @@ export default function ProgressScreen() {
           </View>
 
           {/* Weekly Review card */}
-          <TouchableOpacity
-            style={s.card}
-            activeOpacity={0.7}
-            onPress={() => { haptic.selection(); navigation.navigate('WeeklyReview'); }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                <Ionicons name="document-text-outline" size={18} color={colors.accent} />
-                <Text style={s.cardLabel}>WEEKLY REVIEW</Text>
+          <Animated.View style={weeklyReviewScale.animStyle}>
+            <TouchableOpacity
+              style={s.card}
+              activeOpacity={0.7}
+              onPress={() => { haptic.selection(); navigation.navigate('WeeklyReview'); }}
+              onPressIn={weeklyReviewScale.onPressIn}
+              onPressOut={weeklyReviewScale.onPressOut}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                  <Ionicons name="document-text-outline" size={18} color={colors.accent} />
+                  <Text style={s.cardLabel}>WEEKLY REVIEW</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
               </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-            </View>
-            <Text style={{ ...typography.caption, color: colors.textSecondary, marginTop: spacing.sm }}>
-              AI-generated board meeting — grade, analysis, and next week's focus
-            </Text>
-          </TouchableOpacity>
+              <Text style={{ ...typography.caption, color: colors.textSecondary, marginTop: spacing.sm }}>
+                AI-generated board meeting — grade, analysis, and next week's focus
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Concept Mastery Map */}
           {conceptProgress.length > 0 && conceptProgress.some((cp: any) => cp.total_concepts > 0) && (
             <View style={s.card}>
               <Text style={s.cardLabel}>MASTERY MAP</Text>
-              {conceptProgress.filter((cp: any) => cp.total_concepts > 0).map((cp: any) => {
-                const pillarColor = PILLAR_COLORS[cp.pillar_id] || colors.textTertiary;
-                const masteredPct = cp.total_concepts > 0 ? (cp.mastered / cp.total_concepts) * 100 : 0;
-                const inProgressPct = cp.total_concepts > 0 ? (cp.in_progress / cp.total_concepts) * 100 : 0;
-                return (
-                  <TouchableOpacity
-                    key={cp.pillar_id}
-                    style={[s.pillarCard, { paddingVertical: spacing.sm }]}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      haptic.selection();
-                      navigation.navigate('PillarDetail', { pillarId: cp.pillar_id, pillarName: cp.pillar_name });
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                        <View style={[s.dot, { backgroundColor: pillarColor }]} />
-                        <Text style={s.pillarName}>{cp.pillar_name}</Text>
-                      </View>
-                      <Text style={{ ...typography.micro, color: colors.textTertiary }}>
-                        {cp.mastered}/{cp.total_concepts}
-                        {cp.recently_touched > 0 ? ` · ${cp.recently_touched} active` : ''}
-                      </Text>
-                    </View>
-                    {/* Stacked progress bar: mastered + in_progress */}
-                    <View style={[s.pillarBarTrack, { height: 6 }]}>
-                      <View style={[s.pillarBarFill, {
-                        width: `${masteredPct + inProgressPct}%` as any,
-                        backgroundColor: pillarColor + '40',
-                        position: 'absolute', left: 0, top: 0, bottom: 0,
-                        borderRadius: 3,
-                      }]} />
-                      <View style={[s.pillarBarFill, {
-                        width: `${masteredPct}%` as any,
-                        backgroundColor: pillarColor,
-                      }]} />
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+              {conceptProgress.filter((cp: any) => cp.total_concepts > 0).map((cp: any) => (
+                <ConceptMasteryCard key={cp.pillar_id} cp={cp}
+                  onPress={() => {
+                    haptic.selection();
+                    navigation.navigate('PillarDetail', { pillarId: cp.pillar_id, pillarName: cp.pillar_name });
+                  }} />
+              ))}
             </View>
           )}
 
@@ -753,6 +704,7 @@ export default function ProgressScreen() {
         onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
       />
     </ScrollView>
+    </ScreenBackground>
     </GestureHandlerRootView>
   );
 }
@@ -831,7 +783,7 @@ function VisionEditor({
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
           <Ionicons name="compass-outline" size={16} color={colors.accent} />
           <Text style={s.cardLabel}>NORTH STAR VISION</Text>
-          {saving && <ActivityIndicator size="small" color={colors.accent} style={{ marginLeft: 'auto' }} />}
+          {saving && <Skeleton width={16} height={16} borderRadius={8} style={{ marginLeft: 'auto' }} />}
         </View>
         <TextInput
           style={vs.visionInput}
@@ -934,8 +886,84 @@ function buildHeatmapGrid(data: HeatmapDay[]): (HeatmapDay | null)[][] {
   return weeks;
 }
 
+function PillarCard({ pillar: p, totalHours, isLast, onPress }: {
+  pillar: any; totalHours: number; isLast: boolean; onPress: () => void;
+}) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const pillarColor = PILLAR_COLORS[p.pillar_id] || colors.textTertiary;
+  const totalPct = totalHours > 0 ? (p.total_hours / totalHours) * 100 : 0;
+  return (
+    <Animated.View style={animStyle}>
+      <TouchableOpacity
+        style={[s.pillarCard, !isLast && s.divider]}
+        activeOpacity={0.7}
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+      >
+        <View style={s.pillarHeader}>
+          <View style={[s.dot, { backgroundColor: pillarColor }]} />
+          <Text style={s.pillarName}>{p.pillar_name}</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={{ marginLeft: 4 }} />
+          <Text style={s.pillarHours}>{p.total_hours}h</Text>
+        </View>
+        <View style={s.pillarBarTrack}>
+          <View style={[s.pillarBarFill, { width: `${totalPct}%` as any, backgroundColor: pillarColor }]} />
+        </View>
+        <View style={s.pillarFooter}>
+          <Text style={s.pillarMeta}>{p.entry_count} entries</Text>
+          {p.avg_depth_score != null && (
+            <Text style={s.pillarMeta}>depth {p.avg_depth_score}</Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+function ConceptMasteryCard({ cp, onPress }: { cp: any; onPress: () => void }) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const pillarColor = PILLAR_COLORS[cp.pillar_id] || colors.textTertiary;
+  const masteredPct = cp.total_concepts > 0 ? (cp.mastered / cp.total_concepts) * 100 : 0;
+  const inProgressPct = cp.total_concepts > 0 ? (cp.in_progress / cp.total_concepts) * 100 : 0;
+  return (
+    <Animated.View style={animStyle}>
+      <TouchableOpacity
+        style={[s.pillarCard, { paddingVertical: spacing.sm }]}
+        activeOpacity={0.7}
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            <View style={[s.dot, { backgroundColor: pillarColor }]} />
+            <Text style={s.pillarName}>{cp.pillar_name}</Text>
+          </View>
+          <Text style={{ ...typography.micro, color: colors.textTertiary }}>
+            {cp.mastered}/{cp.total_concepts}
+            {cp.recently_touched > 0 ? ` \u00B7 ${cp.recently_touched} active` : ''}
+          </Text>
+        </View>
+        <View style={[s.pillarBarTrack, { height: 6 }]}>
+          <View style={[s.pillarBarFill, {
+            width: `${masteredPct + inProgressPct}%` as any,
+            backgroundColor: pillarColor + '40',
+            position: 'absolute', left: 0, top: 0, bottom: 0,
+            borderRadius: 3,
+          }]} />
+          <View style={[s.pillarBarFill, {
+            width: `${masteredPct}%` as any,
+            backgroundColor: pillarColor,
+          }]} />
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 const s = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingBottom: 40 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.md },

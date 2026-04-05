@@ -8,7 +8,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Platform, RefreshControl, KeyboardAvoidingView, Animated,
+  Platform, RefreshControl, KeyboardAvoidingView, Animated, Modal,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +18,11 @@ import { colors, spacing, typography, radius, PILLAR_COLORS_BY_NAME } from '../t
 import { API_URL, apiHeaders } from '../api/client';
 import CheckInContent from './CheckInScreen';
 import SwipeableRow from '../components/SwipeableRow';
+import SwipeableTabs from '../components/SwipeableTabs';
+import type { TabDef } from '../components/SwipeableTabs';
 import UndoToast from '../components/UndoToast';
+import ScreenBackground from '../components/ScreenBackground';
+import { usePressScale } from '../hooks/usePressScale';
 
 const TIME_ESTIMATES = [15, 30, 45, 60, 90];
 const HABIT_ICONS: string[] = [
@@ -92,6 +96,11 @@ export default function DailyScreen() {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [selectedTimeEstimate, setSelectedTimeEstimate] = useState<number | null>(null);
   const inputRef = useRef<TextInput>(null);
+
+  // Edit modal state
+  const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editMinutes, setEditMinutes] = useState<number | null>(null);
 
   // Undo toast state for swipe-to-delete
   const [undoToast, setUndoToast] = useState<{
@@ -280,6 +289,39 @@ export default function DailyScreen() {
     }
   };
 
+  // ---- Edit Todo ----
+  const saveEditTodo = async () => {
+    if (!editingTodo) return;
+    const text = editText.trim();
+    if (!text) return;
+    try {
+      const resp = await fetch(`${API_URL}/api/v1/daily/todos/${editingTodo.id}`, {
+        method: 'PUT',
+        headers: apiHeaders(),
+        body: JSON.stringify({
+          text,
+          estimated_minutes: editMinutes,
+          pillar_id: editingTodo.pillar_id,
+          sort_order: editingTodo.sort_order,
+        }),
+      });
+      if (resp.ok) {
+        const updated = await resp.json();
+        setTodos(prev => prev.map(t => t.id === editingTodo.id ? updated : t));
+        haptic.success();
+      }
+    } catch (err) {
+      console.warn('Failed to update todo:', err);
+    }
+    setEditingTodo(null);
+  };
+
+  // Tab definitions for SwipeableTabs
+  const SUB_TABS: TabDef[] = [
+    { key: 'today', label: 'Today' },
+    { key: 'checkin', label: 'Check-In' },
+  ];
+
   // Count progress
   const todosComplete = todos.filter(t => t.completed).length;
   const habitsComplete = habits.filter(h => h.completed_today).length;
@@ -348,45 +390,20 @@ export default function DailyScreen() {
         <Text style={st.sectionCount}>{todosComplete}/{todos.length}</Text>
       </View>
 
-      {todos.map(todo => {
-        const pillarColor = todo.pillar_name ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent) : null;
-        return (
-          <SwipeableRow key={todo.id} onDelete={() => deleteTodo(todo.id, todo.text)}>
-            <TouchableOpacity
-              style={st.todoRow}
-              onPress={() => toggleTodo(todo.id)}
-            >
-              <View style={[
-                st.todoCheck,
-                todo.completed && { backgroundColor: colors.success, borderColor: colors.success },
-              ]}>
-                {todo.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
-              <View style={st.todoContent}>
-                <Text style={[st.todoText, todo.completed && st.todoTextDone]} numberOfLines={2}>
-                  {todo.text}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' }}>
-                  {pillarColor && (
-                    <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
-                      <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
-                      <Text style={[st.pillarTagText, { color: pillarColor }]}>
-                        {todo.pillar_name}
-                      </Text>
-                    </View>
-                  )}
-                  {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
-                    <View style={st.estBadge}>
-                      <Ionicons name="time-outline" size={10} color={colors.textTertiary} />
-                      <Text style={st.estText}>{todo.estimated_minutes}m</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
-          </SwipeableRow>
-        );
-      })}
+      {todos.map(todo => (
+        <TodoRowCard
+          key={todo.id}
+          todo={todo}
+          onToggle={() => toggleTodo(todo.id)}
+          onDelete={() => deleteTodo(todo.id, todo.text)}
+          onLongPress={() => {
+            setEditingTodo(todo);
+            setEditText(todo.text);
+            setEditMinutes(todo.estimated_minutes);
+            haptic.medium();
+          }}
+        />
+      ))}
 
       {/* Quick add todo */}
       <View style={st.addRow}>
@@ -490,40 +507,14 @@ export default function DailyScreen() {
         </>
       )}
 
-      {habits.map(habit => {
-        const habitColor = habit.color || colors.accent;
-        const habitIcon = habit.icon || 'flame-outline';
-        return (
-          <SwipeableRow key={habit.id} onDelete={() => deleteHabit(habit.id, habit.name)}>
-            <TouchableOpacity
-              style={st.habitRow}
-              onPress={() => toggleHabit(habit.id)}
-            >
-              <View style={[
-                st.habitCircle,
-                { borderColor: habitColor },
-                habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
-              ]}>
-                {habit.completed_today
-                  ? <Ionicons name="checkmark" size={16} color="#fff" />
-                  : <Ionicons name={habitIcon as any} size={14} color={habitColor} />
-                }
-              </View>
-              <View style={st.habitInfo}>
-                <Text style={[st.habitName, habit.completed_today && { color: colors.textTertiary }]}>
-                  {habit.name}
-                </Text>
-                {habit.current_streak > 0 && (
-                  <View style={st.streakBadge}>
-                    <Ionicons name="flame" size={10} color="#F59E0B" />
-                    <Text style={st.streakText}>{habit.current_streak}d</Text>
-                  </View>
-                )}
-              </View>
-            </TouchableOpacity>
-          </SwipeableRow>
-        );
-      })}
+      {habits.map(habit => (
+        <HabitRowCard
+          key={habit.id}
+          habit={habit}
+          onToggle={() => toggleHabit(habit.id)}
+          onDelete={() => deleteHabit(habit.id, habit.name)}
+        />
+      ))}
 
       {habits.length === 0 && !showAddHabit && (
         <TouchableOpacity style={st.emptyHabits} onPress={() => setShowAddHabit(true)}>
@@ -538,26 +529,95 @@ export default function DailyScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <ScreenBackground>
       <KeyboardAvoidingView
         style={st.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Sub-tab bar */}
-        <View style={[st.tabBar, { paddingTop: insets.top + spacing.xs }]}>
-          {(['today', 'checkin'] as SubTab[]).map(tab => (
-            <TouchableOpacity
-              key={tab}
-              style={[st.tab, activeTab === tab && st.tabActive]}
-              onPress={() => { setActiveTab(tab); haptic.selection(); }}
-            >
-              <Text style={[st.tabText, activeTab === tab && st.tabTextActive]}>
-                {tab === 'today' ? 'Today' : 'Check-In'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        {/* Sub-tab bar + swipeable content */}
+        <View style={{ paddingTop: insets.top + spacing.xs, flex: 1 }}>
+          <SwipeableTabs
+            tabs={SUB_TABS}
+            activeTab={activeTab}
+            onTabChange={(key) => setActiveTab(key as SubTab)}
+          >
+            {(tab) => tab === 'today' ? renderToday() : <CheckInContent />}
+          </SwipeableTabs>
         </View>
 
-        {activeTab === 'today' ? renderToday() : <CheckInContent />}
+        {/* Edit todo modal */}
+        <Modal
+          visible={editingTodo !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setEditingTodo(null)}
+        >
+          <KeyboardAvoidingView
+            style={st.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <TouchableOpacity
+              style={st.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setEditingTodo(null)}
+            >
+              <TouchableOpacity activeOpacity={1} style={st.modalCard}>
+                <Text style={st.modalTitle}>Edit Task</Text>
+
+                {/* Text input */}
+                <TextInput
+                  style={st.modalInput}
+                  value={editText}
+                  onChangeText={setEditText}
+                  placeholder="Task text..."
+                  placeholderTextColor={colors.textTertiary}
+                  autoFocus
+                  multiline
+                />
+
+                {/* Time estimate picker */}
+                <Text style={st.modalLabel}>TIME ESTIMATE</Text>
+                <View style={st.timeEstRow}>
+                  <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
+                  {TIME_ESTIMATES.map(min => (
+                    <TouchableOpacity
+                      key={min}
+                      style={[st.timePill, editMinutes === min && st.timePillActive]}
+                      onPress={() => { setEditMinutes(editMinutes === min ? null : min); haptic.selection(); }}
+                    >
+                      <Text style={[st.timePillText, editMinutes === min && st.timePillTextActive]}>
+                        {min}m
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Pillar badge (read-only) */}
+                {editingTodo?.pillar_name && (() => {
+                  const pColor = PILLAR_COLORS_BY_NAME[editingTodo.pillar_name!] || colors.accent;
+                  return (
+                    <View style={[st.pillarTag, { backgroundColor: pColor + '15', borderColor: pColor + '30', marginTop: spacing.sm, marginBottom: spacing.sm }]}>
+                      <View style={[st.pillarDot, { backgroundColor: pColor }]} />
+                      <Text style={[st.pillarTagText, { color: pColor }]}>
+                        {editingTodo.pillar_name}
+                      </Text>
+                    </View>
+                  );
+                })()}
+
+                {/* Action buttons */}
+                <View style={st.modalActions}>
+                  <TouchableOpacity style={st.modalCancelBtn} onPress={() => setEditingTodo(null)}>
+                    <Text style={st.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={st.modalSaveBtn} onPress={saveEditTodo}>
+                    <Text style={st.modalSaveText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {/* Undo toast for swipe-to-delete */}
         <UndoToast
@@ -567,25 +627,108 @@ export default function DailyScreen() {
           onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
         />
       </KeyboardAvoidingView>
+      </ScreenBackground>
     </GestureHandlerRootView>
   );
 }
 
+/** Extracted so usePressScale hook can be called per-item. */
+function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
+  todo: Todo; onToggle: () => void; onDelete: () => void;
+  onLongPress: () => void;
+}) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const pillarColor = todo.pillar_name ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent) : null;
+  return (
+    <SwipeableRow onDelete={onDelete}>
+      <Animated.View style={animStyle}>
+        <TouchableOpacity
+          style={st.todoRow}
+          onPress={onToggle}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+          onLongPress={onLongPress}
+        >
+          <View style={[
+            st.todoCheck,
+            todo.completed && { backgroundColor: colors.success, borderColor: colors.success },
+          ]}>
+            {todo.completed && <Ionicons name="checkmark" size={14} color="#fff" />}
+          </View>
+          <View style={st.todoContent}>
+            <Text style={[st.todoText, todo.completed && st.todoTextDone]} numberOfLines={2}>
+              {todo.text}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' }}>
+              {pillarColor && (
+                <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
+                  <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
+                  <Text style={[st.pillarTagText, { color: pillarColor }]}>
+                    {todo.pillar_name}
+                  </Text>
+                </View>
+              )}
+              {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
+                <View style={st.estBadge}>
+                  <Ionicons name="time-outline" size={10} color={colors.textTertiary} />
+                  <Text style={st.estText}>{todo.estimated_minutes}m</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </SwipeableRow>
+  );
+}
+
+/** Extracted so usePressScale hook can be called per-item. */
+function HabitRowCard({ habit, onToggle, onDelete }: {
+  habit: Habit; onToggle: () => void; onDelete: () => void;
+}) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const habitColor = habit.color || colors.accent;
+  const habitIcon = habit.icon || 'flame-outline';
+  return (
+    <SwipeableRow onDelete={onDelete}>
+      <Animated.View style={animStyle}>
+        <TouchableOpacity
+          style={st.habitRow}
+          onPress={onToggle}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+        >
+          <View style={[
+            st.habitCircle,
+            { borderColor: habitColor },
+            habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
+          ]}>
+            {habit.completed_today
+              ? <Ionicons name="checkmark" size={16} color="#fff" />
+              : <Ionicons name={habitIcon as any} size={14} color={habitColor} />
+            }
+          </View>
+          <View style={st.habitInfo}>
+            <Text style={[st.habitName, habit.completed_today && { color: colors.textTertiary }]}>
+              {habit.name}
+            </Text>
+            {habit.current_streak > 0 && (
+              <View style={st.streakBadge}>
+                <Ionicons name="flame" size={10} color="#F59E0B" />
+                <Text style={st.streakText}>{habit.current_streak}d</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </SwipeableRow>
+  );
+}
+
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
-
-  // Tab bar — paddingTop is set dynamically via insets
-  tabBar: {
-    flexDirection: 'row', paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xs,
-    backgroundColor: colors.bg, borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: colors.accent },
-  tabText: { ...typography.bodyBold, color: colors.textTertiary },
-  tabTextActive: { color: colors.accent },
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
@@ -731,4 +874,44 @@ const st = StyleSheet.create({
   colorDotActive: {
     borderColor: '#fff', borderWidth: 3,
   },
+
+  // Edit todo modal
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  modalCard: {
+    backgroundColor: colors.cardElevated, borderRadius: radius.xl,
+    padding: spacing.xl, width: '88%', maxWidth: 400,
+  },
+  modalTitle: {
+    ...typography.bodyBold, color: colors.text, fontSize: 18,
+    marginBottom: spacing.md,
+  },
+  modalInput: {
+    backgroundColor: colors.input, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, fontSize: 15, color: colors.text,
+    minHeight: 48, maxHeight: 120, marginBottom: spacing.md,
+    textAlignVertical: 'top',
+  },
+  modalLabel: {
+    ...typography.micro, color: colors.textTertiary,
+    marginBottom: spacing.sm, letterSpacing: 1,
+  },
+  modalActions: {
+    flexDirection: 'row', justifyContent: 'flex-end',
+    gap: spacing.sm, marginTop: spacing.lg,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    borderRadius: radius.lg, backgroundColor: colors.card,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  modalCancelText: { ...typography.bodyBold, color: colors.textSecondary, fontSize: 14 },
+  modalSaveBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    borderRadius: radius.lg, backgroundColor: colors.accent,
+  },
+  modalSaveText: { ...typography.bodyBold, color: '#fff', fontSize: 14 },
 });

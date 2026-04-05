@@ -6,13 +6,17 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Alert,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Alert, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
 import { haptic } from '../utils/haptics';
 import { API_URL, apiHeaders } from '../api/client';
+import ScreenBackground from '../components/ScreenBackground';
+import ActivityListCard from '../components/ActivityListCard';
+import EmptyState from '../components/EmptyState';
+import { usePressScale } from '../hooks/usePressScale';
 
 interface RouteItem {
   id: number;
@@ -85,109 +89,88 @@ export default function RouteLibraryScreen({ navigation }: any) {
   };
 
   return (
+    <ScreenBackground>
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingTop: 12 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
       {routes.length === 0 && !loading && (
-        <View style={styles.emptyState}>
-          <Ionicons name="map-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyTitle}>No saved routes</Text>
-          <Text style={styles.emptySub}>Routes from your runs will appear here</Text>
-        </View>
+        <EmptyState
+          icon="map-outline"
+          title="No saved routes"
+          subtitle="Routes from your runs will appear here"
+        />
       )}
 
-      {routes.map(route => {
-        const typeIcon = ROUTE_TYPE_ICONS[route.route_type || ''] || 'navigate-outline';
-        const tags = route.tags ? route.tags.split(',').map(t => t.trim()) : [];
-
-        return (
-          <TouchableOpacity
-            key={route.id}
-            style={styles.routeCard}
-            onLongPress={() => deleteRoute(route.id, route.name)}
-          >
-            <View style={styles.routeIconBox}>
-              <Ionicons name={typeIcon} size={22} color={colors.accent} />
-            </View>
-
-            <View style={styles.routeInfo}>
-              <Text style={styles.routeName}>{route.name}</Text>
-              <View style={styles.routeMeta}>
-                <Text style={styles.routeDistance}>{route.distance_miles.toFixed(1)} mi</Text>
-                {route.elevation_gain_ft != null && route.elevation_gain_ft > 0 && (
-                  <Text style={styles.routeElev}>
-                    <Ionicons name="trending-up" size={10} color={colors.textTertiary} /> {Math.round(route.elevation_gain_ft)} ft
-                  </Text>
-                )}
-                {route.times_run > 0 && (
-                  <Text style={styles.routeRuns}>{route.times_run} run{route.times_run !== 1 ? 's' : ''}</Text>
-                )}
-              </View>
-
-              {tags.length > 0 && (
-                <View style={styles.tagRow}>
-                  {tags.map(tag => (
-                    <View key={tag} style={styles.tag}>
-                      <Text style={styles.tagText}>{tag}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            <View style={styles.routeRight}>
-              {route.best_time_seconds != null && (
-                <>
-                  <Text style={styles.bestTime}>{fmtDuration(route.best_time_seconds)}</Text>
-                  <Text style={styles.bestLabel}>BEST</Text>
-                </>
-              )}
-            </View>
-          </TouchableOpacity>
-        );
-      })}
+      {routes.map(route => (
+        <RouteCard key={route.id} route={route} onLongPress={() => deleteRoute(route.id, route.name)} />
+      ))}
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    </ScreenBackground>
+  );
+}
+
+function RouteCard({ route, onLongPress }: { route: RouteItem; onLongPress: () => void }) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const tags = route.tags ? route.tags.split(',').map(t => t.trim()) : [];
+
+  const subtitleParts = [`${route.distance_miles.toFixed(1)} mi`];
+  if (route.elevation_gain_ft != null && route.elevation_gain_ft > 0) {
+    subtitleParts.push(`${Math.round(route.elevation_gain_ft)} ft elev`);
+  }
+
+  return (
+    <Animated.View style={animStyle}>
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onLongPress={onLongPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        style={{ marginHorizontal: spacing.lg }}
+      >
+        <ActivityListCard
+          accentColor={colors.accent}
+          title={route.name}
+          subtitle={subtitleParts.join(' \u2022 ')}
+          metric={route.best_time_seconds != null ? fmtDuration(route.best_time_seconds) : undefined}
+          metricLabel={route.best_time_seconds != null ? 'BEST' : undefined}
+          metricColor={colors.success}
+          icon="map-outline"
+        >
+          {(tags.length > 0 || route.times_run > 0) && (
+            <View style={styles.tagRow}>
+              {route.times_run > 0 && (
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>{route.times_run} run{route.times_run !== 1 ? 's' : ''}</Text>
+                </View>
+              )}
+              {tags.map(tag => (
+                <View key={tag} style={styles.tag}>
+                  <Text style={styles.tagText}>{tag}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </ActivityListCard>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
   backBtn: { marginRight: spacing.md },
   title: { ...typography.title1, color: colors.text },
 
-  emptyState: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
-  emptyTitle: { ...typography.title3, color: colors.textSecondary },
-  emptySub: { ...typography.caption, color: colors.textTertiary },
-
-  routeCard: {
-    flexDirection: 'row', alignItems: 'center', marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm, padding: spacing.md,
-    backgroundColor: colors.card, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  routeIconBox: {
-    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentMuted,
-    alignItems: 'center', justifyContent: 'center', marginRight: spacing.md,
-  },
-  routeInfo: { flex: 1 },
-  routeName: { fontSize: 15, fontWeight: '600', color: colors.text, marginBottom: 2 },
-  routeMeta: { flexDirection: 'row', gap: spacing.md },
-  routeDistance: { ...typography.caption, color: colors.accent, fontWeight: '600' },
-  routeElev: { ...typography.caption, color: colors.textTertiary },
-  routeRuns: { ...typography.caption, color: colors.textTertiary },
   tagRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
   tag: {
     backgroundColor: colors.bg, paddingHorizontal: 6, paddingVertical: 1,
     borderRadius: 4, borderWidth: 1, borderColor: colors.border,
   },
   tagText: { fontSize: 9, color: colors.textTertiary, letterSpacing: 0.3 },
-  routeRight: { alignItems: 'flex-end', marginLeft: spacing.sm },
-  bestTime: { fontSize: 14, fontWeight: '600', color: colors.success, fontVariant: ['tabular-nums'] },
-  bestLabel: { ...typography.micro, color: colors.textTertiary },
 });

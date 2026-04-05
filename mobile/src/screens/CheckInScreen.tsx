@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, Animated,
+  Alert, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createEntry, API_URL, apiHeaders } from '../api/client';
 import { colors, spacing, typography, radius } from '../theme';
 import { haptic } from '../utils/haptics';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton } from '../components/Skeleton';
 
 interface TodoSummary {
   completed: number;
@@ -43,6 +45,8 @@ export default function CheckInScreen() {
   const [expandedPillar, setExpandedPillar] = useState<number | null>(null);
   const [todoSummary, setTodoSummary] = useState<TodoSummary>({ completed: 0, total: 0, totalMinutes: 0 });
   const [pulseAnim] = useState(new Animated.Value(0.3));
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const resultsAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     (async () => {
@@ -62,6 +66,33 @@ export default function CheckInScreen() {
       }
     })();
   }, []);
+
+  // Slide-out animation when form submits
+  useEffect(() => {
+    if (screenState === 'evaluating') {
+      slideAnim.setValue(0);
+      Animated.spring(slideAnim, {
+        toValue: 1,
+        damping: 20,
+        stiffness: 100,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [screenState === 'evaluating']);
+
+  // Fade-in animation when results arrive
+  useEffect(() => {
+    if (screenState === 'results') {
+      resultsAnim.setValue(0);
+      Animated.spring(resultsAnim, {
+        toValue: 1,
+        damping: 20,
+        stiffness: 100,
+        useNativeDriver: true,
+      }).start();
+      haptic.success();
+    }
+  }, [screenState === 'results']);
 
   // Pulse animation for evaluating state
   useEffect(() => {
@@ -87,6 +118,7 @@ export default function CheckInScreen() {
 
   const handleSubmit = async () => {
     if (!takeaway.trim()) return Alert.alert('Required', 'Add a key takeaway from today.');
+    haptic.medium();
     setSubmitting(true);
     try {
       // Save the reflection entry
@@ -110,23 +142,19 @@ export default function CheckInScreen() {
           if (resp.ok) {
             const data: EndOfDayResponse = await resp.json();
             setEvalResponse(data);
-            haptic.success();
             setScreenState('results');
           } else {
             // Eval failed but reflection was saved
-            haptic.success();
             setScreenState('results');
             setEvalResponse({ evaluated: 0, results: [], reflection_applied: true });
           }
         } catch (err) {
           console.warn('End-of-day eval failed:', err);
-          haptic.success();
           setScreenState('results');
           setEvalResponse({ evaluated: 0, results: [], reflection_applied: true });
         }
       } else {
         // No pillar todos — just show simple success
-        haptic.success();
         setScreenState('results');
         setEvalResponse({ evaluated: 0, results: [], reflection_applied: true });
       }
@@ -141,6 +169,8 @@ export default function CheckInScreen() {
     setFocus(5); setEnergy(5); setTakeaway('');
     setScreenState('form'); setEvalResponse(null);
     setExpandedPillar(null); setSubmitting(false);
+    slideAnim.setValue(0);
+    resultsAnim.setValue(0);
   };
 
   const onePercentCount = evalResponse?.results.filter(r => r.one_percent_better).length ?? 0;
@@ -161,8 +191,12 @@ export default function CheckInScreen() {
 
   // ===== RESULTS STATE =====
   if (screenState === 'results') {
+    const resultsTranslateY = resultsAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] });
+    const resultsOpacity = resultsAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+
     return (
       <ScrollView style={s.scroll} contentContainerStyle={s.resultsContainer}>
+        <Animated.View style={{ opacity: resultsOpacity, transform: [{ translateY: resultsTranslateY }] }}>
         {totalEvaluated > 0 ? (
           <>
             {/* Summary header */}
@@ -259,13 +293,19 @@ export default function CheckInScreen() {
         <TouchableOpacity style={s.doneBtn} onPress={() => { haptic.light(); resetForm(); }}>
           <Text style={s.doneBtnText}>Done</Text>
         </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
     );
   }
 
   // ===== FORM STATE =====
+  const formTranslateY = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -50] });
+  const formOpacity = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+
   return (
+    <ScreenBackground>
     <ScrollView style={s.scroll} contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
+      <Animated.View style={{ opacity: formOpacity, transform: [{ translateY: formTranslateY }] }}>
       {/* Today's Progress Summary */}
       <View style={s.summaryCard}>
         <View style={s.summaryRow}>
@@ -315,16 +355,18 @@ export default function CheckInScreen() {
       {/* Submit */}
       <TouchableOpacity style={[s.primaryBtn, submitting && { opacity: 0.5 }]}
         onPress={handleSubmit} disabled={submitting} testID="submit-btn">
-        {submitting ? <ActivityIndicator color={colors.text} /> : <Text style={s.primaryBtnText}>Save Reflection</Text>}
+        {submitting ? <Skeleton width={120} height={18} /> : <Text style={s.primaryBtnText}>Save Reflection</Text>}
       </TouchableOpacity>
 
       <View style={{ height: 24 }} />
+      </Animated.View>
     </ScrollView>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingTop: spacing.md },
 
   // === Summary card ===

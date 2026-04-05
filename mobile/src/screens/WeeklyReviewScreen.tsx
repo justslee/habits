@@ -8,13 +8,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
 import { colors, spacing, typography, radius } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton, SkeletonRow } from '../components/Skeleton';
 
 interface WeeklyReview {
   id: number;
@@ -155,12 +157,19 @@ export default function WeeklyReviewScreen() {
   if (loading) {
     return (
       <View style={s.centerContainer}>
-        <ActivityIndicator size="large" color={colors.accent} />
+        <View style={{ width: '100%', padding: spacing.lg, gap: spacing.md }}>
+          <Skeleton width="50%" height={28} />
+          <Skeleton width="100%" height={200} borderRadius={radius.lg} />
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </View>
       </View>
     );
   }
 
   return (
+    <ScreenBackground>
     <ScrollView
       style={s.scroll}
       contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.sm }]}
@@ -187,7 +196,7 @@ export default function WeeklyReviewScreen() {
         disabled={generating}
       >
         {generating ? (
-          <ActivityIndicator color={colors.text} />
+          <Skeleton width={120} height={18} />
         ) : (
           <>
             <Ionicons name="sparkles-outline" size={18} color={colors.text} />
@@ -236,13 +245,14 @@ export default function WeeklyReviewScreen() {
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   container: { padding: spacing.lg },
-  centerContainer: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
 

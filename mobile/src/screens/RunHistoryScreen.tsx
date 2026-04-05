@@ -17,6 +17,9 @@ import { haptic } from '../utils/haptics';
 import { API_URL, apiHeaders, deleteRun, restoreRun } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
+import ScreenBackground from '../components/ScreenBackground';
+import ActivityListCard from '../components/ActivityListCard';
+import EmptyState from '../components/EmptyState';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
   easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
@@ -129,6 +132,7 @@ export default function RunHistoryScreen({ navigation }: any) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <ScreenBackground>
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingTop: 12 }}
@@ -180,45 +184,31 @@ export default function RunHistoryScreen({ navigation }: any) {
 
       {/* Run list */}
       {runs.length === 0 && !loading && (
-        <View style={styles.emptyState}>
-          <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No runs yet</Text>
-          <Text style={styles.emptySubtext}>Start your first run from the Train tab</Text>
-        </View>
+        <EmptyState
+          icon="footsteps-outline"
+          title="No runs yet"
+          subtitle="Start your first run from the Train tab"
+        />
       )}
 
       {runs.map(run => {
         const typeColor = RUN_TYPE_COLORS[run.run_type || 'easy'] || colors.accent;
-        const typeIcon = RUN_TYPE_ICONS[run.run_type || 'easy'] || 'footsteps-outline';
         const dateStr = new Date(run.run_date + 'T12:00:00').toLocaleDateString('en-US', {
           weekday: 'short', month: 'short', day: 'numeric',
         });
 
         return (
           <SwipeableRow key={run.id} onDelete={() => handleDeleteRun(run)}>
-            <View style={styles.runCard}>
-              <View style={styles.runCardLeft}>
-                <View style={[styles.runTypeIcon, { backgroundColor: typeColor + '15' }]}>
-                  <Ionicons name={typeIcon} size={18} color={typeColor} />
-                </View>
-              </View>
-
-              <View style={styles.runCardCenter}>
-                <View style={styles.runCardTop}>
-                  <Text style={styles.runDistance}>{run.distance_miles.toFixed(2)} mi</Text>
-                  <View style={[styles.runTypeBadge, { backgroundColor: typeColor + '15' }]}>
-                    <Text style={[styles.runTypeBadgeText, { color: typeColor }]}>
-                      {(run.run_type || 'easy').toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.runDate}>{dateStr}</Text>
-              </View>
-
-              <View style={styles.runCardRight}>
-                <Text style={styles.runPace}>{run.avg_pace_formatted}</Text>
-                <Text style={styles.runPaceLabel}>/mi</Text>
-              </View>
+            <View style={{ marginHorizontal: spacing.lg }}>
+              <ActivityListCard
+                accentColor={typeColor}
+                title={`${run.distance_miles.toFixed(2)} mi`}
+                subtitle={`${dateStr} \u2022 ${(run.run_type || 'easy').charAt(0).toUpperCase() + (run.run_type || 'easy').slice(1)}`}
+                metric={run.avg_pace_formatted}
+                metricLabel="/mi"
+                metricColor={colors.accent}
+                icon="footsteps-outline"
+              />
             </View>
           </SwipeableRow>
         );
@@ -233,12 +223,13 @@ export default function RunHistoryScreen({ navigation }: any) {
       onUndo={handleUndoRun}
       onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
     />
+    </ScreenBackground>
     </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
   backBtn: { marginRight: spacing.md },
@@ -267,27 +258,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, marginBottom: spacing.sm,
   },
 
-  emptyState: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
-  emptyText: { ...typography.title3, color: colors.textSecondary },
-  emptySubtext: { ...typography.caption, color: colors.textTertiary },
-
-  runCard: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, paddingHorizontal: spacing.lg,
-    marginHorizontal: spacing.lg, marginBottom: spacing.sm,
-    backgroundColor: colors.card, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  runCardLeft: { marginRight: spacing.md },
-  runTypeIcon: {
-    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-  },
-  runCardCenter: { flex: 1 },
-  runCardTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 2 },
-  runDistance: { fontSize: 16, fontWeight: '600', color: colors.text, fontVariant: ['tabular-nums'] },
-  runTypeBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
-  runTypeBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-  runDate: { ...typography.caption, color: colors.textTertiary },
-  runCardRight: { alignItems: 'flex-end' },
-  runPace: { fontSize: 16, fontWeight: '600', color: colors.accent, fontVariant: ['tabular-nums'] },
-  runPaceLabel: { ...typography.micro, color: colors.textTertiary },
 });

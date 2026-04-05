@@ -23,7 +23,6 @@ ANTHROPIC_MODEL = "claude-opus-4-6"
 
 # IMPORTANT: Do not hardcode API keys in the repo.
 # Set ANTHROPIC_API_KEY in the environment.
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 # Module-level singleton — reuses connection pool across all calls.
 _anthropic_client: Optional[anthropic.AsyncAnthropic] = None
@@ -32,9 +31,10 @@ _anthropic_client: Optional[anthropic.AsyncAnthropic] = None
 def _get_client() -> anthropic.AsyncAnthropic:
     global _anthropic_client
     if _anthropic_client is None:
-        if not ANTHROPIC_API_KEY:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
             raise RuntimeError("Missing ANTHROPIC_API_KEY env var")
-        _anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
     return _anthropic_client
 
 SYSTEM_PROMPT = """You are the Honest Mirror — a brutally honest AI evaluator for a personal mastery tracking system.

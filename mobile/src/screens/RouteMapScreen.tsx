@@ -7,7 +7,7 @@
 import React, { useRef, useMemo, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions, Platform,
-  ActivityIndicator, Alert, Animated, PanResponder,
+  Alert, Animated, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,8 @@ import {
 } from '../api/client';
 import { colors, spacing, typography, radius } from '../theme';
 import { haptic } from '../utils/haptics';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton } from '../components/Skeleton';
 
 const DIFFICULTY_COLORS: Record<string, string> = {
   easy: colors.success, moderate: colors.warning, hilly: colors.error,
@@ -196,6 +198,7 @@ export default function RouteMapScreen({ route: navRoute, navigation }: any) {
   };
 
   return (
+    <ScreenBackground>
     <View style={s.container}>
       {/* Map */}
       {Platform.OS !== 'web' && region && (
@@ -265,7 +268,7 @@ export default function RouteMapScreen({ route: navRoute, navigation }: any) {
 
           <View style={s.editBarCenter}>
             {routing ? (
-              <ActivityIndicator size="small" color={colors.accent} />
+              <Skeleton width={100} height={14} />
             ) : (
               <Text style={s.editBarHint}>
                 Tap map to add waypoints · Drag to adjust
@@ -395,11 +398,12 @@ export default function RouteMapScreen({ route: navRoute, navigation }: any) {
         </View>
       </Animated.View>
     </View>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   recenterBtn: {
     position: 'absolute', right: spacing.lg,

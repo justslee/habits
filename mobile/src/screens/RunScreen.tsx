@@ -19,6 +19,7 @@ import { haptic } from '../utils/haptics';
 import MapView, { Polyline } from '../components/MapView';
 import PacePolyline from '../components/PacePolyline';
 import { colors, spacing, typography, radius } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
   easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
@@ -433,6 +434,7 @@ export default function RunScreen({ navigation, route }: any) {
 
   // === ACTIVE / PAUSED ===
   return (
+    <ScreenBackground>
     <View style={s.container}>
       {/* Map */}
       {lastPoint ? (
@@ -572,11 +574,12 @@ export default function RunScreen({ navigation, route }: any) {
         </View>
       </View>
     </View>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   // Pre-run
   preContent: { padding: spacing.lg },

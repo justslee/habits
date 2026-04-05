@@ -9,10 +9,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, ActivityIndicator,
+  RefreshControl, Animated,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
 import { haptic } from '../utils/haptics';
@@ -28,7 +29,9 @@ import { getWhoopData, WhoopData } from '../api/client';
 import {
   DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
 } from '../constants/trainingSchedule';
+import ScreenBackground from '../components/ScreenBackground';
 import { formatPace } from '../services/gps';
+import { usePressScale } from '../hooks/usePressScale';
 
 type Segment = 'train' | 'run' | 'plan';
 
@@ -53,6 +56,7 @@ export default function TrainHomeScreen({ navigation }: any) {
   const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
 
   const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
+  const heroScale = usePressScale(0.97);
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<{
@@ -137,38 +141,44 @@ export default function TrainHomeScreen({ navigation }: any) {
     <>
       {/* Today's Workout Hero Card */}
       {todayWorkout && (
-        <TouchableOpacity
-          style={styles.heroCard}
-          onPress={() => todayWorkout.status === 'completed'
-            ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
-            : navigation?.navigate?.('TodayWorkout')
-          }
-          activeOpacity={0.8}
-        >
-          <View style={styles.heroHeader}>
-            <View style={[styles.heroIndicator, { backgroundColor: colors.success }]} />
-            <Text style={styles.heroLabel}>TODAY</Text>
-          </View>
-          <Text style={styles.heroTitle}>
-            {DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type}
-          </Text>
-          <View style={styles.heroMeta}>
-            {todayWorkout.whoop_recovery_score != null && (
+        <Animated.View style={heroScale.animStyle}>
+          <TouchableOpacity
+            style={styles.heroCard}
+            onPress={() => {
+              haptic.light();
+              todayWorkout.status === 'completed'
+                ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
+                : navigation?.navigate?.('TodayWorkout');
+            }}
+            onPressIn={heroScale.onPressIn}
+            onPressOut={heroScale.onPressOut}
+            activeOpacity={0.8}
+          >
+            <View style={styles.heroHeader}>
+              <View style={[styles.heroIndicator, { backgroundColor: colors.success }]} />
+              <Text style={styles.heroLabel}>TODAY</Text>
+            </View>
+            <Text style={styles.heroTitle}>
+              {DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type}
+            </Text>
+            <View style={styles.heroMeta}>
+              {todayWorkout.whoop_recovery_score != null && (
+                <Text style={styles.heroMetaText}>
+                  Recovery {todayWorkout.whoop_recovery_score.toFixed(0)}%
+                </Text>
+              )}
               <Text style={styles.heroMetaText}>
-                Recovery {todayWorkout.whoop_recovery_score.toFixed(0)}%
+                {todayWorkout.status === 'completed' ? '\u2705 Done' : todayWorkout.status === 'in_progress' ? '\uD83D\uDD35 In Progress' : ''}
               </Text>
-            )}
-            <Text style={styles.heroMetaText}>
-              {todayWorkout.status === 'completed' ? '✅ Done' : todayWorkout.status === 'in_progress' ? '🔵 In Progress' : ''}
-            </Text>
-          </View>
-          <View style={styles.heroCta}>
-            <Text style={styles.heroCtaText}>
-              {todayWorkout.status === 'completed' ? 'View Workout' : 'Start Workout'}
-            </Text>
-            <Ionicons name="arrow-forward" size={16} color={colors.accent} />
-          </View>
-        </TouchableOpacity>
+            </View>
+            <View style={styles.heroCta}>
+              <Text style={styles.heroCtaText}>
+                {todayWorkout.status === 'completed' ? 'View Workout' : 'Start Workout'}
+              </Text>
+              <Ionicons name="arrow-forward" size={16} color={colors.accent} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
       )}
 
             {/* Whoop Card — compact in train view */}
@@ -183,45 +193,11 @@ export default function TrainHomeScreen({ navigation }: any) {
         <>
           <Text style={styles.sectionTitle}>RECENT SESSIONS</Text>
           <Text style={styles.swipeHint}>← swipe to delete</Text>
-          {liftItems.slice(0, 7).map(item => {
-            const typeColor = DAY_TYPE_COLORS[item.day_type || 'push'] || colors.accent;
-            const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
-              weekday: 'short', month: 'short', day: 'numeric',
-            });
-            return (
-              <SwipeableRow key={`w-${item.id}`} onDelete={() => handleDelete(item)}>
-                <TouchableOpacity
-                  style={styles.sessionCard}
-                  activeOpacity={0.7}
-                  onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: item.id })}
-                >
-                  <View style={styles.sessionLeft}>
-                    <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
-                      <Ionicons name="barbell-outline" size={18} color={typeColor} />
-                    </View>
-                  </View>
-                  <View style={styles.sessionCenter}>
-                    <View style={styles.sessionTop}>
-                      <Text style={styles.sessionLabel}>{item.label}</Text>
-                      <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
-                        <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-                          {(item.day_type || '').toUpperCase()}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.sessionDate}>{dateStr}</Text>
-                  </View>
-                  <View style={styles.sessionRight}>
-                    <Text style={styles.sessionDetail}>{item.detail}</Text>
-                    {item.rpe != null && (
-                      <Text style={styles.sessionRpe}>RPE {item.rpe}</Text>
-                    )}
-                    <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-                  </View>
-                </TouchableOpacity>
-              </SwipeableRow>
-            );
-          })}
+          {liftItems.slice(0, 7).map(item => (
+            <LiftSessionCard key={`w-${item.id}`} item={item}
+              onDelete={() => handleDelete(item)}
+              onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: item.id })} />
+          ))}
           <TouchableOpacity
             style={styles.seeAllBtn}
             onPress={() => navigation?.navigate?.('WorkoutHistory')}
@@ -593,14 +569,23 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   if (loading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top + 40, alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={colors.accent} />
+      <View style={[styles.container, { paddingTop: insets.top + 40, padding: spacing.lg }]}>
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: spacing.lg }}>
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+        </View>
+        <Skeleton width="100%" height={120} borderRadius={radius.lg} style={{ marginBottom: spacing.md }} />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
       </View>
     );
   }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <ScreenBackground>
       <ScrollView
         style={styles.container}
         contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40, flexGrow: 1 }}
@@ -644,12 +629,60 @@ export default function TrainHomeScreen({ navigation }: any) {
         onUndo={handleUndo}
         onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
       />
+      </ScreenBackground>
     </GestureHandlerRootView>
   );
 }
 
+function LiftSessionCard({ item, onDelete, onPress }: {
+  item: TrainingItem; onDelete: () => void; onPress: () => void;
+}) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const typeColor = DAY_TYPE_COLORS[item.day_type || 'push'] || colors.accent;
+  const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+  return (
+    <SwipeableRow onDelete={onDelete}>
+      <Animated.View style={animStyle}>
+        <TouchableOpacity
+          style={styles.sessionCard}
+          activeOpacity={0.7}
+          onPress={() => { haptic.light(); onPress(); }}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+        >
+          <View style={styles.sessionLeft}>
+            <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
+              <Ionicons name="barbell-outline" size={18} color={typeColor} />
+            </View>
+          </View>
+          <View style={styles.sessionCenter}>
+            <View style={styles.sessionTop}>
+              <Text style={styles.sessionLabel}>{item.label}</Text>
+              <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
+                <Text style={[styles.typeBadgeText, { color: typeColor }]}>
+                  {(item.day_type || '').toUpperCase()}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.sessionDate}>{dateStr}</Text>
+          </View>
+          <View style={styles.sessionRight}>
+            <Text style={styles.sessionDetail}>{item.detail}</Text>
+            {item.rpe != null && (
+              <Text style={styles.sessionRpe}>RPE {item.rpe}</Text>
+            )}
+            <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </SwipeableRow>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   screenTitle: {
     ...typography.title1, color: colors.text,

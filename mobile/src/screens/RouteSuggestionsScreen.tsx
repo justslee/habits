@@ -5,7 +5,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Platform, TextInput, Keyboard,
+  Platform, TextInput, Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,8 @@ import MapView, { Polyline } from '../components/MapView';
 import { discoverRoutes, saveDiscoveredRoute, DiscoveredRoute } from '../api/client';
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
 import { haptic } from '../utils/haptics';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton } from '../components/Skeleton';
 
 const DISTANCE_PRESETS = [
   { label: '1 mi', value: 1 },
@@ -114,6 +116,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
   };
 
   return (
+    <ScreenBackground>
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingTop: 12, paddingBottom: 40 }}
@@ -205,7 +208,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
               </View>
             </View>
           ))}
-          <ActivityIndicator size="large" color={colors.accent} style={{ marginTop: spacing.md }} />
+          <Skeleton width={48} height={48} borderRadius={24} style={{ marginTop: spacing.md }} />
           <Text style={styles.loadingText}>Finding routes near you...</Text>
         </View>
       )}
@@ -307,7 +310,7 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
               disabled={isSaved || savingIdx === idx}
             >
               {savingIdx === idx ? (
-                <ActivityIndicator size="small" color={colors.accent} />
+                <Skeleton width={60} height={18} />
               ) : (
                 <>
                   <Ionicons
@@ -325,11 +328,12 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
         );
       })}
     </ScrollView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   header: {
     flexDirection: 'row', alignItems: 'center',

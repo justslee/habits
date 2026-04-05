@@ -3,8 +3,10 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
-import { View } from 'react-native';
+import { View, Animated } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useRef, useCallback } from 'react';
+import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import DailyScreen from './src/screens/DailyScreen';
 import TrainHomeScreen from './src/screens/TrainHomeScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
@@ -22,10 +24,23 @@ import WeeklyReviewScreen from './src/screens/WeeklyReviewScreen';
 import SpeakingScreen from './src/screens/SpeakingScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
+import { haptic } from './src/utils/haptics';
 
 const Tab = createBottomTabNavigator();
 const TrainStack = createStackNavigator();
 const ProgressStack = createStackNavigator();
+
+const HEADER_STYLE = {
+  backgroundColor: colors.bg,
+  shadowColor: 'transparent',
+  elevation: 0,
+};
+const HEADER_TITLE_STYLE = {
+  color: colors.text,
+  fontFamily: 'Inter_600SemiBold',
+  fontWeight: '600' as const,
+  fontSize: 18,
+};
 
 function TrainStackScreen() {
   return (
@@ -34,10 +49,9 @@ function TrainStackScreen() {
         screenOptions={{
           headerShown: true,
           headerBackTitle: ' ',
-          headerStyle: { backgroundColor: '#09090F', shadowColor: 'transparent', elevation: 0 },
-          headerTintColor: '#6366F1',
-          headerTitleStyle: { color: '#F0F0F5', fontFamily: 'Inter', fontWeight: '600', fontSize: 18 },
-          
+          headerStyle: HEADER_STYLE,
+          headerTintColor: colors.accent,
+          headerTitleStyle: HEADER_TITLE_STYLE,
         }}
       >
         <TrainStack.Screen name="TrainHome" component={TrainHomeScreen} options={{ headerShown: false }} />
@@ -62,10 +76,9 @@ function ProgressStackScreen() {
         screenOptions={{
           headerShown: true,
           headerBackTitle: ' ',
-          headerStyle: { backgroundColor: '#09090F', shadowColor: 'transparent', elevation: 0 },
-          headerTintColor: '#6366F1',
-          headerTitleStyle: { color: '#F0F0F5', fontFamily: 'Inter', fontWeight: '600', fontSize: 18 },
-          
+          headerStyle: HEADER_STYLE,
+          headerTintColor: colors.accent,
+          headerTitleStyle: HEADER_TITLE_STYLE,
         }}
       >
         <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} options={{ headerShown: false }} />
@@ -83,7 +96,50 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
   Progress: { active: 'stats-chart', inactive: 'stats-chart-outline' },
 };
 
+/** Animated tab icon with spring scale on focus change. */
+function AnimatedTabIcon({ focused, color, iconName }: { focused: boolean; color: string; iconName: keyof typeof Ionicons.glyphMap }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const onLayout = useCallback(() => {
+    if (focused) {
+      Animated.sequence([
+        Animated.spring(scale, { toValue: 1.15, useNativeDriver: true, damping: 15, stiffness: 150, mass: 0.5 }),
+        Animated.spring(scale, { toValue: 1, useNativeDriver: true, damping: 15, stiffness: 150, mass: 0.5 }),
+      ]).start();
+      haptic.light();
+    }
+  }, [focused, scale]);
+
+  return (
+    <Animated.View
+      onLayout={onLayout}
+      style={[
+        { transform: [{ scale }] },
+        focused ? {
+          backgroundColor: 'rgba(99,102,241,0.18)',
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: 'rgba(99,102,241,0.12)',
+          paddingHorizontal: 14,
+          paddingVertical: 4,
+        } : undefined,
+      ]}
+    >
+      <Ionicons name={iconName} size={22} color={color} />
+    </Animated.View>
+  );
+}
+
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  if (!fontsLoaded) return null;
+
   return (
     <SafeAreaProvider>
       <NavigationContainer>
@@ -92,8 +148,7 @@ export default function App() {
             headerShown: false,
             tabBarStyle: {
               backgroundColor: colors.bg,
-              borderTopWidth: 1,
-              borderTopColor: colors.border,
+              borderTopWidth: 0,
               elevation: 0,
               paddingTop: 8,
             },
@@ -102,22 +157,14 @@ export default function App() {
             tabBarLabelStyle: {
               fontSize: 10,
               fontWeight: '600',
+              fontFamily: 'Inter_600SemiBold',
               marginTop: 2,
               letterSpacing: 0.3,
             },
             tabBarIcon: ({ focused, color }) => {
               const icons = TAB_ICONS[route.name];
               const iconName = focused ? icons.active : icons.inactive;
-              return (
-                <View style={focused ? {
-                  backgroundColor: colors.accentMuted,
-                  borderRadius: 12,
-                  paddingHorizontal: 14,
-                  paddingVertical: 4,
-                } : undefined}>
-                  <Ionicons name={iconName} size={22} color={color} />
-                </View>
-              );
+              return <AnimatedTabIcon focused={focused} color={color} iconName={iconName} />;
             },
           })}
         >

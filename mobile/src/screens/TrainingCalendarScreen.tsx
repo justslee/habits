@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
 import { haptic } from '../utils/haptics';
 import { API_URL, apiHeaders } from '../api/client';
 
@@ -111,6 +112,7 @@ export default function TrainingCalendarScreen({ navigation }: any) {
   const weeks = Array.from({ length: plan.total_weeks }, (_, i) => i + 1);
 
   return (
+    <ScreenBackground>
     <ScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
@@ -222,11 +224,12 @@ export default function TrainingCalendarScreen({ navigation }: any) {
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center', gap: spacing.sm },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.md },

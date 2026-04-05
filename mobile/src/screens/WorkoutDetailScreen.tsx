@@ -4,13 +4,15 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, ActivityIndicator, RefreshControl,
+  View, Text, ScrollView, StyleSheet, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getWorkoutSession, getWhoopData, getWhoopSnapshot, WorkoutSession, ExerciseLogData, WhoopData } from '../api/client';
 import WhoopCard from '../components/WhoopCard';
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
 
 const DAY_LABELS: Record<string, string> = {
   push: 'Push Day', pull: 'Pull Day', legs: 'Legs + Core',
@@ -94,8 +96,17 @@ export default function WorkoutDetailScreen({ route }: any) {
 
   if (loading) {
     return (
-      <View style={s.center}>
-        <ActivityIndicator size="large" color={colors.accent} />
+      <View style={[s.center, { padding: spacing.lg, justifyContent: 'flex-start', paddingTop: 60 }]}>
+        <Skeleton width="60%" height={28} style={{ alignSelf: 'center', marginBottom: spacing.sm }} />
+        <Skeleton width="40%" height={14} style={{ alignSelf: 'center', marginBottom: spacing.lg }} />
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: spacing.lg, width: '100%' }}>
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+        </View>
+        <Skeleton width="100%" height={100} borderRadius={radius.lg} style={{ marginBottom: spacing.md }} />
+        <SkeletonRow />
+        <SkeletonRow />
       </View>
     );
   }
@@ -133,6 +144,7 @@ export default function WorkoutDetailScreen({ route }: any) {
     : (recoveryScore ?? 0) >= 34 ? colors.warning : colors.error;
 
   return (
+    <ScreenBackground>
     <ScrollView
       style={s.scroll}
       contentContainerStyle={s.container}
@@ -311,15 +323,16 @@ export default function WorkoutDetailScreen({ route }: any) {
 
       <View style={{ height: spacing.xl }} />
     </ScrollView>
+    </ScreenBackground>
   );
 }
 
 // --- Styles ---
 
 const s = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingBottom: 40 },
-  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   errorText: { ...typography.body, color: colors.textSecondary, marginTop: spacing.sm },
 
   // Hero

@@ -1,21 +1,23 @@
 import { Platform } from 'react-native';
 
-// --- Colors: layered depth, not flat ---
+// --- Colors: indigo-tinted dark mode ---
 export const colors = {
-  // Backgrounds (darkest → lightest)
-  bg: '#09090F',
-  card: '#12121E',
-  cardElevated: '#1A1A2E',
-  input: '#242438',
+  // Backgrounds — indigo undertone throughout (high blue channel)
+  bg: '#0B0D1A',
+  card: '#131525',
+  cardElevated: '#1A1D35',
+  input: '#242645',
 
-  // Text hierarchy
-  text: '#F0F0F5',
-  textSecondary: '#A0A0B8',
-  textTertiary: '#5C5C72',
+  // Text — indigo-gray, not pure gray
+  text: '#EEEEF5',
+  textSecondary: '#9B9BC0',
+  textTertiary: '#5B5B80',
 
   // Accent
   accent: '#6366F1',
-  accentMuted: 'rgba(99,102,241,0.12)',
+  accentLight: '#818CF8',
+  accentMuted: 'rgba(99,102,241,0.15)',
+  accentGlow: 'rgba(99,102,241,0.25)',
 
   // Semantic
   success: '#22C55E',
@@ -30,13 +32,13 @@ export const colors = {
   pillarAI: '#22D3EE',
   pillarSpeaking: '#EC4899',
 
-  // Borders
-  border: 'rgba(255,255,255,0.03)',
-  borderFocus: 'rgba(99,102,241,0.25)',
+  // Borders — indigo-tinted
+  border: 'rgba(129,140,248,0.06)',
+  borderFocus: 'rgba(99,102,241,0.35)',
 
   // Chart
   chartLine: '#6366F1',
-  chartFill: 'rgba(99,102,241,0.06)',
+  chartFill: 'rgba(99,102,241,0.08)',
 };
 
 /** Pillar colors by DB id (1-5). */
@@ -68,17 +70,21 @@ export const spacing = {
 };
 
 // --- Typography ---
-const fontFamily = Platform.OS === 'ios' ? 'Inter' : 'Inter';
+// Font families loaded via @expo-google-fonts/inter in App.tsx
+const regular = 'Inter_400Regular';
+const medium = 'Inter_500Medium';
+const semibold = 'Inter_600SemiBold';
+const bold = 'Inter_700Bold';
 
 export const typography = {
-  display: { fontSize: 48, fontWeight: '700' as const, letterSpacing: -1.5, fontFamily },
-  title1: { fontSize: 28, fontWeight: '700' as const, letterSpacing: -0.5, fontFamily },
-  title2: { fontSize: 22, fontWeight: '600' as const, letterSpacing: -0.3, fontFamily },
-  title3: { fontSize: 18, fontWeight: '600' as const, letterSpacing: 0, fontFamily },
-  body: { fontSize: 15, fontWeight: '400' as const, letterSpacing: 0, fontFamily },
-  bodyBold: { fontSize: 15, fontWeight: '600' as const, letterSpacing: 0, fontFamily },
-  caption: { fontSize: 13, fontWeight: '500' as const, letterSpacing: 0.2, fontFamily },
-  micro: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 0.5, fontFamily },
+  display: { fontSize: 48, fontFamily: bold, letterSpacing: -1.5 },
+  title1: { fontSize: 28, fontFamily: bold, letterSpacing: -0.5 },
+  title2: { fontSize: 22, fontFamily: semibold, letterSpacing: -0.3 },
+  title3: { fontSize: 18, fontFamily: semibold, letterSpacing: 0 },
+  body: { fontSize: 15, fontFamily: regular, letterSpacing: 0 },
+  bodyBold: { fontSize: 15, fontFamily: semibold, letterSpacing: 0 },
+  caption: { fontSize: 13, fontFamily: medium, letterSpacing: 0.2 },
+  micro: { fontSize: 11, fontFamily: semibold, letterSpacing: 0.5 },
 };
 
 // --- Border Radius ---
@@ -90,6 +96,37 @@ export const radius = {
   pill: 999,
 };
 
+// --- Shadows: colored indigo, not black ---
+export const shadows = {
+  card: Platform.select({
+    ios: {
+      shadowColor: '#6366F1',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+    },
+    android: { elevation: 3 },
+  }),
+  cardElevated: Platform.select({
+    ios: {
+      shadowColor: '#6366F1',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 16,
+    },
+    android: { elevation: 6 },
+  }),
+  glow: Platform.select({
+    ios: {
+      shadowColor: '#6366F1',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.4,
+      shadowRadius: 20,
+    },
+    android: { elevation: 8 },
+  }),
+};
+
 // --- Card Styles ---
 export const cardStyle = {
   backgroundColor: colors.card,
@@ -97,12 +134,14 @@ export const cardStyle = {
   borderWidth: 1,
   borderColor: colors.border,
   padding: spacing.lg,
+  ...shadows.card,
 };
 
 export const cardElevatedStyle = {
   backgroundColor: colors.cardElevated,
   borderRadius: radius.xl,
   borderWidth: 1,
-  borderColor: 'rgba(255,255,255,0.05)',
+  borderColor: 'rgba(129,140,248,0.08)',
   padding: spacing.lg,
+  ...shadows.cardElevated,
 };

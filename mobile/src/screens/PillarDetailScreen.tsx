@@ -8,7 +8,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, ActivityIndicator,
+  View, Text, ScrollView, StyleSheet,
   TouchableOpacity, TextInput, Alert, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,8 @@ import {
 import { haptic } from '../utils/haptics';
 import ConceptGraph from '../components/ConceptGraph';
 import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton, SkeletonRow } from '../components/Skeleton';
 
 const STATUS_CYCLE: ConceptData['status'][] = ['not_started', 'in_progress', 'mastered'];
 const STATUS_COLORS: Record<string, string> = {
@@ -207,8 +209,14 @@ export default function PillarDetailScreen({ route, navigation }: any) {
 
   if (loading) {
     return (
-      <View style={st.center}>
-        <ActivityIndicator size="large" color={pillarColor} />
+      <View style={[st.center, { padding: spacing.lg, justifyContent: 'flex-start', paddingTop: 60 }]}>
+        <Skeleton width="50%" height={24} style={{ marginBottom: spacing.sm }} />
+        <Skeleton width="30%" height={14} style={{ marginBottom: spacing.lg }} />
+        <Skeleton width="100%" height={6} borderRadius={3} style={{ marginBottom: spacing.lg }} />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
       </View>
     );
   }
@@ -217,6 +225,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
   const progressPct = tree && tree.total > 0 ? Math.round((tree.mastered / tree.total) * 100) : 0;
 
   return (
+    <ScreenBackground>
     <ScrollView
       style={st.scroll}
       contentContainerStyle={[st.container, { paddingTop: spacing.sm }]}
@@ -275,7 +284,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
             disabled={seeding}
           >
             {seeding && seedMode === 'quick' ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <Skeleton width={80} height={18} />
             ) : (
               <>
                 <Ionicons name="sparkles" size={18} color="#fff" />
@@ -292,7 +301,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
             disabled={seeding}
           >
             {seeding && seedMode === 'research' ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <Skeleton width={120} height={18} />
             ) : (
               <>
                 <Ionicons name="telescope" size={18} color="#fff" />
@@ -317,7 +326,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
       {/* Seeding overlay for re-seed */}
       {seeding && !isEmpty && (
         <View style={st.seedingOverlay}>
-          <ActivityIndicator size="large" color={pillarColor} />
+          <Skeleton width={48} height={48} borderRadius={24} />
           <Text style={st.seedingText}>
             {seedMode === 'research'
               ? 'Deep research mode: Notion KB → Web search → Synthesis...'
@@ -391,6 +400,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    </ScreenBackground>
   );
 }
 
@@ -620,7 +630,7 @@ function ConceptRow({
 // --- Styles ---
 
 const st = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingBottom: 40 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
 

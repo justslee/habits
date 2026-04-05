@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Platform, KeyboardAvoidingView, RefreshControl,
+  Platform, KeyboardAvoidingView, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getTodayWorkout, chatWithCoach, WorkoutSession } from '../api/client';
 import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
+import { Skeleton } from '../components/Skeleton';
 import { haptic } from '../utils/haptics';
 
 interface ChatMessage { role: 'user' | 'coach'; text: string; }
@@ -100,6 +102,7 @@ export default function WorkoutScreen() {
     : (session?.whoop_recovery_score ?? 0) >= 34 ? colors.warning : colors.error;
 
   return (
+    <ScreenBackground>
     <KeyboardAvoidingView style={s.outer} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
       <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={[s.container, { paddingTop: 0 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchWorkout(); }} tintColor={colors.textTertiary} />}>
@@ -337,7 +340,7 @@ export default function WorkoutScreen() {
               <Text style={[s.bubbleText, msg.role === 'user' ? { color: '#fff' } : { color: colors.text }]}>{msg.text}</Text>
             </View>
           ))}
-          {sending && <ActivityIndicator size="small" color={colors.textTertiary} style={{ marginTop: 8 }} />}
+          {sending && <Skeleton width={40} height={14} style={{ marginTop: 8, alignSelf: 'flex-start' }} />}
         </View>
       </ScrollView>
 
@@ -360,14 +363,15 @@ export default function WorkoutScreen() {
         </View>
       )}
     </KeyboardAvoidingView>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  outer: { flex: 1, backgroundColor: colors.bg },
+  outer: { flex: 1 },
   scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingBottom: 20 },
-  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
 
   skeleton: { gap: spacing.md, width: '80%' },

@@ -12,6 +12,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius } from '../theme';
+import ScreenBackground from '../components/ScreenBackground';
+import ActivityListCard from '../components/ActivityListCard';
+import EmptyState from '../components/EmptyState';
 import { haptic } from '../utils/haptics';
 import { API_URL, apiHeaders, deleteWorkout, restoreWorkout, WorkoutSession } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
@@ -119,6 +122,7 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <ScreenBackground>
       <ScrollView
         style={styles.container}
         contentContainerStyle={{ paddingTop: 12 }}
@@ -150,67 +154,18 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
 
         {/* Workout list */}
         {workouts.length === 0 && !loading && (
-          <View style={styles.emptyState}>
-            <Ionicons name="barbell-outline" size={48} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>No workouts yet</Text>
-            <Text style={styles.emptySubtext}>Start a workout from the Train tab</Text>
-          </View>
+          <EmptyState
+            icon="barbell-outline"
+            title="No workouts yet"
+            subtitle="Start a workout from the Train tab"
+          />
         )}
 
-        {workouts.map(w => {
-          const typeColor = DAY_TYPE_COLORS[w.day_type] || colors.accent;
-          const typeIcon = DAY_TYPE_ICONS[w.day_type] || 'barbell-outline';
-          const dateStr = new Date(w.session_date + 'T12:00:00').toLocaleDateString('en-US', {
-            weekday: 'short', month: 'short', day: 'numeric',
-          });
-          const { totalSets, totalVolume, exerciseCount } = getExerciseStats(w);
-
-          return (
-            <SwipeableRow key={w.id} onDelete={() => handleDelete(w)}>
-              <TouchableOpacity
-                style={styles.workoutCard}
-                activeOpacity={0.7}
-                onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: w.id })}
-              >
-                <View style={styles.cardLeft}>
-                  <View style={[styles.typeIcon, { backgroundColor: typeColor + '15' }]}>
-                    <Ionicons name={typeIcon} size={18} color={typeColor} />
-                  </View>
-                </View>
-
-                <View style={styles.cardCenter}>
-                  <View style={styles.cardTop}>
-                    <Text style={styles.cardLabel}>
-                      {w.day_type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                    </Text>
-                    <View style={[styles.dayBadge, { backgroundColor: typeColor + '15' }]}>
-                      <Text style={[styles.dayBadgeText, { color: typeColor }]}>
-                        {w.day_type.toUpperCase()}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.cardDate}>{dateStr}</Text>
-                  <Text style={styles.cardDetail}>
-                    {exerciseCount} exercises • {totalSets} sets
-                    {totalVolume > 0 ? ` • ${totalVolume.toLocaleString()} lb` : ''}
-                  </Text>
-                </View>
-
-                <View style={styles.cardRight}>
-                  {w.overall_rpe != null && (
-                    <>
-                      <Text style={styles.rpeValue}>RPE {w.overall_rpe}</Text>
-                    </>
-                  )}
-                  <Text style={[styles.statusText, w.status === 'completed' && { color: colors.success }]}>
-                    {w.status === 'completed' ? '✓' : w.status}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={{ marginTop: 4 }} />
-                </View>
-              </TouchableOpacity>
-            </SwipeableRow>
-          );
-        })}
+        {workouts.map(w => (
+          <WorkoutCard key={w.id} workout={w} onDelete={() => handleDelete(w)}
+            onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: w.id })}
+            getExerciseStats={getExerciseStats} />
+        ))}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -221,12 +176,48 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
         onUndo={handleUndo}
         onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
       />
+      </ScreenBackground>
     </GestureHandlerRootView>
   );
 }
 
+function WorkoutCard({ workout: w, onDelete, onPress, getExerciseStats }: {
+  workout: WorkoutListItem; onDelete: () => void; onPress: () => void;
+  getExerciseStats: (w: WorkoutListItem) => { totalSets: number; totalVolume: number; exerciseCount: number };
+}) {
+  const typeColor = DAY_TYPE_COLORS[w.day_type] || colors.accent;
+  const dateStr = new Date(w.session_date + 'T12:00:00').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+  const { totalSets, totalVolume, exerciseCount } = getExerciseStats(w);
+  const metricStr = totalVolume > 0
+    ? `${totalVolume.toLocaleString()} lb`
+    : `${totalSets} sets`;
+  return (
+    <SwipeableRow onDelete={onDelete}>
+      <View style={{ marginHorizontal: spacing.lg }}>
+        <ActivityListCard
+          accentColor={typeColor}
+          title={w.day_type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
+          subtitle={dateStr}
+          metric={metricStr}
+          metricLabel={totalVolume > 0 ? 'volume' : undefined}
+          icon="fitness-outline"
+          onPress={() => { haptic.light(); onPress(); }}
+          showChevron
+        >
+          <Text style={styles.cardDetail}>
+            {exerciseCount} exercises {'\u2022'} {totalSets} sets
+            {w.overall_rpe != null ? ` \u2022 RPE ${w.overall_rpe}` : ''}
+          </Text>
+        </ActivityListCard>
+      </View>
+    </SwipeableRow>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1 },
 
   header: {
     flexDirection: 'row', alignItems: 'center',
@@ -248,29 +239,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, marginBottom: spacing.sm,
   },
 
-  emptyState: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
-  emptyText: { ...typography.title3, color: colors.textSecondary },
-  emptySubtext: { ...typography.caption, color: colors.textTertiary },
-
-  workoutCard: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: spacing.md, paddingHorizontal: spacing.lg,
-    marginHorizontal: spacing.lg, marginBottom: spacing.sm,
-    backgroundColor: colors.card, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  cardLeft: { marginRight: spacing.md },
-  typeIcon: {
-    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-  },
-  cardCenter: { flex: 1 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 2 },
-  cardLabel: { fontSize: 16, fontWeight: '600', color: colors.text },
-  dayBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
-  dayBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-  cardDate: { ...typography.caption, color: colors.textTertiary },
   cardDetail: { ...typography.micro, color: colors.textSecondary, marginTop: 2 },
-  cardRight: { alignItems: 'flex-end' },
-  rpeValue: { fontSize: 14, fontWeight: '600', color: colors.accent, fontVariant: ['tabular-nums'] },
-  statusText: { ...typography.micro, color: colors.textTertiary, marginTop: 2 },
 });
