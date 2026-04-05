@@ -11,15 +11,12 @@ import {
   getDashboardStats, getHeatmap, getDepthProgression, getExerciseProfiles,
   getVision, saveVision, getRecentEntries, deleteEntry, restoreEntry,
   DashboardStats, HeatmapDay, DepthProgressionPoint, ExerciseProfileData,
-  VisionData, EntryResponse,
+  VisionData, EntryResponse, PillarStats,
   API_URL, apiHeaders,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
-import RadarChart from '../components/RadarChart';
-import DepthChart from '../components/DepthChart';
 import CompoundingChart from '../components/CompoundingChart';
 import { ProgressSkeleton, Skeleton } from '../components/Skeleton';
-import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
 import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
@@ -67,7 +64,14 @@ const TREND_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color
   declining: { icon: 'arrow-down', color: colors.error },
 };
 
-const HEATMAP_COLORS = ['#12121E', '#0e4429', '#006d32', '#26a641', '#39d353'];
+// Indigo shades: 0=bg (empty), 1-4=increasingly bright indigo
+const HEATMAP_COLORS = [
+  '#0B0D1A',
+  'rgba(99,102,241,0.25)',
+  'rgba(99,102,241,0.45)',
+  'rgba(99,102,241,0.70)',
+  'rgba(99,102,241,0.92)',
+];
 
 function intensityLevel(count: number): number {
   if (count === 0) return 0; if (count === 1) return 1;
@@ -103,6 +107,67 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+// ---------- Small reusable components ----------
+
+function StripItem({ value, label }: { value: string | number; label: string }) {
+  return (
+    <View style={ms.stripItem}>
+      <Text style={ms.stripValue}>{value}</Text>
+      <Text style={ms.stripLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function PillarHealthRow({ pillar, recentEntries }: { pillar: PillarStats; recentEntries: EntryResponse[] }) {
+  const pillarColor = PILLAR_COLORS[pillar.pillar_id] || colors.textTertiary;
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+
+  const entries = recentEntries.filter(e => (e.pillar_tags || []).includes(pillar.pillar_id));
+  const recentE = entries.filter(e => e.entry_date >= sevenDaysAgo);
+  const priorE = entries.filter(e => e.entry_date >= fourteenDaysAgo && e.entry_date < sevenDaysAgo);
+
+  const avgDepthOf = (arr: EntryResponse[]) => {
+    const scored = arr.filter(e => e.evaluation?.depth_score != null);
+    if (!scored.length) return null;
+    return scored.reduce((s, e) => s + e.evaluation!.depth_score, 0) / scored.length;
+  };
+
+  const recentDepth = avgDepthOf(recentE);
+  const priorDepth = avgDepthOf(priorE);
+
+  let trendChar = '—';
+  let trendColor = colors.textTertiary;
+  if (recentDepth != null && priorDepth != null) {
+    const diff = recentDepth - priorDepth;
+    if (diff > 3) { trendChar = '↑'; trendColor = colors.success; }
+    else if (diff < -3) { trendChar = '↓'; trendColor = colors.error; }
+    else { trendChar = '→'; trendColor = colors.textTertiary; }
+  } else if (recentDepth != null) {
+    trendChar = '→'; trendColor = colors.textTertiary;
+  }
+
+  const depthScore = pillar.avg_depth_score ?? 0;
+  const depthBarWidth = Math.round(Math.min(1, depthScore / 100) * 80);
+
+  return (
+    <View style={ms.pillarHealthRow}>
+      <View style={[ms.pillarHealthDot, { backgroundColor: pillarColor }]} />
+      <Text style={ms.pillarHealthName} numberOfLines={1}>
+        {pillar.pillar_name.split(' ').slice(0, 2).join(' ')}
+      </Text>
+      <Text style={ms.pillarHealthMeta}>{pillar.total_hours}h · {pillar.entry_count}</Text>
+      <View style={ms.depthBar}>
+        <View style={[ms.depthBarFill, { width: depthBarWidth, backgroundColor: pillarColor }]} />
+      </View>
+      <Text style={ms.depthNum}>{pillar.avg_depth_score != null ? Math.round(pillar.avg_depth_score) : '—'}</Text>
+      <Text style={[ms.trendArrow, { color: trendColor }]}>{trendChar}</Text>
+    </View>
+  );
+}
+
+// ---------- Main screen ----------
+
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
@@ -121,12 +186,10 @@ export default function ProgressScreen() {
     visible: boolean; message: string; entryId: number; snapshot: EntryResponse | null;
   }>({ visible: false, message: '', entryId: 0, snapshot: null });
   const [heatTooltip, setHeatTooltip] = useState<{ date: string; count: number } | null>(null);
-  const [conceptProgress, setConceptProgress] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<Section>('mastery');
-  const [compoundExpanded, setCompoundExpanded] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -152,10 +215,9 @@ export default function ProgressScreen() {
         setVision(v);
       } catch (err) { console.warn('Failed to fetch vision', err); }
 
-      // Fetch concept mastery overview
+      // Fetch concept mastery overview (kept for data consistency)
       try {
-        const cpResp = await fetch(`${API_URL}/api/v1/concepts/progress/overview`, { headers: apiHeaders() });
-        if (cpResp.ok) setConceptProgress(await cpResp.json());
+        await fetch(`${API_URL}/api/v1/concepts/progress/overview`, { headers: apiHeaders() });
       } catch (err) { console.warn('Failed to fetch concept progress', err); }
 
       // Fetch discipline analytics
@@ -187,7 +249,7 @@ export default function ProgressScreen() {
     setUndoToast({ visible: true, message: `"${desc}" deleted`, entryId: entry.id, snapshot: entry });
     try {
       await deleteEntry(entry.id);
-      fetchData(); // refresh stats, heatmap, streaks, pillars
+      fetchData();
     } catch (err) {
       console.warn('Failed to delete entry:', err);
       setRecentEntries(prev => [...prev, entry].sort((a, b) => b.id - a.id));
@@ -202,7 +264,7 @@ export default function ProgressScreen() {
     try {
       await restoreEntry(entryId);
       setRecentEntries(prev => [...prev, snapshot].sort((a, b) => b.id - a.id));
-      fetchData(); // refresh stats, heatmap, streaks, pillars
+      fetchData();
     } catch (err) {
       console.warn('Failed to restore entry:', err);
     }
@@ -218,7 +280,21 @@ export default function ProgressScreen() {
     </View>
   );
 
-  const trend = stats ? (TREND_CONFIG[stats.trend] || { icon: 'ellipse' as const, color: colors.textTertiary }) : null;
+  // --- Hero score calculation (compound growth multiplier) ---
+  const heroDays = 90;
+  const totalEntries = stats
+    ? stats.pillar_breakdown.reduce((sum, p) => sum + (p.entry_count || 0), 0)
+    : 0;
+  const heroAvgDepth = stats?.avg_depth_score || 0;
+  const heroDailyRate = totalEntries > 0 ? totalEntries / heroDays : 0;
+  const heroCompound = heroDailyRate > 0 ? (1 + 0.01 * heroDailyRate * (heroAvgDepth / 50)) : 1;
+  const heroMultiplier = Math.pow(heroCompound, heroDays);
+  const heroLastWeek = Math.pow(heroCompound, heroDays - 7);
+  const heroChange = heroMultiplier - heroLastWeek;
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+  const sessionsThisWeek = recentEntries.filter(e => e.entry_date >= sevenDaysAgo).length;
+
   const heatmapGrid = buildHeatmapGrid(heatmap);
   const grouped = MUSCLE_GROUPS.map(mg => ({ ...mg, exercises: profiles.filter(p => p.muscle_group === mg.key) }));
 
@@ -228,6 +304,7 @@ export default function ProgressScreen() {
     <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
+      {/* Tab filters */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -252,88 +329,64 @@ export default function ProgressScreen() {
         ))}
       </ScrollView>
 
-      {/* MASTERY */}
+      {/* ── MASTERY ── */}
       {activeSection === 'mastery' && stats && (
         <>
-          <View style={s.statsGrid}>
-            <View style={s.statCard}>
-              <CountUp value={stats.hours.all_time} style={s.statCardValue} />
-              <Text style={s.statCardLabel}>ALL TIME</Text>
-            </View>
-            <View style={s.statCard}>
-              <CountUp value={stats.hours.this_week} style={s.statCardValue} />
-              <Text style={s.statCardLabel}>THIS WEEK</Text>
-            </View>
-            <View style={s.statCard}>
-              <CountUp value={stats.avg_depth_score} style={[s.statCardValue, { color: trend?.color }]} />
-              <Text style={s.statCardLabel}>AVG DEPTH</Text>
-            </View>
+          {/* 1. Hero Score */}
+          <View style={ms.heroCard}>
+            <Text style={ms.heroNumber}>{heroMultiplier.toFixed(2)}×</Text>
+            <Text style={ms.heroLabel}>Compound Growth</Text>
+            <Text style={[ms.heroSub, { color: heroChange >= 0 ? colors.success : colors.error }]}>
+              {heroChange >= 0 ? '↑' : '↓'} {Math.abs(heroChange).toFixed(2)} from last week
+            </Text>
           </View>
 
+          {/* 2. Week-at-a-Glance Strip */}
+          <View style={ms.strip}>
+            <StripItem value={sessionsThisWeek} label="Sessions" />
+            <View style={ms.stripDivider} />
+            <StripItem value={`${stats.hours.this_week}h`} label="Hours" />
+            <View style={ms.stripDivider} />
+            <StripItem value={stats.avg_depth_score != null ? Math.round(stats.avg_depth_score) : '—'} label="Avg Depth" />
+            <View style={ms.stripDivider} />
+            <StripItem value={totalEntries} label="All Time" />
+          </View>
+
+          {/* 3. 1% Daily Compound Chart */}
           <View style={s.card}>
             <Text style={s.cardLabel}>1% DAILY COMPOUND</Text>
-            <CompoundingChart stats={stats} />
+            <CompoundingChart stats={stats} height={240} />
           </View>
 
+          {/* 4. Weekly Review CTA */}
+          <Animated.View style={weeklyReviewScale.animStyle}>
+            <TouchableOpacity
+              style={ms.reviewCard}
+              activeOpacity={0.7}
+              onPress={() => { haptic.selection(); navigation.navigate('WeeklyReview'); }}
+              onPressIn={weeklyReviewScale.onPressIn}
+              onPressOut={weeklyReviewScale.onPressOut}
+            >
+              <View style={ms.reviewLeft}>
+                <Text style={ms.reviewEmoji}>📋</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={ms.reviewTitle}>Weekly Review</Text>
+                  <Text style={ms.reviewSub}>AI-generated grade, analysis, and next week's focus</Text>
+                </View>
+              </View>
+              <Text style={ms.reviewArrow}>›</Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* 5. Pillar Health */}
           <View style={s.card}>
-            <Text style={s.cardLabel}>PILLARS</Text>
-            {stats.pillar_breakdown.map((p, i) => (
-              <PillarCard key={p.pillar_id} pillar={p} totalHours={stats.hours.all_time}
-                isLast={i === stats.pillar_breakdown.length - 1}
-                onPress={() => {
-                  haptic.selection();
-                  navigation.navigate('PillarDetail', { pillarId: p.pillar_id, pillarName: p.pillar_name });
-                }} />
+            <Text style={s.cardLabel}>PILLAR HEALTH</Text>
+            {stats.pillar_breakdown.map(p => (
+              <PillarHealthRow key={p.pillar_id} pillar={p} recentEntries={recentEntries} />
             ))}
           </View>
 
-          <View style={s.card}>
-            <Text style={s.cardLabel}>PILLAR BALANCE</Text>
-            <View style={{ alignItems: 'center' }}>
-              <RadarChart data={stats.pillar_breakdown.map(p => ({
-                pillar_id: p.pillar_id, pillar_name: p.pillar_name,
-                score: Math.min(100, (p.total_hours * 2 + (p.avg_depth_score || 0)) / 3 * 1.5),
-              }))} />
-            </View>
-          </View>
-
-          <View style={s.card}>
-            <Text style={s.cardLabel}>DEPTH — 90 DAYS</Text>
-            <DepthChart data={depthData} />
-          </View>
-
-          {stats.streaks.length > 0 && (
-            <View style={s.card}>
-              <Text style={s.cardLabel}>STREAKS</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -spacing.sm }}>
-                <View style={{ flexDirection: 'row', gap: spacing.md, paddingHorizontal: spacing.sm }}>
-                  {stats.streaks.map(sk => {
-                    const pct = sk.longest_streak > 0 ? Math.min(100, (sk.current_streak / sk.longest_streak) * 100) : 0;
-                    const pillarColor = PILLAR_COLORS[sk.pillar_id] || colors.warning;
-                    return (
-                      <View key={sk.id} style={s.streakRing}>
-                        {/* Ring background */}
-                        <View style={[s.ringTrack, { borderColor: 'rgba(255,255,255,0.05)' }]}>
-                          {/* Ring fill - simulated with border */}
-                          <View style={[s.ringTrack, {
-                            borderColor: pillarColor,
-                            borderTopColor: pct > 75 ? pillarColor : 'transparent',
-                            borderRightColor: pct > 50 ? pillarColor : 'transparent',
-                            borderBottomColor: pct > 25 ? pillarColor : 'transparent',
-                            position: 'absolute',
-                          }]} />
-                          <Text style={s.ringNum}>{sk.current_streak}</Text>
-                        </View>
-                        <Text style={s.ringLabel} numberOfLines={1}>{sk.pillar_name.split(' ')[0]}</Text>
-                        <Text style={s.ringBest}>best {sk.longest_streak}d</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            </View>
-          )}
-
+          {/* 6. Activity Heatmap (absorbs streaks) */}
           <View style={s.card}>
             <Text style={s.cardLabel}>ACTIVITY — 6 MONTHS</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -385,7 +438,6 @@ export default function ProgressScreen() {
                 </View>
               </View>
             </ScrollView>
-            {/* Tooltip */}
             {heatTooltip && (
               <View style={s.heatTooltip}>
                 <Text style={s.heatTooltipText}>
@@ -394,7 +446,6 @@ export default function ProgressScreen() {
                 </Text>
               </View>
             )}
-            {/* Legend */}
             <View style={s.heatLegend}>
               <Text style={s.heatLegendLabel}>Less</Text>
               {HEATMAP_COLORS.map((c, i) => (
@@ -404,84 +455,43 @@ export default function ProgressScreen() {
             </View>
           </View>
 
-          {/* Weekly Review card */}
-          <Animated.View style={weeklyReviewScale.animStyle}>
-            <TouchableOpacity
-              style={s.card}
-              activeOpacity={0.7}
-              onPress={() => { haptic.selection(); navigation.navigate('WeeklyReview'); }}
-              onPressIn={weeklyReviewScale.onPressIn}
-              onPressOut={weeklyReviewScale.onPressOut}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                  <Ionicons name="document-text-outline" size={18} color={colors.accent} />
-                  <Text style={s.cardLabel}>WEEKLY REVIEW</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </View>
-              <Text style={{ ...typography.caption, color: colors.textSecondary, marginTop: spacing.sm }}>
-                AI-generated board meeting — grade, analysis, and next week's focus
-              </Text>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Concept Mastery Map */}
-          {conceptProgress.length > 0 && conceptProgress.some((cp: any) => cp.total_concepts > 0) && (
-            <View style={s.card}>
-              <Text style={s.cardLabel}>MASTERY MAP</Text>
-              {conceptProgress.filter((cp: any) => cp.total_concepts > 0).map((cp: any) => (
-                <ConceptMasteryCard key={cp.pillar_id} cp={cp}
-                  onPress={() => {
-                    haptic.selection();
-                    navigation.navigate('PillarDetail', { pillarId: cp.pillar_id, pillarName: cp.pillar_name });
-                  }} />
-              ))}
-            </View>
-          )}
-
-          {/* Recent Sessions — swipe to delete */}
+          {/* 7. Recent Sessions */}
           {recentEntries.length > 0 && (
-            <View style={s.recentSection}>
-              <Text style={s.sectionLabel}>Recent Sessions</Text>
-              <Text style={[s.sectionHint, { marginBottom: spacing.sm }]}>Swipe left to delete</Text>
-              {recentEntries.slice(0, 10).map(entry => {
+            <View style={s.card}>
+              <Text style={s.cardLabel}>RECENT SESSIONS</Text>
+              {recentEntries.slice(0, 3).map(entry => {
                 const pillarIds: number[] = entry.pillar_tags || [];
-                const scorePct = entry.evaluation
-                  ? Math.round((entry.evaluation.depth_score + entry.evaluation.relevance_score) / 2)
-                  : null;
-                const onePercent = entry.evaluation?.one_percent_better;
+                const primaryPillarId = pillarIds[0];
+                const pillarColor = primaryPillarId ? (PILLAR_COLORS[primaryPillarId] || colors.textTertiary) : colors.textTertiary;
+                const depthScore = entry.evaluation?.depth_score;
+                const durationH = entry.time_invested_minutes >= 60
+                  ? `${(entry.time_invested_minutes / 60).toFixed(1)}h`
+                  : `${entry.time_invested_minutes}m`;
+                const dateStr = new Date(entry.entry_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 return (
-                  <SwipeableRow key={entry.id} onDelete={() => handleDeleteEntry(entry)}>
-                    <View style={s.entryRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.entryDesc} numberOfLines={1}>{entry.description}</Text>
-                        <View style={s.entryMeta}>
-                          <Text style={s.entryDate}>{entry.entry_date}</Text>
-                          <Text style={s.entryTime}>{entry.time_invested_minutes}m</Text>
-                          {pillarIds.map(pid => (
-                            <View key={pid} style={[s.entryPillarDot, { backgroundColor: PILLAR_COLORS[pid] || colors.textTertiary }]} />
-                          ))}
-                        </View>
-                      </View>
-                      {scorePct != null && (
-                        <View style={s.entryScore}>
-                          <Text style={[s.entryScoreText, { color: onePercent ? colors.success : colors.textTertiary }]}>
-                            {scorePct}
-                          </Text>
-                          {onePercent && <Ionicons name="arrow-up" size={10} color={colors.success} />}
-                        </View>
-                      )}
+                  <View key={entry.id} style={ms.sessionRow}>
+                    <View style={[ms.sessionDot, { backgroundColor: pillarColor }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={ms.sessionName} numberOfLines={1}>{entry.description}</Text>
+                      <Text style={ms.sessionMeta}>{dateStr} · {durationH}{primaryPillarId ? ` · ${stats.pillar_breakdown.find(p => p.pillar_id === primaryPillarId)?.pillar_name.split(' ')[0] ?? ''}` : ''}</Text>
                     </View>
-                  </SwipeableRow>
+                    {depthScore != null && (
+                      <Text style={ms.sessionDepth}>{Math.round(depthScore)}</Text>
+                    )}
+                  </View>
                 );
               })}
+              {recentEntries.length > 3 && (
+                <TouchableOpacity style={ms.seeAllRow} onPress={() => haptic.selection()}>
+                  <Text style={ms.seeAll}>See all sessions ›</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </>
       )}
 
-      {/* STRENGTH */}
+      {/* ── STRENGTH ── */}
       {activeSection === 'strength' && (
         grouped.map(mg => (
           <View key={mg.key} style={s.card}>
@@ -531,12 +541,11 @@ export default function ProgressScreen() {
         ))
       )}
 
-      {/* RUNNING */}
+      {/* ── RUNNING ── */}
       {activeSection === 'running' && (
         <>
           {runStats && runStats.total_runs > 0 ? (
             <>
-              {/* Mileage overview */}
               <View style={s.card}>
                 <Text style={s.sectionHeader}>MILEAGE</Text>
                 <View style={s.runStatsGrid}>
@@ -559,7 +568,6 @@ export default function ProgressScreen() {
                 </View>
               </View>
 
-              {/* Pace + Distance */}
               <View style={s.card}>
                 <Text style={s.sectionHeader}>PERFORMANCE</Text>
                 <View style={s.runStatsGrid}>
@@ -578,7 +586,6 @@ export default function ProgressScreen() {
                 </View>
               </View>
 
-              {/* PR Board */}
               {prs.length > 0 && (
                 <View style={s.card}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
@@ -607,11 +614,10 @@ export default function ProgressScreen() {
         </>
       )}
 
-      {/* DISCIPLINE */}
+      {/* ── DISCIPLINE ── */}
       {activeSection === 'discipline' && (
         disciplineData && disciplineData.habits.length > 0 ? (
           <>
-            {/* Discipline Score */}
             <View style={s.statsGrid}>
               <View style={s.statCard}>
                 <Text style={[s.statCardValue, { color: disciplineData.discipline_score >= 80 ? colors.success : disciplineData.discipline_score >= 60 ? colors.warning : colors.error }]}>
@@ -629,7 +635,6 @@ export default function ProgressScreen() {
               </View>
             </View>
 
-            {/* Per-habit stats */}
             <View style={s.card}>
               <Text style={s.cardLabel}>HABIT STREAKS</Text>
               {disciplineData.habits.map((h: any) => (
@@ -652,7 +657,6 @@ export default function ProgressScreen() {
               ))}
             </View>
 
-            {/* Completion heatmap per habit */}
             <View style={s.card}>
               <Text style={s.cardLabel}>COMPLETION MAP — 30 DAYS</Text>
               {disciplineData.habits.map((h: any) => {
@@ -685,7 +689,7 @@ export default function ProgressScreen() {
         )
       )}
 
-      {/* VISION */}
+      {/* ── VISION ── */}
       {activeSection === 'vision' && (
         <VisionEditor
           vision={vision}
@@ -696,7 +700,6 @@ export default function ProgressScreen() {
 
       <View style={{ height: 40 }} />
 
-      {/* Undo toast for entry deletion */}
       <UndoToast
         visible={undoToast.visible}
         message={undoToast.message}
@@ -727,7 +730,6 @@ function VisionEditor({
   const [saving, setSaving] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync when vision prop changes
   useEffect(() => {
     setVisionText(vision?.vision_text || '');
     setPillarTargets(vision?.pillar_targets || {});
@@ -778,7 +780,6 @@ function VisionEditor({
 
   return (
     <>
-      {/* North Star */}
       <View style={s.card}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
           <Ionicons name="compass-outline" size={16} color={colors.accent} />
@@ -796,7 +797,6 @@ function VisionEditor({
         />
       </View>
 
-      {/* Pillar Targets */}
       <View style={s.card}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
           <Ionicons name="flag-outline" size={16} color={colors.accent} />
@@ -829,7 +829,6 @@ function VisionEditor({
         )}
       </View>
 
-      {/* Anti-Goals */}
       <View style={s.card}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.md }}>
           <Ionicons name="close-circle-outline" size={16} color={colors.error} />
@@ -886,87 +885,11 @@ function buildHeatmapGrid(data: HeatmapDay[]): (HeatmapDay | null)[][] {
   return weeks;
 }
 
-function PillarCard({ pillar: p, totalHours, isLast, onPress }: {
-  pillar: any; totalHours: number; isLast: boolean; onPress: () => void;
-}) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const pillarColor = PILLAR_COLORS[p.pillar_id] || colors.textTertiary;
-  const totalPct = totalHours > 0 ? (p.total_hours / totalHours) * 100 : 0;
-  return (
-    <Animated.View style={animStyle}>
-      <TouchableOpacity
-        style={[s.pillarCard, !isLast && s.divider]}
-        activeOpacity={0.7}
-        onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-      >
-        <View style={s.pillarHeader}>
-          <View style={[s.dot, { backgroundColor: pillarColor }]} />
-          <Text style={s.pillarName}>{p.pillar_name}</Text>
-          <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={{ marginLeft: 4 }} />
-          <Text style={s.pillarHours}>{p.total_hours}h</Text>
-        </View>
-        <View style={s.pillarBarTrack}>
-          <View style={[s.pillarBarFill, { width: `${totalPct}%` as any, backgroundColor: pillarColor }]} />
-        </View>
-        <View style={s.pillarFooter}>
-          <Text style={s.pillarMeta}>{p.entry_count} entries</Text>
-          {p.avg_depth_score != null && (
-            <Text style={s.pillarMeta}>depth {p.avg_depth_score}</Text>
-          )}
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
-
-function ConceptMasteryCard({ cp, onPress }: { cp: any; onPress: () => void }) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const pillarColor = PILLAR_COLORS[cp.pillar_id] || colors.textTertiary;
-  const masteredPct = cp.total_concepts > 0 ? (cp.mastered / cp.total_concepts) * 100 : 0;
-  const inProgressPct = cp.total_concepts > 0 ? (cp.in_progress / cp.total_concepts) * 100 : 0;
-  return (
-    <Animated.View style={animStyle}>
-      <TouchableOpacity
-        style={[s.pillarCard, { paddingVertical: spacing.sm }]}
-        activeOpacity={0.7}
-        onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            <View style={[s.dot, { backgroundColor: pillarColor }]} />
-            <Text style={s.pillarName}>{cp.pillar_name}</Text>
-          </View>
-          <Text style={{ ...typography.micro, color: colors.textTertiary }}>
-            {cp.mastered}/{cp.total_concepts}
-            {cp.recently_touched > 0 ? ` \u00B7 ${cp.recently_touched} active` : ''}
-          </Text>
-        </View>
-        <View style={[s.pillarBarTrack, { height: 6 }]}>
-          <View style={[s.pillarBarFill, {
-            width: `${masteredPct + inProgressPct}%` as any,
-            backgroundColor: pillarColor + '40',
-            position: 'absolute', left: 0, top: 0, bottom: 0,
-            borderRadius: 3,
-          }]} />
-          <View style={[s.pillarBarFill, {
-            width: `${masteredPct}%` as any,
-            backgroundColor: pillarColor,
-          }]} />
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
+// ---- Shared styles ----
 
 const s = StyleSheet.create({
   scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingBottom: 40 },
-  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.md },
 
   sectionTabsScroll: { flexGrow: 0, marginBottom: spacing.lg },
   sectionTabs: { flexDirection: 'row', gap: spacing.xs, paddingRight: spacing.lg },
@@ -985,6 +908,7 @@ const s = StyleSheet.create({
   sectionHeader: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
   divider: { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: spacing.md, marginBottom: spacing.md },
 
+  // Discipline stat cards (unchanged)
   statsGrid: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
   statCard: {
     flex: 1, backgroundColor: colors.card, borderRadius: radius.lg,
@@ -992,28 +916,6 @@ const s = StyleSheet.create({
   },
   statCardValue: { fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
   statCardLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 4 },
-
-  pillarCard: { paddingVertical: spacing.sm },
-  pillarHeader: { flexDirection: 'row', alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.sm },
-  pillarName: { ...typography.body, color: colors.text, fontWeight: '600', flex: 1 },
-  pillarHours: { ...typography.bodyBold, color: colors.text, fontVariant: ['tabular-nums'] },
-  pillarBarTrack: {
-    height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.05)',
-    marginTop: spacing.xs, marginLeft: spacing.md + 8,
-  },
-  pillarBarFill: { height: '100%', borderRadius: 2 },
-  pillarFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, marginLeft: spacing.md + 8 },
-  pillarMeta: { ...typography.caption, color: colors.textTertiary },
-
-  streakRing: { alignItems: 'center', width: 72 },
-  ringTrack: {
-    width: 56, height: 56, borderRadius: 28, borderWidth: 3,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  ringNum: { fontSize: 20, fontWeight: '700', color: colors.text },
-  ringLabel: { ...typography.micro, color: colors.textSecondary, marginTop: 4 },
-  ringBest: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
 
   heatmapMonths: { flexDirection: 'row', gap: 2, marginBottom: 2, height: 16 },
   heatMonthLabel: { ...typography.micro, color: colors.textTertiary, fontSize: 9 },
@@ -1046,7 +948,6 @@ const s = StyleSheet.create({
   emptyTitle: { ...typography.title3, color: colors.text },
   emptySubtitle: { ...typography.body, color: colors.textTertiary },
 
-  // Running section
   runStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   runStatBox: {
     flex: 1, minWidth: '28%' as any, alignItems: 'center', paddingVertical: spacing.md,
@@ -1061,28 +962,200 @@ const s = StyleSheet.create({
   prLabel: { ...typography.caption, color: colors.textSecondary, flex: 1 },
   prTime: { fontSize: 16, fontWeight: '600', color: colors.accent, fontVariant: ['tabular-nums'], flex: 1, textAlign: 'center' },
   prDate: { ...typography.micro, color: colors.textTertiary, flex: 1, textAlign: 'right' },
-
-  // Recent sessions
-  recentSection: { marginTop: spacing.xl },
-  sectionLabel: { ...typography.bodyBold, color: colors.text, marginBottom: 2 },
-  sectionHint: { ...typography.micro, color: colors.textTertiary },
-  entryRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: spacing.md, paddingHorizontal: spacing.md,
-    backgroundColor: colors.card, borderRadius: radius.md,
-    marginBottom: spacing.xs,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  entryDesc: { ...typography.body, color: colors.text },
-  entryMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 3 },
-  entryDate: { ...typography.micro, color: colors.textTertiary },
-  entryTime: { ...typography.micro, color: colors.textSecondary, fontWeight: '600' },
-  entryPillarDot: { width: 8, height: 8, borderRadius: 4 },
-  entryScore: { alignItems: 'center', marginLeft: spacing.sm },
-  entryScoreText: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] as any },
 });
 
-// Discipline-specific styles
+// ---- Mastery-section styles ----
+
+const ms = StyleSheet.create({
+  // Hero Score
+  heroCard: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  heroNumber: {
+    fontSize: 56,
+    fontWeight: '700',
+    color: colors.accentLight,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -2,
+  },
+  heroLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  heroSub: {
+    ...typography.caption,
+    marginTop: spacing.xs,
+    fontWeight: '600',
+  },
+
+  // Week Strip
+  strip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.card,
+  },
+  stripItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  stripValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
+  stripLabel: {
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginTop: 3,
+  },
+  stripDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: colors.border,
+  },
+
+  // Weekly Review CTA
+  reviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(99,102,241,0.06)',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.18)',
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  reviewLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    flex: 1,
+  },
+  reviewEmoji: {
+    fontSize: 22,
+  },
+  reviewTitle: {
+    ...typography.bodyBold,
+    color: colors.text,
+  },
+  reviewSub: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  reviewArrow: {
+    fontSize: 22,
+    color: colors.textTertiary,
+    marginLeft: spacing.sm,
+  },
+
+  // Pillar Health rows
+  pillarHealthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  pillarHealthDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  pillarHealthName: {
+    ...typography.caption,
+    color: colors.text,
+    fontWeight: '600',
+    width: 80,
+  },
+  pillarHealthMeta: {
+    ...typography.micro,
+    color: colors.textTertiary,
+    flex: 1,
+  },
+  depthBar: {
+    width: 80,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    overflow: 'hidden',
+  },
+  depthBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  depthNum: {
+    ...typography.micro,
+    color: colors.textSecondary,
+    fontWeight: '700',
+    width: 24,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+  trendArrow: {
+    fontSize: 14,
+    fontWeight: '700',
+    width: 16,
+    textAlign: 'center',
+  },
+
+  // Recent Sessions
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sessionDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  sessionName: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  sessionMeta: {
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
+  sessionDepth: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+    minWidth: 30,
+    textAlign: 'right',
+  },
+  seeAllRow: {
+    paddingTop: spacing.md,
+    alignItems: 'flex-end',
+  },
+  seeAll: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: '600',
+  },
+});
+
+// ---- Discipline styles ----
+
 const ds = StyleSheet.create({
   habitStatRow: {
     flexDirection: 'row',
@@ -1122,7 +1195,8 @@ const ds = StyleSheet.create({
   },
 });
 
-// Vision-specific styles
+// ---- Vision styles ----
+
 const vs = StyleSheet.create({
   visionInput: {
     ...typography.body,
