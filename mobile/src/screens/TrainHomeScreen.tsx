@@ -174,9 +174,9 @@ export default function TrainHomeScreen({ navigation }: any) {
               {DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type}
             </Text>
             <View style={styles.heroMeta}>
-              {todayWorkout.whoop_recovery_score != null && (
+              {(whoopData?.recovery_score ?? todayWorkout.whoop_recovery_score) != null && (
                 <Text style={styles.heroMetaText}>
-                  Recovery {todayWorkout.whoop_recovery_score.toFixed(0)}%
+                  Recovery {(whoopData?.recovery_score ?? todayWorkout.whoop_recovery_score)!.toFixed(0)}%
                 </Text>
               )}
               <Text style={styles.heroMetaText}>
