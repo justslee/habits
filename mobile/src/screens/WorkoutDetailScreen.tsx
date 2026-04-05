@@ -74,14 +74,14 @@ export default function WorkoutDetailScreen({ route }: any) {
     try {
       const data = await getWorkoutSession(sessionId);
       setSession(data);
-      // Fetch Whoop data for the session's date (historical), fall back to live
+      // Prefer live WHOOP data; fall back to historical snapshot for past sessions
       try {
-        const snapshot = await getWhoopSnapshot(data.session_date);
-        setWhoopData(snapshot);
+        const live = await getWhoopData();
+        setWhoopData(live);
       } catch {
         try {
-          const live = await getWhoopData();
-          setWhoopData(live);
+          const snapshot = await getWhoopSnapshot(data.session_date);
+          setWhoopData(snapshot);
         } catch { /* no whoop data available */ }
       }
     } catch (err) {
