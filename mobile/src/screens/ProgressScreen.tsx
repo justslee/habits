@@ -191,6 +191,7 @@ export default function ProgressScreen() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<Section>('mastery');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heatmapScrollRef = useRef<ScrollView>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -389,7 +390,12 @@ export default function ProgressScreen() {
           {/* 6. Activity Heatmap (absorbs streaks) */}
           <View style={s.card}>
             <Text style={s.cardLabel}>ACTIVITY — 6 MONTHS</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView
+              ref={heatmapScrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              onContentSizeChange={() => heatmapScrollRef.current?.scrollToEnd({ animated: false })}
+            >
               <View>
                 {/* Month labels */}
                 <View style={s.heatmapMonths}>

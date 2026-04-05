@@ -157,32 +157,34 @@ export default function CompoundingChart({
         </View>
       )}
 
-      {/* Timeframe selector + legend row */}
+      {/* Legend row */}
       {!compact && (
-        <View style={styles.bottomRow}>
-          <View style={styles.legend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendLine, { backgroundColor: '#818CF8' }]} />
-              <Text style={styles.legendText}>Your progress</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendLine, { backgroundColor: '#555', opacity: 0.8 }]} />
-              <Text style={styles.legendText}>1% daily (ideal)</Text>
-            </View>
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendLine, { backgroundColor: '#818CF8' }]} />
+            <Text style={styles.legendText}>Your progress</Text>
           </View>
-          <View style={styles.timeRow}>
-            {TIMEFRAMES.map((tf) => (
-              <TouchableOpacity
-                key={tf.days}
-                style={[styles.timeChip, timeframe === tf.days && styles.timeChipActive]}
-                onPress={() => setTimeframe(tf.days)}
-              >
-                <Text style={[styles.timeText, timeframe === tf.days && styles.timeTextActive]}>
-                  {tf.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.legendItem}>
+            <View style={[styles.legendLine, { backgroundColor: '#555', opacity: 0.8 }]} />
+            <Text style={styles.legendText}>1% daily (ideal)</Text>
           </View>
+        </View>
+      )}
+
+      {/* Timeframe toggle row */}
+      {!compact && (
+        <View style={styles.timeRow}>
+          {TIMEFRAMES.map((tf) => (
+            <TouchableOpacity
+              key={tf.days}
+              style={[styles.timeChip, timeframe === tf.days && styles.timeChipActive]}
+              onPress={() => setTimeframe(tf.days)}
+            >
+              <Text style={[styles.timeText, timeframe === tf.days && styles.timeTextActive]}>
+                {tf.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       )}
     </View>
@@ -197,12 +199,11 @@ const styles = StyleSheet.create({
   },
   tooltipLabel: { fontSize: 10, color: '#999', marginBottom: 2 },
   tooltipVal: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] as any },
-  bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
-  legend: { flexDirection: 'row', gap: 12 },
+  legend: { flexDirection: 'row', gap: 16, justifyContent: 'center', marginTop: 10 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendLine: { width: 16, height: 3, borderRadius: 1 },
   legendText: { fontSize: 11, color: '#666' },
-  timeRow: { flexDirection: 'row', gap: 6 },
+  timeRow: { flexDirection: 'row', gap: 6, justifyContent: 'center', marginTop: 8 },
   timeChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12,
     backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333',
