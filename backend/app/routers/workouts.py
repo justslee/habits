@@ -167,7 +167,7 @@ async def get_today_plan(db: Session = Depends(get_db)):
     try:
         from app.services.whoop import fetch_whoop_data, cache_whoop_snapshot
         whoop_data = await fetch_whoop_data()
-        cache_whoop_snapshot(user.id, db, whoop_data)
+        cache_whoop_snapshot(user.id, whoop_data, db)
     except Exception:
         pass  # Whoop unavailable — continue without it
 
