@@ -19,6 +19,7 @@ from app.models.vision import Vision
 from app.models.concept import PillarConcept
 from app.models.concept_touch import ConceptTouch
 from app.models.speaking import SpeakingSession, SpeakingEvaluation
+from app.models.coaching import CoachingObservation
 
 __all__ = [
     "Base",
@@ -50,4 +51,5 @@ __all__ = [
     "ConceptTouch",
     "SpeakingSession",
     "SpeakingEvaluation",
+    "CoachingObservation",
 ]

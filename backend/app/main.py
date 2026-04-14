@@ -7,7 +7,7 @@ import time
 from dotenv import load_dotenv
 
 from pathlib import Path as _Path
-load_dotenv(_Path(__file__).resolve().parent.parent / ".env")  # Load .env before anything reads os.getenv
+load_dotenv(_Path(__file__).resolve().parent.parent / ".env", override=True)  # override=True so .env wins over empty shell vars
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

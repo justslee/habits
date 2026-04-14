@@ -28,6 +28,71 @@ DELOAD_CYCLE_WEEKS = 4  # deload every N weeks
 MEV = {"push": 10, "pull": 10, "legs": 10}  # Minimum Effective Volume
 MRV = {"push": 22, "pull": 22, "legs": 22}  # Maximum Recoverable Volume
 
+# ---------------------------------------------------------------------------
+# Macro periodization
+# ---------------------------------------------------------------------------
+
+MACRO_BLOCKS: dict[str, dict] = {
+    "hypertrophy": {
+        "weeks": 4,
+        "rep_range": (8, 12),
+        "set_range": (3, 4),
+        "intensity_pct": 0.72,
+        "description": "Volume accumulation — 8-12 reps, 70-75% 1RM",
+    },
+    "strength": {
+        "weeks": 4,
+        "rep_range": (3, 6),
+        "set_range": (4, 5),
+        "intensity_pct": 0.85,
+        "description": "Neural adaptation — 3-6 reps, 80-90% 1RM",
+    },
+    "peaking": {
+        "weeks": 3,
+        "rep_range": (1, 3),
+        "set_range": (4, 5),
+        "intensity_pct": 0.93,
+        "description": "Max strength expression — 1-3 reps, 90-100% 1RM",
+    },
+}
+MACRO_BLOCK_ORDER = ["hypertrophy", "strength", "peaking"]
+
+
+def get_block_rep_target(macro_block: str) -> int:
+    """Middle of the rep range for the given macro block."""
+    cfg = MACRO_BLOCKS.get(macro_block, MACRO_BLOCKS["hypertrophy"])
+    lo, hi = cfg["rep_range"]
+    return (lo + hi) // 2
+
+
+def get_block_set_target(macro_block: str) -> int:
+    """Default set count for the given macro block."""
+    cfg = MACRO_BLOCKS.get(macro_block, MACRO_BLOCKS["hypertrophy"])
+    lo, hi = cfg["set_range"]
+    return (lo + hi) // 2
+
+
+def _advance_macro_block(profile: ExerciseProfile) -> None:
+    """Cycle to the next macro block after a deload completes."""
+    current = getattr(profile, "macro_block", None) or "hypertrophy"
+    try:
+        idx = MACRO_BLOCK_ORDER.index(current)
+        next_block = MACRO_BLOCK_ORDER[(idx + 1) % len(MACRO_BLOCK_ORDER)]
+    except ValueError:
+        next_block = "hypertrophy"
+
+    profile.macro_block = next_block
+    profile.macro_block_week = 1
+    profile.current_rep_target = get_block_rep_target(next_block)
+    profile.current_set_target = get_block_set_target(next_block)
+
+    logger.info(
+        "Exercise %s → %s block (reps: %s)",
+        profile.exercise_name,
+        next_block,
+        MACRO_BLOCKS[next_block]["rep_range"],
+    )
+
 
 def estimate_1rm(weight: float, reps: int) -> float:
     """Estimate 1RM using Epley formula: weight × (1 + reps/30)."""
@@ -250,11 +315,53 @@ def update_profile_after_session(
         if profile.mesocycle_phase != "deload":
             profile.mesocycle_phase = "deload"
         else:
+            # Deload complete — advance macro block and reset mesocycle
             profile.mesocycle_phase = "accumulation"
             profile.mesocycle_week = 1
+            _advance_macro_block(profile)
+
+    # Increment macro_block_week (separate from mesocycle)
+    if profile.mesocycle_phase != "deload":
+        current_block = getattr(profile, "macro_block", "hypertrophy")
+        block_max = MACRO_BLOCKS.get(current_block, {}).get("weeks", 4)
+        new_block_week = (getattr(profile, "macro_block_week", 1) or 1) + 1
+        if new_block_week <= block_max:
+            profile.macro_block_week = new_block_week
 
     db.commit()
     return profile
+
+
+def update_profiles_after_session(
+    session: WorkoutSession,
+    db: Session,
+) -> list[ExerciseProfile]:
+    """Update all exercise profiles touched in a completed session.
+
+    This is the plural form called from workout_chat.py after session_complete.
+    Delegates to update_profile_after_session for each exercise.
+    """
+    exercise_names = {
+        log.exercise_name
+        for log in session.exercises
+        if not log.is_warmup and log.exercise_name
+    }
+
+    updated = []
+    for name in exercise_names:
+        profile = (
+            db.query(ExerciseProfile)
+            .filter(
+                ExerciseProfile.user_id == session.user_id,
+                ExerciseProfile.exercise_name == name,
+            )
+            .first()
+        )
+        if profile:
+            session_logs = [l for l in session.exercises if l.exercise_name == name]
+            updated.append(update_profile_after_session(profile, session_logs, db))
+
+    return updated
 
 
 def get_weekly_volume(user_id: int, muscle_group: str, db: Session) -> dict:

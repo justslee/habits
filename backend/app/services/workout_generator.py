@@ -1,7 +1,8 @@
 """AI Workout Generator — "The Coach" (P2-2).
 
 Generates complete workout plans using tool_use structured outputs.
-Integrates progressive overload data and Whoop recovery.
+System prompt is built dynamically based on the current macro block,
+athlete profile, weak points, and coaching observations.
 """
 
 import logging
@@ -10,9 +11,10 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.workout import ExerciseProfile, WorkoutSession
+from app.models.workout import ExerciseProfile
 from app.services.llm import SONNET, structured_output
 from app.services.progressive_overload import (
+    MACRO_BLOCKS,
     calculate_warmup_sets,
     get_next_session_targets,
 )
@@ -20,33 +22,30 @@ from app.services.whoop import get_recovery_adjustment
 
 logger = logging.getLogger(__name__)
 
-# Day type → muscle groups
+# ---------------------------------------------------------------------------
+# Exercise menus
+# ---------------------------------------------------------------------------
+
+# Core exercises per day type
 DAY_EXERCISES: dict[str, list[str]] = {
-    "push": ["Bench Press", "OHP", "Incline DB Press", "Tricep Pushdowns", "Lateral Raises"],
-    "pull": ["Barbell Row", "Pull-ups", "Seated Cable Row", "Barbell Curl", "Face Pulls"],
-    "legs": ["Squat", "RDL", "Leg Press", "Walking Lunges", "Calf Raises"],
+    "push":  ["Bench Press", "OHP", "Incline DB Press", "Tricep Pushdowns", "Lateral Raises"],
+    "pull":  ["Barbell Row", "Pull-ups", "Seated Cable Row", "Barbell Curl", "Face Pulls"],
+    "legs":  ["Squat", "RDL", "Leg Press", "Walking Lunges", "Calf Raises"],
     "cardio": ["Easy Jog", "Intervals"],
 }
 
-COACH_SYSTEM_PROMPT = """You are an elite strength and conditioning coach working with a hybrid athlete.
-Your client trains Push on Monday, Cardio on Tuesday, Legs+Core on Wednesday, rests Thursday, Pull+Core on Friday, plays competitive basketball Saturday, and rests Sunday. Sunday is ALWAYS a full rest day. Every lift day begins with a 10-15 min easy jog for mental focus.
-
-Your programming philosophy:
-- Progressive overload is the foundation. Every session attempts to progress from the last — via weight, reps, or quality.
-- Periodize in 4-6 week mesocycles. Manage fatigue, don't just accumulate it.
-- Target RPE 7-8 on working sets. Build strength, don't test it every session.
-- Account for cross-day recovery: Saturday basketball impacts Monday readiness. Tuesday pull affects Wednesday legs.
-- Prioritize compound lifts. Use accessories to address specific weaknesses.
-- When recovery is low, reduce volume or prescribe active recovery. Never push through bad recovery.
-- NO TRICEP DIPS — they hurt the athlete's shoulders. Use pushdowns, skull crushers, or overhead extensions instead.
-
-Your communication style:
-- Direct, authoritative, no fluff. Speak like a coach, not a chatbot.
-- Explain the WHY behind every programming decision briefly.
-- Be honest when progress stalls — diagnose the issue, don't just encourage.
-- Celebrate real PRs and milestones. Ignore fake effort.
-
-Use the submit_workout_plan tool to return the structured workout plan."""
+# Sport-specific additions keyed by (day_type, macro_block_or_"all")
+SPORT_SPECIFIC_EXERCISES: dict[str, dict[str, list[str]]] = {
+    "legs": {
+        # Plyometrics during strength/peaking for athletic carryover
+        "strength": ["Box Jumps", "Jump Squats"],
+        "peaking":  ["Box Jumps", "Depth Jumps"],
+    },
+    "pull": {
+        # Rotational power every pull day for basketball
+        "all": ["Pallof Press", "Cable Woodchops"],
+    },
+}
 
 WORKOUT_PLAN_SCHEMA = {
     "type": "object",
@@ -56,12 +55,12 @@ WORKOUT_PLAN_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "sets": {"type": "integer"},
-                    "reps": {"type": "string", "description": "Reps as int or range like '8-12'"},
-                    "weight": {"type": "number", "description": "Weight in lbs, or 0 if bodyweight"},
+                    "name":         {"type": "string"},
+                    "sets":         {"type": "integer"},
+                    "reps":         {"type": "string", "description": "Reps as int or range '8-12'"},
+                    "weight":       {"type": "number", "description": "Weight in lbs, 0 if bodyweight"},
                     "rest_seconds": {"type": "integer"},
-                    "notes": {"type": "string"},
+                    "notes":        {"type": "string"},
                 },
                 "required": ["name", "sets", "reps", "rest_seconds"],
             },
@@ -70,17 +69,75 @@ WORKOUT_PLAN_SCHEMA = {
             "type": "object",
             "properties": {
                 "minutes": {"type": "integer"},
-                "pace": {"type": "string"},
+                "pace":    {"type": "string"},
             },
             "required": ["minutes", "pace"],
             "description": "Pre-workout jog. Omit for cardio days.",
         },
-        "coach_notes": {"type": "string", "description": "2-3 sentences about today's session focus"},
+        "coach_notes":                {"type": "string", "description": "2-3 sentences about today's focus"},
         "estimated_duration_minutes": {"type": "integer"},
     },
     "required": ["exercises", "coach_notes", "estimated_duration_minutes"],
 }
 
+
+# ---------------------------------------------------------------------------
+# Dynamic system prompt (2C)
+# ---------------------------------------------------------------------------
+
+def _build_coach_system_prompt(current_block: str) -> str:
+    """Build a dynamic system prompt based on the current macro training block."""
+    block_cfg = MACRO_BLOCKS.get(current_block, MACRO_BLOCKS["hypertrophy"])
+    rep_lo, rep_hi = block_cfg["rep_range"]
+    intensity = int(block_cfg["intensity_pct"] * 100)
+
+    block_guidance = {
+        "hypertrophy": (
+            f"HYPERTROPHY BLOCK — {rep_lo}-{rep_hi} reps at {intensity}% 1RM.\n"
+            "Short rest (60-90s isolation, 120s compounds). Accumulate volume.\n"
+            "Every working set ends at RPE 7-8 — leave 2 in the tank."
+        ),
+        "strength": (
+            f"STRENGTH BLOCK — {rep_lo}-{rep_hi} reps at {intensity}% 1RM.\n"
+            "Full rest (3-5 min on compounds). Quality over quantity.\n"
+            "Focus on bar speed and perfect technique under load."
+        ),
+        "peaking": (
+            f"PEAKING BLOCK — {rep_lo}-{rep_hi} reps at {intensity}% 1RM.\n"
+            "Full recovery between sets (5 min). No fatigue during working sets.\n"
+            "Perfect technique is non-negotiable at these loads."
+        ),
+        "deload": (
+            "DELOAD WEEK — 60% working weight, same reps, fewer sets.\n"
+            "This is not a test. Move well, flush fatigue, prepare to rebuild.\n"
+            "Body adapts during recovery, not during training."
+        ),
+    }
+
+    return f"""You are an elite strength and conditioning coach working with a hybrid athlete.
+
+Schedule: Push (Mon), Pull (Tue), Legs+Core (Wed), Rest (Thu), Cardio/Pull+Core (Fri), Basketball (Sat), Rest (Sun).
+Every lift day starts with a 10-15 min easy jog for mental focus and movement prep.
+
+Current macrocycle: {block_guidance.get(current_block, block_guidance['hypertrophy'])}
+
+Programming rules:
+- Progressive overload is the foundation — every session attempts progress (weight, reps, or quality).
+- Saturday basketball impacts Monday readiness — adjust Monday volume accordingly.
+- Prioritize compounds. Use accessories to address flagged weaknesses.
+- Recovery < 50%: reduce volume 20-30%. Recovery < 34%: active recovery only, no lifting.
+- NO TRICEP DIPS — shoulder injury. Use pushdowns, skull crushers, or overhead extensions.
+- Basketball athlete needs: hip stability, rotational power, ankle mobility, single-leg strength.
+  → Legs day includes plyometrics during strength/peaking blocks.
+  → Pull day includes rotational core work every session.
+
+Communication: Direct, brief. One sentence on the WHY per exercise.
+Use the submit_workout_plan tool to return the structured plan."""
+
+
+# ---------------------------------------------------------------------------
+# Context builder (delegates to coach_context for rich data)
+# ---------------------------------------------------------------------------
 
 def _build_workout_context(
     user_id: int,
@@ -88,49 +145,15 @@ def _build_workout_context(
     recovery_data: Optional[dict],
     db: Session,
 ) -> str:
-    """Build context string for the Coach LLM prompt."""
-    profiles = (
-        db.query(ExerciseProfile)
-        .filter(ExerciseProfile.user_id == user_id)
-        .all()
-    )
-    profile_map = {p.exercise_name: p for p in profiles}
+    """Build the user-message context string for the Coach LLM."""
+    # Lazy import to avoid circular dependency
+    from app.services.coach_context import build_workout_context as _rich_ctx
+    return _rich_ctx(db=db, user_id=user_id, day_type=day_type, recovery_data=recovery_data)
 
-    # Recovery adjustment
-    recovery_score = recovery_data.get("recovery_score") if recovery_data else None
-    adjustment = get_recovery_adjustment(recovery_score)
 
-    lines = [f"Day type: {day_type.upper()}"]
-    lines.append(f"Recovery: {adjustment['level']} — {adjustment['note']}")
-
-    if recovery_data:
-        lines.append(
-            f"Whoop: Recovery {recovery_data.get('recovery_score', '?')}%, "
-            f"HRV {recovery_data.get('hrv', '?')}ms, "
-            f"RHR {recovery_data.get('resting_hr', '?')}bpm, "
-            f"Sleep {recovery_data.get('sleep_score', '?')}%"
-        )
-
-    lines.append(f"\nVolume modifier: {adjustment['volume_modifier']}x")
-    lines.append(f"Weight modifier: {adjustment['weight_modifier']}x")
-
-    # Exercise profiles with progression targets
-    exercises = DAY_EXERCISES.get(day_type, [])
-    lines.append("\nExercise targets:")
-    for ex_name in exercises:
-        profile = profile_map.get(ex_name)
-        if profile:
-            targets = get_next_session_targets(profile, db)
-            lines.append(
-                f"- {ex_name}: {targets['weight']} lbs × {targets['reps']} × {targets['sets']} "
-                f"(e1RM: {profile.estimated_1rm or '?'}, status: {profile.progression_status}, "
-                f"mesocycle wk {profile.mesocycle_week}/{profile.mesocycle_phase}) — {targets['rationale']}"
-            )
-        else:
-            lines.append(f"- {ex_name}: No profile yet (use moderate weight, establish baseline)")
-
-    return "\n".join(lines)
-
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 async def generate_workout_plan(
     user_id: int,
@@ -138,53 +161,76 @@ async def generate_workout_plan(
     recovery_data: Optional[dict],
     db: Session,
 ) -> dict[str, Any]:
-    """Generate a complete workout plan for the given day type.
-
-    Returns parsed plan dict with exercises, coach notes, etc.
-    """
+    """Generate a complete workout plan for the given day type."""
     if day_type == "rest":
         return {
             "exercises": [],
             "pre_jog": None,
-            "coach_notes": "Rest day. Active recovery: light walk, stretching, mobility work. Your body builds when it recovers.",
+            "coach_notes": (
+                "Rest day. Active recovery: light walk, stretching, mobility work. "
+                "Your body builds during recovery."
+            ),
             "estimated_duration_minutes": 0,
         }
 
-    context = _build_workout_context(user_id, day_type, recovery_data, db)
-
-    # Check if red recovery → active recovery only
     recovery_score = recovery_data.get("recovery_score") if recovery_data else None
     if recovery_score is not None and recovery_score < 34:
         return {
             "exercises": [
-                {"name": "Light Walk", "sets": 1, "reps": "20 min", "weight": None, "rest_seconds": 0, "notes": "Easy pace"},
+                {"name": "Light Walk",   "sets": 1, "reps": "20 min", "weight": None, "rest_seconds": 0, "notes": "Easy pace"},
                 {"name": "Foam Rolling", "sets": 1, "reps": "10 min", "weight": None, "rest_seconds": 0, "notes": "Full body"},
-                {"name": "Stretching", "sets": 1, "reps": "10 min", "weight": None, "rest_seconds": 0, "notes": "Focus on tight areas"},
+                {"name": "Stretching",   "sets": 1, "reps": "10 min", "weight": None, "rest_seconds": 0, "notes": "Focus tight areas"},
             ],
             "pre_jog": None,
-            "coach_notes": f"Recovery is critically low ({recovery_score}%). No lifting today. Active recovery only. Trust the process — rest IS training.",
+            "coach_notes": (
+                f"Recovery critically low ({recovery_score}%). No lifting today. "
+                "Active recovery only. Rest IS training."
+            ),
             "estimated_duration_minutes": 40,
         }
 
-    user_prompt = f"Generate today's {day_type} workout plan.\n\n{context}"
+    # Determine current macro block for this athlete
+    profiles = (
+        db.query(ExerciseProfile)
+        .filter(ExerciseProfile.user_id == user_id)
+        .all()
+    )
+    macro_blocks = [
+        getattr(p, "macro_block", "hypertrophy") or "hypertrophy" for p in profiles
+    ]
+    current_block = (
+        max(set(macro_blocks), key=macro_blocks.count) if macro_blocks else "hypertrophy"
+    )
+
+    system_prompt = _build_coach_system_prompt(current_block)
+    context = _build_workout_context(user_id, day_type, recovery_data, db)
+
+    user_prompt = f"Generate today's {day_type.upper()} workout.\n\n{context}"
 
     try:
         return await structured_output(
-            system=COACH_SYSTEM_PROMPT,
+            system=system_prompt,
             user_prompt=user_prompt,
             tool_name="submit_workout_plan",
-            tool_description="Submit the structured workout plan with exercises, sets, reps, weights, and coaching notes.",
+            tool_description=(
+                "Submit the structured workout plan with exercises, sets, reps, "
+                "weights, and coaching notes."
+            ),
             output_schema=WORKOUT_PLAN_SCHEMA,
             model=SONNET,
         )
     except Exception as e:
-        logger.error(f"Workout generation failed: {e}")
+        logger.error("Workout generation failed: %s", e)
         return _generate_fallback_plan(user_id, day_type, db)
 
 
+# ---------------------------------------------------------------------------
+# Fallback (no LLM)
+# ---------------------------------------------------------------------------
+
 def _generate_fallback_plan(user_id: int, day_type: str, db: Session) -> dict:
-    """Generate a basic plan without LLM (fallback)."""
-    exercises = DAY_EXERCISES.get(day_type, [])
+    """Generate a basic plan without LLM."""
+    exercises = list(DAY_EXERCISES.get(day_type, []))
     profiles = {
         p.exercise_name: p
         for p in db.query(ExerciseProfile)
@@ -193,26 +239,26 @@ def _generate_fallback_plan(user_id: int, day_type: str, db: Session) -> dict:
     }
 
     plan_exercises = []
-    for ex_name in exercises:
+    for i, ex_name in enumerate(exercises):
         profile = profiles.get(ex_name)
         if profile and profile.current_working_weight:
             targets = get_next_session_targets(profile, db)
             plan_exercises.append({
-                "name": ex_name,
-                "sets": targets["sets"],
-                "reps": targets["reps"],
-                "weight": targets["weight"],
-                "rest_seconds": 120 if exercises.index(ex_name) < 2 else 90,
-                "notes": targets["rationale"],
+                "name":         ex_name,
+                "sets":         targets["sets"],
+                "reps":         targets["reps"],
+                "weight":       targets["weight"],
+                "rest_seconds": 120 if i < 2 else 90,
+                "notes":        targets["rationale"],
             })
         else:
             plan_exercises.append({
-                "name": ex_name,
-                "sets": 3,
-                "reps": 8,
-                "weight": None,
+                "name":         ex_name,
+                "sets":         3,
+                "reps":         8,
+                "weight":       None,
                 "rest_seconds": 90,
-                "notes": "Establish baseline — use moderate weight.",
+                "notes":        "Establish baseline — moderate weight.",
             })
 
     return {
@@ -223,16 +269,20 @@ def _generate_fallback_plan(user_id: int, day_type: str, db: Session) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Schedule helper
+# ---------------------------------------------------------------------------
+
 def get_day_type_for_date(target_date: Optional[date] = None) -> str:
     """Get the scheduled day type based on the weekly template."""
     d = target_date or date.today()
     schedule = {
-        0: "push",       # Monday
-        1: "pull",       # Tuesday
-        2: "legs",       # Wednesday
-        3: "rest",       # Thursday
-        4: "cardio",     # Friday
-        5: "basketball", # Saturday
-        6: "rest",       # Sunday
+        0: "push",        # Monday
+        1: "pull",        # Tuesday
+        2: "legs",        # Wednesday
+        3: "rest",        # Thursday
+        4: "cardio",      # Friday
+        5: "basketball",  # Saturday
+        6: "rest",        # Sunday
     }
     return schedule[d.weekday()]

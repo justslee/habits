@@ -114,6 +114,24 @@ def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
     # Check for PRs
     _check_and_update_prs(run, db)
 
+    # Adaptive plan: mark planned run done, check A:C, adjust paces/volume
+    try:
+        planned = db.query(PlannedRun).filter(
+            PlannedRun.plan_id.in_(
+                db.query(TrainingPlan.id).filter(
+                    TrainingPlan.user_id == user.id,
+                    TrainingPlan.status == "active",
+                )
+            ),
+            PlannedRun.planned_date == run_date,
+            PlannedRun.status == "upcoming",
+        ).first()
+
+        from app.services.run_plan_adapter import adapt_plan_after_run
+        adapt_plan_after_run(user.id, run, planned, db)
+    except Exception:
+        pass  # Never fail the run save due to adaptation errors
+
     return _run_to_response(run)
 
 

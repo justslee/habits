@@ -14,11 +14,20 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.masterytracker.app",
+      "appleTeamId": "X3F694PQ8B",
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification",
           "location"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSExceptionDomains": {
+            "100.106.81.115": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        }
       }
     },
     "plugins": [
@@ -54,8 +63,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "653e2495-dae4-40b4-9227-1200f157eef5"
       }
-    }
+    },
+    "owner": "jlee627"
   }
 }

@@ -273,6 +273,12 @@ ATHLETE SAYS: {message}"""
         except Exception as e:
             logger.warning("Failed to update profiles after session: %s", e)
 
+        # Generate and persist coaching observations (2D)
+        try:
+            await _analyze_session_and_save_observations(session, db)
+        except Exception as e:
+            logger.warning("Failed to save session observations: %s", e)
+
     db.commit()
 
     return {
@@ -364,3 +370,137 @@ def _fallback_response(
         "parsed_sets": [],
         "session_summary": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Post-session observation analysis (2D)
+# ---------------------------------------------------------------------------
+
+_OBSERVATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "observations": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "observation": {
+                        "type": "string",
+                        "description": "Specific, actionable observation in 1-2 sentences",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence 0.0-1.0",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["strength", "running", "general"],
+                    },
+                },
+                "required": ["observation", "confidence", "category"],
+            },
+        },
+    },
+    "required": ["observations"],
+}
+
+
+async def _analyze_session_and_save_observations(
+    session: WorkoutSession,
+    db: Session,
+) -> None:
+    """Analyze planned-vs-actual and persist 2-3 coaching observations.
+
+    Called after session_complete.  Uses Haiku (cheap + fast) since this
+    is a background analysis step, not a real-time response.
+    """
+    from app.models.coaching import CoachingObservation
+    from app.services.llm import HAIKU, structured_output
+
+    working_sets = [e for e in session.exercises if not e.is_warmup]
+    if not working_sets:
+        return
+
+    # Build planned section
+    planned_str = ""
+    if session.ai_plan:
+        try:
+            plan = json.loads(session.ai_plan) if isinstance(session.ai_plan, str) else session.ai_plan
+            planned_exercises = plan.get("exercises", [])
+            if planned_exercises:
+                planned_str = "Planned:\n" + "\n".join(
+                    f"  {e.get('name')}: {e.get('sets')}×{e.get('reps')} "
+                    f"@ {e.get('weight', '?')}lbs"
+                    for e in planned_exercises
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Build actual section
+    exercise_groups: Dict[str, List[ExerciseLog]] = {}
+    for log in working_sets:
+        exercise_groups.setdefault(log.exercise_name, []).append(log)
+
+    actual_lines = ["Actual:"]
+    for name, logs in exercise_groups.items():
+        best_e1rm = max(
+            (estimate_1rm(l.weight or 0, l.reps or 0) for l in logs), default=0
+        )
+        max_weight = max((l.weight or 0) for l in logs)
+        max_reps   = max((l.reps   or 0) for l in logs)
+        actual_lines.append(
+            f"  {name}: {len(logs)} sets, "
+            f"top {max_weight:.0f}lbs×{max_reps}r, "
+            f"e1RM ~{best_e1rm:.0f}"
+        )
+    actual_str = "\n".join(actual_lines)
+
+    prompt = f"""Analyze this completed {session.day_type.upper()} session and generate 2-3 specific coaching observations.
+Be precise and data-driven. No vague encouragement — concrete patterns only.
+
+RPE: {session.overall_rpe or 'N/A'} | WHOOP recovery: {session.whoop_recovery_score or '?'}%
+
+{planned_str}
+
+{actual_str}
+
+Focus on:
+- Progress or regression vs previous sessions
+- Volume/intensity execution vs plan
+- Specific exercises ready for progression or needing a fix
+- Fatigue patterns or recovery implications"""
+
+    try:
+        result = await structured_output(
+            system=(
+                "You are a data-driven strength coach. Analyze workout logs and "
+                "generate specific, actionable observations. Numbers only — "
+                "no vague encouragement."
+            ),
+            user_prompt=prompt,
+            tool_name="submit_observations",
+            tool_description="Submit 2-3 post-session coaching observations.",
+            output_schema=_OBSERVATION_SCHEMA,
+            model=HAIKU,
+        )
+
+        saved = 0
+        for obs_data in result.get("observations", []):
+            text = obs_data.get("observation", "").strip()
+            if not text:
+                continue
+            db.add(CoachingObservation(
+                user_id=session.user_id,
+                category=obs_data.get("category", "strength"),
+                observation=text,
+                source=f"session_{session.id}",
+                confidence=float(obs_data.get("confidence", 0.8)),
+                is_active=True,
+            ))
+            saved += 1
+
+        logger.info("Saved %d coaching observations for session %d", saved, session.id)
+
+    except Exception as e:
+        logger.warning("Observation analysis failed for session %d: %s", session.id, e)
