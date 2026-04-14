@@ -6,7 +6,7 @@ then synthesizes results into a research brief that feeds the concept tree gener
 Supports multiple search providers:
 - Brave Search API (default, free tier: 1000 queries/month)
 - Tavily API (optimized for AI agents)
-- Fallback: Claude-based research (uses LLM's training data as research proxy)
+- Fallback: Clawdbot-based research (uses LLM's training data as research proxy)
 
 The research pipeline:
 1. Generate targeted search queries for the pillar
@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from app.services.evaluation import call_claude
+from app.services.llm import HAIKU, SONNET, structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +108,15 @@ The queries should cover:
 5. Frontier research and open problems
 6. Career-relevant skills and certifications
 
-Respond with JSON only:
-{
-  "queries": ["query 1", "query 2", ...]
-}"""
+Use the submit_queries tool to return the search queries."""
+
+QUERY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "queries": {"type": "array", "items": {"type": "string"}, "description": "5-8 targeted search queries"},
+    },
+    "required": ["queries"],
+}
 
 
 async def _generate_search_queries(
@@ -127,23 +132,19 @@ async def _generate_search_queries(
         user_prompt += f"\nSpecific goal: {vision_target}"
 
     try:
-        raw = await call_claude(QUERY_GEN_PROMPT, user_prompt)
-        content = raw["choices"][0]["message"]["content"]
-        # Strip markdown fences
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-
-        parsed = json.loads(content)
+        parsed = await structured_output(
+            system=QUERY_GEN_PROMPT,
+            user_prompt=user_prompt,
+            tool_name="submit_queries",
+            tool_description="Submit the list of targeted search queries for this field.",
+            output_schema=QUERY_SCHEMA,
+            model=HAIKU,
+        )
         queries = parsed.get("queries", [])
         logger.info(f"Generated {len(queries)} search queries for {pillar_name}")
         return queries
     except Exception as e:
         logger.error(f"Query generation failed: {e}")
-        # Fallback queries
         return [
             f"{pillar_name} comprehensive learning roadmap 2026",
             f"{pillar_name} best textbooks and courses",
@@ -237,15 +238,20 @@ SYNTHESIS_SYSTEM_PROMPT = """You are a research synthesizer. Given a collection 
 about a topic, produce a structured research brief that would help someone build a comprehensive
 learning roadmap.
 
-Your output must be valid JSON:
-{
-  "synthesis": "2-4 paragraph overview of the current state of the field, key areas, and what someone needs to learn",
-  "key_topics": ["List of 20-40 specific technical topics/concepts that are essential to master"],
-  "key_resources": ["List of 10-20 specific books, courses, papers, or tools with titles and authors"],
-  "frontier_developments": ["List of 5-10 cutting-edge developments, new papers, or emerging techniques from 2024-2026"]
-}
+Be SPECIFIC. Use real names, real papers, real tools. No generic platitudes.
 
-Be SPECIFIC. Use real names, real papers, real tools. No generic platitudes."""
+Use the submit_research_brief tool to return the structured research brief."""
+
+SYNTHESIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "synthesis": {"type": "string", "description": "2-4 paragraph overview of the field's current state"},
+        "key_topics": {"type": "array", "items": {"type": "string"}, "description": "20-40 specific technical topics essential to master"},
+        "key_resources": {"type": "array", "items": {"type": "string"}, "description": "10-20 specific books, courses, papers, or tools with titles and authors"},
+        "frontier_developments": {"type": "array", "items": {"type": "string"}, "description": "5-10 cutting-edge developments from 2024-2026"},
+    },
+    "required": ["synthesis", "key_topics", "key_resources", "frontier_developments"],
+}
 
 
 async def _synthesize_results(
@@ -254,13 +260,12 @@ async def _synthesize_results(
     depth_target: str | None = None,
 ) -> dict[str, Any]:
     """Use LLM to synthesize search results into a structured brief."""
-    # Build context from search results
     context_parts = [f"Research topic: {pillar_name}"]
     if depth_target:
         context_parts.append(f"Depth target: {depth_target}")
 
     context_parts.append("\n--- Search Results ---\n")
-    for i, r in enumerate(results[:30], 1):  # Cap at 30 results
+    for i, r in enumerate(results[:30], 1):
         context_parts.append(f"[{i}] {r.title}")
         context_parts.append(f"    URL: {r.url}")
         context_parts.append(f"    {r.snippet}")
@@ -270,25 +275,18 @@ async def _synthesize_results(
     user_prompt += "\n\nSynthesize these search results into a comprehensive research brief."
 
     try:
-        raw = await call_claude(SYNTHESIS_SYSTEM_PROMPT, user_prompt)
-        content = raw["choices"][0]["message"]["content"]
-        # Strip markdown fences
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-
-        return json.loads(content)
+        return await structured_output(
+            system=SYNTHESIS_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            tool_name="submit_research_brief",
+            tool_description="Submit the synthesized research brief with topics, resources, and frontier developments.",
+            output_schema=SYNTHESIS_SCHEMA,
+            model=SONNET,
+            max_tokens=8192,
+        )
     except Exception as e:
         logger.error(f"Research synthesis failed: {e}")
-        return {
-            "synthesis": "",
-            "key_topics": [],
-            "key_resources": [],
-            "frontier_developments": [],
-        }
+        return {"synthesis": "", "key_topics": [], "key_resources": [], "frontier_developments": []}
 
 
 async def _llm_only_research(
@@ -310,23 +308,18 @@ async def _llm_only_research(
     )
 
     try:
-        raw = await call_claude(SYNTHESIS_SYSTEM_PROMPT, user_prompt)
-        content = raw["choices"][0]["message"]["content"]
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-        return json.loads(content)
+        return await structured_output(
+            system=SYNTHESIS_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            tool_name="submit_research_brief",
+            tool_description="Submit the synthesized research brief with topics, resources, and frontier developments.",
+            output_schema=SYNTHESIS_SCHEMA,
+            model=SONNET,
+            max_tokens=8192,
+        )
     except Exception as e:
         logger.error(f"LLM-only research failed: {e}")
-        return {
-            "synthesis": "",
-            "key_topics": [],
-            "key_resources": [],
-            "frontier_developments": [],
-        }
+        return {"synthesis": "", "key_topics": [], "key_resources": [], "frontier_developments": []}
 
 
 # --- Main Research Pipeline ---

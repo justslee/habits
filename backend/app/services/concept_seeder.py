@@ -25,7 +25,7 @@ from app.models.concept import PillarConcept
 from app.models.pillar import Pillar
 from app.models.user import User
 from app.models.vision import Vision
-from app.services.evaluation import call_claude
+from app.services.llm import SONNET, structured_output
 from app.services.notion_kb import get_kb_summary_for_pillar, KBSummary
 from app.services.web_research import research_pillar, ResearchBrief
 
@@ -62,20 +62,7 @@ organized in 5 tiers from foundational to frontier.
 - Description should be 1-2 sentences explaining what mastery of this concept looks like.
 - Sort concepts within each tier from most foundational to most advanced.
 
-## Response Format
-You MUST respond with valid JSON only. No markdown, no explanation outside the JSON.
-{
-  "concepts": [
-    {
-      "name": "Concept Name",
-      "tier": 1,
-      "description": "What mastery of this concept looks like.",
-      "prerequisites": ["Other Concept Name"],
-      "key_resources": "Specific book/paper/course/tool",
-      "sort_order": 1
-    }
-  ]
-}"""
+Use the submit_concept_tree tool to return the structured concept tree."""
 
 RESEARCH_SEEDER_SYSTEM_PROMPT = """You are an expert curriculum designer, mastery coach, and research synthesizer.
 
@@ -113,20 +100,7 @@ You have been given THREE sources of context:
 - Description should be 1-2 sentences explaining what mastery looks like. Flag if user already knows it.
 - Sort concepts within each tier from most foundational to most advanced.
 
-## Response Format
-You MUST respond with valid JSON only. No markdown, no explanation outside the JSON.
-{
-  "concepts": [
-    {
-      "name": "Concept Name",
-      "tier": 1,
-      "description": "What mastery of this concept looks like. (reviewed) if user knows it. PRIORITY if low confidence.",
-      "prerequisites": ["Other Concept Name"],
-      "key_resources": "Specific book/paper/course/tool — prefer current resources from research",
-      "sort_order": 1
-    }
-  ]
-}"""
+Use the submit_concept_tree tool to return the structured concept tree."""
 
 
 # ---------------------------------------------------------------------------
@@ -240,22 +214,32 @@ def _build_research_prompt(
 # Response parsing
 # ---------------------------------------------------------------------------
 
-def _parse_seeder_response(raw_response: dict[str, Any]) -> list[dict]:
-    """Parse the LLM response into a list of concept dicts."""
-    content = raw_response["choices"][0]["message"]["content"]
+CONCEPT_TREE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "concepts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Specific, actionable concept name"},
+                    "tier": {"type": "integer", "minimum": 1, "maximum": 5, "description": "1=Foundation, 5=Frontier"},
+                    "description": {"type": "string", "description": "1-2 sentences on what mastery looks like"},
+                    "prerequisites": {"type": "array", "items": {"type": "string"}, "description": "Other concept names from this tree"},
+                    "key_resources": {"type": "string", "description": "Specific book/paper/course/tool"},
+                    "sort_order": {"type": "integer"},
+                },
+                "required": ["name", "tier", "description", "sort_order"],
+            },
+        },
+    },
+    "required": ["concepts"],
+}
 
-    # Strip markdown code fences if present
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
 
-    parsed = json.loads(content)
+def _clean_concept_dicts(parsed: dict[str, Any]) -> list[dict]:
+    """Validate and clean concept dicts from tool_use output."""
     concepts = parsed.get("concepts", [])
-
-    # Validate and clean
     cleaned = []
     for c in concepts:
         tier = max(1, min(5, int(c.get("tier", 1))))
@@ -267,7 +251,6 @@ def _parse_seeder_response(raw_response: dict[str, Any]) -> list[dict]:
             "key_resources": str(c.get("key_resources", "")) if c.get("key_resources") else None,
             "sort_order": int(c.get("sort_order", 0)),
         })
-
     return cleaned
 
 
@@ -364,19 +347,27 @@ async def _seed_quick_mode(
 ) -> list[dict]:
     """Original single-call seeding with Vision context only."""
     user_prompt = _build_quick_prompt(pillar, vision)
-    raw_response = await call_claude(SEEDER_SYSTEM_PROMPT, user_prompt)
-    return _parse_seeder_response(raw_response)
+    parsed = await structured_output(
+        system=SEEDER_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        tool_name="submit_concept_tree",
+        tool_description="Submit the concept tree with tiered concepts, prerequisites, and resources.",
+        output_schema=CONCEPT_TREE_SCHEMA,
+        model=SONNET,
+        max_tokens=8192,
+    )
+    return _clean_concept_dicts(parsed)
 
 
 async def _seed_research_mode(
     pillar: Pillar,
     vision: Vision | None,
 ) -> list[dict]:
-    """Enhanced 3-stage pipeline: Notion KB + Web Research + Vision → Concepts.
+    """Enhanced 3-stage pipeline: Notion KB + Web Research + Vision -> Concepts.
 
     Stage 1: Fetch Notion Knowledge Base entries for this pillar
     Stage 2: Run web research to gather latest developments
-    Stage 3: Combine everything into a comprehensive LLM prompt → concept tree
+    Stage 3: Combine everything into a comprehensive LLM prompt -> concept tree
     """
     vision_target = _get_vision_target(vision, pillar.id)
 
@@ -412,6 +403,13 @@ async def _seed_research_mode(
     logger.info(f"[Research Mode] Stage 3: Synthesizing concept tree for {pillar.name}")
     user_prompt = _build_research_prompt(pillar, vision, kb_summary, research_brief)
 
-    # Use the research-enhanced system prompt
-    raw_response = await call_claude(RESEARCH_SEEDER_SYSTEM_PROMPT, user_prompt)
-    return _parse_seeder_response(raw_response)
+    parsed = await structured_output(
+        system=RESEARCH_SEEDER_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        tool_name="submit_concept_tree",
+        tool_description="Submit the personalized concept tree with tiered concepts, prerequisites, and resources.",
+        output_schema=CONCEPT_TREE_SCHEMA,
+        model=SONNET,
+        max_tokens=8192,
+    )
+    return _clean_concept_dicts(parsed)

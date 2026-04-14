@@ -1,5 +1,11 @@
 """Shared test fixtures."""
 
+import os
+
+# Must be set before app.main imports (reads API_KEY at import time)
+os.environ["API_KEY"] = ""
+os.environ["TESTING"] = "1"
+
 import pytest
 from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker

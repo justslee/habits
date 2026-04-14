@@ -1,7 +1,7 @@
 """Live Workout Chat — Elite AI Coach during sessions (P2-3).
 
 Routes ALL messages through Claude for intelligent coaching.
-Handles set logging, conversation, motivation, form tips, and adjustments.
+Uses tool_use for structured responses (parsed sets, coaching, adjustments).
 """
 
 import json
@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
-from app.services.evaluation import call_claude
+from app.services.llm import SONNET, structured_output
 from app.services.progressive_overload import estimate_1rm
 
 logger = logging.getLogger(__name__)
@@ -59,18 +59,56 @@ You have FOUR jobs every message:
    Give a brief wrap-up: summarize what was accomplished, note any PRs, give encouragement.
    Otherwise return {"session_complete": false}.
 
-ALWAYS respond with valid JSON:
-{
-  "parsed_sets": [
-    {"exercise_name": "Bench Press", "weight": 165, "reps": 5, "rpe": null, "set_number": 1}
-  ],
-  "coach_response": "Your response as a coach (2-4 sentences, conversational)",
-  "adjustments": null,
-  "session_complete": false
-}
-
+Use the submit_coach_response tool to return your structured response.
 If no sets to parse, return empty parsed_sets []. ALWAYS include a coach_response.
 The coach_response should feel like texting your trainer — casual, direct, human."""
+
+CHAT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "parsed_sets": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "exercise_name": {"type": "string", "description": "Normalized exercise name (e.g. 'Bench Press', not 'bench')"},
+                    "weight": {"type": "number"},
+                    "reps": {"type": "integer"},
+                    "rpe": {"type": "number", "description": "Rate of perceived exertion if mentioned"},
+                    "set_number": {"type": "integer"},
+                },
+                "required": ["exercise_name", "weight", "reps", "set_number"],
+            },
+            "description": "Sets parsed from the athlete's message. Empty array if no sets mentioned.",
+        },
+        "coach_response": {"type": "string", "description": "2-4 sentence coaching response — casual, direct, human"},
+        "adjustments": {
+            "type": "object",
+            "properties": {
+                "exercises": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "sets": {"type": "integer"},
+                            "reps": {"type": "integer"},
+                            "weight": {"type": "number"},
+                            "rest_seconds": {"type": "integer"},
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["name", "sets", "reps"],
+                    },
+                },
+                "reason": {"type": "string"},
+            },
+            "required": ["exercises", "reason"],
+            "description": "Only include if the athlete requested plan modifications. Otherwise omit.",
+        },
+        "session_complete": {"type": "boolean", "description": "True only if the athlete said they're done with the workout"},
+    },
+    "required": ["parsed_sets", "coach_response", "session_complete"],
+}
 
 
 def _build_chat_context(session: WorkoutSession, db: Session) -> str:
@@ -149,7 +187,7 @@ async def process_chat_message(
 ) -> dict[str, Any]:
     """Process a chat message during a live workout.
 
-    Routes through Claude for intelligent coaching responses.
+    Routes through Clawdbot for intelligent coaching responses.
     Falls back gracefully if LLM is unavailable.
     """
     context = _build_chat_context(session, db)
@@ -161,32 +199,16 @@ async def process_chat_message(
 ATHLETE SAYS: {message}"""
 
     try:
-        raw_response = await call_claude(COACH_SYSTEM_PROMPT, user_prompt)
-        content = raw_response["choices"][0]["message"]["content"].strip()
-
-        # Strip markdown code fences if present
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-
-        parsed = json.loads(content)
-    except json.JSONDecodeError as e:
-        # LLM responded but not valid JSON — try to extract coach_response
-        logger.warning(f"Chat JSON parse failed: {e}")
-        try:
-            # Sometimes LLM returns text before/after JSON
-            raw = raw_response["choices"][0]["message"]["content"].strip()
-            return {
-                "coach_response": raw[:500],
-                "parsed_sets": [],
-                "session_summary": None,
-            }
-        except Exception:
-            return _fallback_response(message, session, db)
+        parsed = await structured_output(
+            system=COACH_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            tool_name="submit_coach_response",
+            tool_description="Submit the coaching response with any parsed sets, adjustments, and session status.",
+            output_schema=CHAT_RESPONSE_SCHEMA,
+            model=SONNET,
+        )
     except Exception as e:
-        logger.error(f"Claude chat call failed: {e}")
+        logger.error(f"Coach chat call failed: {e}")
         return _fallback_response(message, session, db)
 
     # Log parsed sets to the session
@@ -265,7 +287,7 @@ ATHLETE SAYS: {message}"""
 def _fallback_response(
     message: str, session: WorkoutSession, db: Session
 ) -> dict[str, Any]:
-    """Fallback when Claude is unavailable. Still tries to be useful."""
+    """Fallback when Clawdbot is unavailable. Still tries to be useful."""
     msg_lower = message.lower().strip()
 
     # Completion detection

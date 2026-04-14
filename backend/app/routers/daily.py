@@ -619,35 +619,45 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
 
 # ==================== HELPERS ====================
 
+CLASSIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pillar_id": {"type": "integer", "description": "Pillar ID or 0 if no pillar fits"},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    },
+    "required": ["pillar_id", "confidence"],
+}
+
+
 async def _classify_pillar(text: str, db: Session) -> tuple:
-    """Use LLM to classify a todo into a pillar. Returns (pillar_id, confidence)."""
+    """Use Haiku to classify a todo into a pillar. Returns (pillar_id, confidence)."""
+    from app.services.llm import HAIKU, structured_output
+
     pillars = db.query(Pillar).order_by(Pillar.display_order).all()
     pillar_list = "\n".join(f"{p.id}: {p.name} — {p.description or ''}" for p in pillars)
 
-    prompt = f"""Classify this task into ONE of these pillars (or "none" if it doesn't fit):
+    prompt = f"""Classify this task into ONE of these pillars (or pillar_id=0 if it doesn't fit):
 
 {pillar_list}
 
 Task: "{text}"
 
-Respond with ONLY valid JSON: {{"pillar_id": <int or null>, "confidence": <0.0-1.0>}}
-If the task is general/lifestyle (workout, errands, etc.), return {{"pillar_id": null, "confidence": 0.0}}"""
+If the task is general/lifestyle (workout, errands, etc.), return pillar_id=0 with confidence=0.0"""
 
     try:
-        from app.services.evaluation import call_claude
-        result = await call_claude(
-            "You classify tasks into learning pillars. Be precise. Only return JSON.",
-            prompt,
+        parsed = await structured_output(
+            system="You classify tasks into learning pillars. Be precise.",
+            user_prompt=prompt,
+            tool_name="submit_classification",
+            tool_description="Submit the pillar classification with confidence score.",
+            output_schema=CLASSIFY_SCHEMA,
+            model=HAIKU,
         )
-        content = result["choices"][0]["message"]["content"].strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-        parsed = json.loads(content)
         pid = parsed.get("pillar_id")
         conf = parsed.get("confidence", 0.5)
+        # pillar_id=0 means no pillar
+        if pid == 0:
+            return (None, 0.0)
         # Validate pillar_id exists
         if pid is not None:
             valid_ids = {p.id for p in pillars}

@@ -1,6 +1,6 @@
 """Weekly Review generation service — AI-powered weekly summary.
 
-Generates honest weekly reviews via Claude (D-012).
+Generates honest weekly reviews via tool_use structured outputs (D-012).
 """
 
 import json
@@ -18,7 +18,7 @@ from app.models.pillar import Pillar
 from app.models.streak import Streak
 from app.models.user import User
 from app.models.weekly_review import WeeklyReview
-from app.services.evaluation import call_claude
+from app.services.llm import SONNET, structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +47,20 @@ The user tracks 5 pillars:
 - D: Below expectations. Mostly coasting, surface-level, or single-pillar tunnel vision.
 - F: Failing. Barely showed up, dishonest logging, or pure maintenance work.
 
-## Response Format
-Respond with valid JSON only:
-{
-  "pillar_distribution": "<summary of hours and depth per pillar this week>",
-  "comfort_zone_analysis": "<call out if drifting toward comfort zones>",
-  "recommendations": "<2-3 specific recommendations for next week>",
-  "letter_grade": "<A|B|C|D|F>",
-  "grade_justification": "<2-3 sentences explaining the grade honestly>",
-  "quote": "<motivational quote with attribution>"
-}"""
+Use the submit_weekly_review tool to return your structured review."""
+
+REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pillar_distribution": {"type": "string", "description": "Summary of hours and depth per pillar this week"},
+        "comfort_zone_analysis": {"type": "string", "description": "Call out if drifting toward comfort zones"},
+        "recommendations": {"type": "string", "description": "2-3 specific recommendations for next week"},
+        "letter_grade": {"type": "string", "enum": ["A", "B", "C", "D", "F"], "description": "Honest letter grade"},
+        "grade_justification": {"type": "string", "description": "2-3 sentences explaining the grade honestly"},
+        "quote": {"type": "string", "description": "Motivational quote with attribution"},
+    },
+    "required": ["pillar_distribution", "comfort_zone_analysis", "recommendations", "letter_grade", "grade_justification", "quote"],
+}
 
 
 def _build_week_summary(
@@ -150,32 +154,6 @@ def _build_week_summary(
     return "\n".join(lines)
 
 
-def parse_review_response_local(raw_response: dict[str, Any]) -> dict[str, Any]:
-    """Parse weekly review LLM response."""
-    content = raw_response["choices"][0]["message"]["content"]
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-
-    parsed = json.loads(content)
-
-    grade = str(parsed["letter_grade"]).upper().strip()
-    if grade not in ("A", "B", "C", "D", "F"):
-        grade = "C"  # fallback
-
-    return {
-        "pillar_distribution": str(parsed["pillar_distribution"]),
-        "comfort_zone_analysis": str(parsed["comfort_zone_analysis"]),
-        "recommendations": str(parsed["recommendations"]),
-        "letter_grade": grade,
-        "grade_justification": str(parsed["grade_justification"]),
-        "quote": str(parsed["quote"]),
-    }
-
-
 async def generate_weekly_review(
     user_id: int, week_start: date, week_end: date, db: Session
 ) -> WeeklyReview:
@@ -194,20 +172,31 @@ async def generate_weekly_review(
 
     user_prompt = _build_week_summary(user_id, week_start, week_end, db)
 
-    raw_response = await call_claude(REVIEW_SYSTEM_PROMPT, user_prompt)
-    parsed = parse_review_response_local(raw_response)
+    parsed = await structured_output(
+        system=REVIEW_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        tool_name="submit_weekly_review",
+        tool_description="Submit the structured weekly review with grades, analysis, and recommendations.",
+        output_schema=REVIEW_SCHEMA,
+        model=SONNET,
+    )
+
+    # Validate grade (schema enum should enforce this, but belt-and-suspenders)
+    grade = str(parsed["letter_grade"]).upper().strip()
+    if grade not in ("A", "B", "C", "D", "F"):
+        grade = "C"
 
     review = WeeklyReview(
         user_id=user_id,
         week_start=week_start,
         week_end=week_end,
-        pillar_distribution=parsed["pillar_distribution"],
-        comfort_zone_analysis=parsed["comfort_zone_analysis"],
-        recommendations=parsed["recommendations"],
-        letter_grade=parsed["letter_grade"],
-        grade_justification=parsed["grade_justification"],
-        quote=parsed["quote"],
-        raw_llm_response=json.dumps(raw_response),
+        pillar_distribution=str(parsed["pillar_distribution"]),
+        comfort_zone_analysis=str(parsed["comfort_zone_analysis"]),
+        recommendations=str(parsed["recommendations"]),
+        letter_grade=grade,
+        grade_justification=str(parsed["grade_justification"]),
+        quote=str(parsed["quote"]),
+        raw_llm_response=json.dumps(parsed),
     )
 
     db.add(review)
