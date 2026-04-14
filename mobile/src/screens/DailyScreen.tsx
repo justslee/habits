@@ -1,9 +1,8 @@
 /**
- * Daily Screen — unified scrollable view
+ * Daily Screen — single scrollable "Today" view
  *
- * Today: hero date, context line, blockquote quote, progress bar,
- *        habits section, tasks section, wrap-up prompt
- * Check-In: bottom-sheet modal (CheckInModal)
+ * Hero date header, blockquote, progress bar, unified habit+task list,
+ * wrap-up prompt that opens CheckInModal as a bottom sheet.
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -18,11 +17,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { haptic } from '../utils/haptics';
 import { colors, spacing, typography, radius, PILLAR_COLORS_BY_NAME } from '../theme';
 import { API_URL, apiHeaders } from '../api/client';
-import CheckInModal from '../components/CheckInModal';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
 import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
+import CheckInModal from './CheckInModal';
 
 const TIME_ESTIMATES = [15, 30, 45, 60, 90];
 const HABIT_ICONS: string[] = [
@@ -36,7 +35,8 @@ const HABIT_COLORS = [
   '#22C55E', '#06B6D4', '#3B82F6', '#F97316', '#10B981',
 ];
 
-// Types
+// ── Types ──────────────────────────────────────────────────────────────────────
+
 interface Todo {
   id: number;
   text: string;
@@ -72,8 +72,7 @@ interface DailySummary {
   whoop_recovery: number | null;
 }
 
-const RECOVERY_COLOR = (pct: number) =>
-  pct >= 67 ? colors.success : pct >= 34 ? colors.warning : colors.error;
+// ── Main Screen ────────────────────────────────────────────────────────────────
 
 export default function DailyScreen() {
   const insets = useSafeAreaInsets();
@@ -98,7 +97,7 @@ export default function DailyScreen() {
   const [editText, setEditText] = useState('');
   const [editMinutes, setEditMinutes] = useState<number | null>(null);
 
-  // Undo toast state for swipe-to-delete
+  // Undo toast state
   const [undoToast, setUndoToast] = useState<{
     visible: boolean;
     message: string;
@@ -167,7 +166,8 @@ export default function DailyScreen() {
     setRefreshing(false);
   }, [fetchData]);
 
-  // ---- Todo Actions ----
+  // ── Todo actions ─────────────────────────────────────────────────────────────
+
   const addTodo = async () => {
     const text = newTodoText.trim();
     if (!text) return;
@@ -222,7 +222,8 @@ export default function DailyScreen() {
     }
   };
 
-  // ---- Habit Actions ----
+  // ── Habit actions ─────────────────────────────────────────────────────────────
+
   const toggleHabit = async (id: number) => {
     try {
       const resp = await fetch(`${API_URL}/api/v1/daily/habits/${id}/toggle`, {
@@ -278,7 +279,6 @@ export default function DailyScreen() {
     }
   };
 
-  // ---- Edit Todo ----
   const saveEditTodo = async () => {
     if (!editingTodo) return;
     const text = editText.trim();
@@ -305,27 +305,28 @@ export default function DailyScreen() {
     setEditingTodo(null);
   };
 
-  // Progress counts
+  // ── Derived values ────────────────────────────────────────────────────────────
+
   const todosComplete = todos.filter(t => t.completed).length;
   const habitsComplete = habits.filter(h => h.completed_today).length;
   const totalItems = todos.length + habits.length;
   const totalComplete = todosComplete + habitsComplete;
-  const progress = totalItems > 0 ? totalComplete / totalItems : 0;
   const allDone = totalItems > 0 && totalComplete === totalItems;
 
-  // Total minutes for completed todos (for check-in modal)
-  const totalMinutes = todos
-    .filter(t => t.completed)
-    .reduce((sum, t) => sum + (t.estimated_minutes || 0), 0);
-
-  // Date string
   const dateStr = new Date().toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
   });
 
-  // Context line (workout + recovery)
   const recoveryColor = summary?.whoop_recovery != null
-    ? RECOVERY_COLOR(summary.whoop_recovery) : null;
+    ? (summary.whoop_recovery >= 67 ? colors.success
+      : summary.whoop_recovery >= 34 ? colors.warning : colors.error)
+    : null;
+
+  const progressPct = totalItems > 0
+    ? `${Math.min(100, Math.round((totalComplete / totalItems) * 100))}%`
+    : '0%';
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -342,22 +343,22 @@ export default function DailyScreen() {
             }
             keyboardShouldPersistTaps="handled"
           >
-            {/* ── HEADER ── */}
+            {/* ── Hero date header ── */}
             <View style={st.header}>
-              <Text style={st.dateHero}>{dateStr}</Text>
+              <Text style={st.heroDate}>{dateStr}</Text>
               {summary && (summary.workout_preview || summary.whoop_recovery != null) && (
                 <View style={st.contextLine}>
-                  {summary.workout_preview && (
+                  {summary.workout_preview != null && (
                     <Text style={st.contextText}>{summary.workout_preview}</Text>
                   )}
-                  {summary.workout_preview && summary.whoop_recovery != null && (
+                  {summary.workout_preview != null && summary.whoop_recovery != null && (
                     <Text style={st.contextSep}> · </Text>
                   )}
-                  {summary.whoop_recovery != null && (
+                  {summary.whoop_recovery != null && recoveryColor && (
                     <>
-                      <View style={[st.recoveryDot, { backgroundColor: recoveryColor! }]} />
+                      <View style={[st.recoveryDot, { backgroundColor: recoveryColor }]} />
                       <Text style={st.contextText}>
-                        {Math.round(summary.whoop_recovery)}% recovery
+                        {Math.round(summary.whoop_recovery)}%
                       </Text>
                     </>
                   )}
@@ -365,54 +366,69 @@ export default function DailyScreen() {
               )}
             </View>
 
-            {/* ── QUOTE ── */}
+            {/* ── Quote blockquote ── */}
             {summary && (
               <View style={st.quoteBlock}>
-                <View style={st.quoteAccent} />
-                <View style={st.quoteBody}>
+                <View style={st.quoteBorder} />
+                <View style={{ flex: 1 }}>
                   <Text style={st.quoteText}>"{summary.quote}"</Text>
                   <Text style={st.quoteAuthor}>— {summary.quote_author}</Text>
                 </View>
               </View>
             )}
 
-            {/* ── PROGRESS BAR ── */}
+            {/* ── Progress bar ── */}
             {totalItems > 0 && (
               <View style={st.progressContainer}>
-                <View style={st.progressLabelRow}>
-                  <Text style={st.progressDoneLabel}>{totalComplete} of {totalItems} done</Text>
-                  <Text style={[st.progressCount, allDone && { color: colors.success }]}>
+                <View style={st.progressLabels}>
+                  <Text style={st.progressLeft}>{totalComplete} of {totalItems} done</Text>
+                  <Text style={[st.progressRight, allDone && { color: colors.success }]}>
                     {totalComplete}/{totalItems}
                   </Text>
                 </View>
                 <View style={st.progressTrack}>
                   <LinearGradient
-                    colors={[colors.accent, colors.accentLight]}
+                    colors={allDone
+                      ? [colors.success, '#34D399']
+                      : [colors.accent, colors.accentLight]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={[st.progressFill, { width: `${Math.round(progress * 100)}%` as any }]}
+                    style={[st.progressFill, { width: progressPct }]}
                   />
                 </View>
               </View>
             )}
 
-            {/* ── HABITS SECTION ── */}
+            {/* ── HABITS section ── */}
             <View style={st.sectionDivider}>
               <Text style={st.sectionLabel}>HABITS</Text>
               <View style={st.sectionLine} />
+              <Text style={st.sectionCount}>{habitsComplete}/{habits.length}</Text>
               <TouchableOpacity
                 onPress={() => { setShowAddHabit(!showAddHabit); haptic.selection(); }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={st.sectionAddBtn}
               >
-                <Ionicons
-                  name={showAddHabit ? 'close' : 'add'}
-                  size={18}
-                  color={colors.textTertiary}
-                />
+                <Ionicons name={showAddHabit ? 'close' : 'add'} size={18} color={colors.textTertiary} />
               </TouchableOpacity>
             </View>
 
-            {/* Add habit inline form */}
+            {habits.map(habit => (
+              <HabitRowCard
+                key={habit.id}
+                habit={habit}
+                onToggle={() => toggleHabit(habit.id)}
+                onDelete={() => deleteHabit(habit.id, habit.name)}
+              />
+            ))}
+
+            {habits.length === 0 && !showAddHabit && (
+              <TouchableOpacity style={st.emptyRow} onPress={() => setShowAddHabit(true)}>
+                <Ionicons name="add-circle-outline" size={18} color={colors.textTertiary} />
+                <Text style={st.emptyRowText}>Add your first daily habit</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Add habit inline */}
             {showAddHabit && (
               <>
                 <View style={st.addRow}>
@@ -449,7 +465,10 @@ export default function DailyScreen() {
                           key={icon}
                           style={[
                             st.iconCell,
-                            newHabitIcon === icon && { backgroundColor: newHabitColor + '25', borderColor: newHabitColor },
+                            newHabitIcon === icon && {
+                              backgroundColor: newHabitColor + '25',
+                              borderColor: newHabitColor,
+                            },
                           ]}
                           onPress={() => { setNewHabitIcon(icon); haptic.selection(); }}
                         >
@@ -466,11 +485,7 @@ export default function DailyScreen() {
                       {HABIT_COLORS.map(c => (
                         <TouchableOpacity
                           key={c}
-                          style={[
-                            st.colorDot,
-                            { backgroundColor: c },
-                            newHabitColor === c && st.colorDotActive,
-                          ]}
+                          style={[st.colorDot, { backgroundColor: c }, newHabitColor === c && st.colorDotActive]}
                           onPress={() => { setNewHabitColor(c); haptic.selection(); }}
                         />
                       ))}
@@ -480,29 +495,11 @@ export default function DailyScreen() {
               </>
             )}
 
-            {habits.map(habit => (
-              <HabitRowCard
-                key={habit.id}
-                habit={habit}
-                onToggle={() => toggleHabit(habit.id)}
-                onDelete={() => deleteHabit(habit.id, habit.name)}
-              />
-            ))}
-
-            {habits.length === 0 && !showAddHabit && (
-              <TouchableOpacity
-                style={st.emptyHabits}
-                onPress={() => { setShowAddHabit(true); haptic.selection(); }}
-              >
-                <Ionicons name="add-circle-outline" size={24} color={colors.textTertiary} />
-                <Text style={st.emptyHabitsText}>Add your first daily habit</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* ── TASKS SECTION ── */}
+            {/* ── TASKS section ── */}
             <View style={[st.sectionDivider, { marginTop: spacing.lg }]}>
               <Text style={st.sectionLabel}>TASKS</Text>
               <View style={st.sectionLine} />
+              <Text style={st.sectionCount}>{todosComplete}/{todos.length}</Text>
             </View>
 
             {todos.map(todo => (
@@ -520,15 +517,12 @@ export default function DailyScreen() {
               />
             ))}
 
-            {/* Add task row */}
-            <View style={st.addTaskRow}>
-              <View style={st.addTaskCheckbox}>
-                <Ionicons name="add" size={14} color={colors.textTertiary} />
-              </View>
+            {/* Quick add task */}
+            <View style={st.addRow}>
               <TextInput
                 ref={inputRef}
                 style={st.addInput}
-                placeholder="Add a task or habit…"
+                placeholder="Add a task..."
                 placeholderTextColor={colors.textTertiary}
                 value={newTodoText}
                 onChangeText={setNewTodoText}
@@ -542,7 +536,6 @@ export default function DailyScreen() {
               )}
             </View>
 
-            {/* Time estimate pills */}
             {newTodoText.trim().length > 0 && (
               <View style={st.timeEstRow}>
                 <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
@@ -563,18 +556,18 @@ export default function DailyScreen() {
               </View>
             )}
 
-            {/* ── WRAP UP PROMPT ── */}
+            {/* ── Wrap Up Your Day prompt ── */}
             {totalComplete > 0 && (
               <TouchableOpacity
-                style={st.wrapUpRow}
+                style={st.wrapUpCard}
                 onPress={() => { haptic.medium(); setShowCheckIn(true); }}
                 activeOpacity={0.8}
               >
                 <Text style={st.wrapUpEmoji}>🌙</Text>
                 <View style={st.wrapUpContent}>
-                  <Text style={st.wrapUpTitle}>Wrap up your day</Text>
+                  <Text style={st.wrapUpTitle}>WRAP UP YOUR DAY</Text>
                   <Text style={st.wrapUpSub}>
-                    {totalComplete}/{totalItems} items complete — ready to reflect?
+                    {totalComplete} of {totalItems} item{totalItems !== 1 ? 's' : ''} complete
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
@@ -584,7 +577,7 @@ export default function DailyScreen() {
             <View style={{ height: 48 }} />
           </ScrollView>
 
-          {/* ── EDIT TODO MODAL ── */}
+          {/* ── Edit todo modal ── */}
           <Modal
             visible={editingTodo !== null}
             transparent
@@ -602,6 +595,7 @@ export default function DailyScreen() {
               >
                 <TouchableOpacity activeOpacity={1} style={st.modalCard}>
                   <Text style={st.modalTitle}>Edit Task</Text>
+
                   <TextInput
                     style={st.modalInput}
                     value={editText}
@@ -611,6 +605,7 @@ export default function DailyScreen() {
                     autoFocus
                     multiline
                   />
+
                   <Text style={st.modalLabel}>TIME ESTIMATE</Text>
                   <View style={st.timeEstRow}>
                     <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
@@ -626,13 +621,16 @@ export default function DailyScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
+
                   {editingTodo?.pillar_name && (() => {
                     const pColor = PILLAR_COLORS_BY_NAME[editingTodo.pillar_name!] || colors.accent;
                     return (
-                      <View style={[
-                        st.pillarTag,
-                        { backgroundColor: pColor + '15', borderColor: pColor + '30', marginVertical: spacing.sm },
-                      ]}>
+                      <View style={[st.pillarTag, {
+                        backgroundColor: pColor + '15',
+                        borderColor: pColor + '30',
+                        marginTop: spacing.sm,
+                        marginBottom: spacing.sm,
+                      }]}>
                         <View style={[st.pillarDot, { backgroundColor: pColor }]} />
                         <Text style={[st.pillarTagText, { color: pColor }]}>
                           {editingTodo.pillar_name}
@@ -640,6 +638,7 @@ export default function DailyScreen() {
                       </View>
                     );
                   })()}
+
                   <View style={st.modalActions}>
                     <TouchableOpacity style={st.modalCancelBtn} onPress={() => setEditingTodo(null)}>
                       <Text style={st.modalCancelText}>Cancel</Text>
@@ -653,7 +652,6 @@ export default function DailyScreen() {
             </KeyboardAvoidingView>
           </Modal>
 
-          {/* ── UNDO TOAST ── */}
           <UndoToast
             visible={undoToast.visible}
             message={undoToast.message}
@@ -663,74 +661,13 @@ export default function DailyScreen() {
         </KeyboardAvoidingView>
       </ScreenBackground>
 
-      {/* ── CHECK-IN MODAL ── */}
-      <CheckInModal
-        visible={showCheckIn}
-        onClose={() => setShowCheckIn(false)}
-        completedCount={totalComplete}
-        totalCount={totalItems}
-        totalMinutes={totalMinutes}
-      />
+      {/* ── Check-In bottom sheet ── */}
+      <CheckInModal visible={showCheckIn} onClose={() => setShowCheckIn(false)} />
     </GestureHandlerRootView>
   );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────
-
-function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
-  todo: Todo; onToggle: () => void; onDelete: () => void; onLongPress: () => void;
-}) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const pillarColor = todo.pillar_name ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent) : null;
-
-  return (
-    <SwipeableRow onDelete={onDelete}>
-      <Animated.View style={[animStyle, todo.completed && { opacity: 0.35 }]}>
-        <TouchableOpacity
-          style={st.itemRow}
-          onPress={onToggle}
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-          onLongPress={onLongPress}
-        >
-          {/* Square checkbox */}
-          <View style={[
-            st.todoCheck,
-            todo.completed && { backgroundColor: colors.accent, borderColor: colors.accent },
-          ]}>
-            {todo.completed && <Ionicons name="checkmark" size={13} color="#fff" />}
-          </View>
-
-          {/* Text + metadata stacked in a column */}
-          <View style={st.itemContent}>
-            <Text style={[st.itemText, todo.completed && st.itemTextDone]}>
-              {todo.text}
-            </Text>
-
-            {(pillarColor || (todo.estimated_minutes != null && todo.estimated_minutes > 0)) && (
-              <View style={st.itemMeta}>
-                {pillarColor && (
-                  <View style={[st.pillarTag, { backgroundColor: pillarColor + '15', borderColor: pillarColor + '30' }]}>
-                    <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
-                    <Text style={[st.pillarTagText, { color: pillarColor }]}>
-                      {todo.pillar_name}
-                    </Text>
-                  </View>
-                )}
-                {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
-                  <View style={st.estBadge}>
-                    <Ionicons name="time-outline" size={10} color={colors.textTertiary} />
-                    <Text style={st.estText}>{todo.estimated_minutes}m</Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    </SwipeableRow>
-  );
-}
+// ── HabitRowCard ───────────────────────────────────────────────────────────────
 
 function HabitRowCard({ habit, onToggle, onDelete }: {
   habit: Habit; onToggle: () => void; onDelete: () => void;
@@ -741,35 +678,34 @@ function HabitRowCard({ habit, onToggle, onDelete }: {
 
   return (
     <SwipeableRow onDelete={onDelete}>
-      <Animated.View style={[animStyle, habit.completed_today && { opacity: 0.35 }]}>
+      <Animated.View style={[animStyle, habit.completed_today && st.completedRow]}>
         <TouchableOpacity
-          style={st.itemRow}
+          style={st.habitRow}
           onPress={onToggle}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
         >
-          {/* Circle checkbox — shows habit icon (not checkmark) when done */}
           <View style={[
             st.habitCircle,
             { borderColor: habitColor },
-            habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
+            habit.completed_today && { backgroundColor: habitColor },
           ]}>
-            <Ionicons
-              name={habitIcon as any}
-              size={13}
-              color={habit.completed_today ? '#fff' : habitColor}
-            />
+            {habit.completed_today
+              ? <Ionicons name="checkmark" size={13} color="#fff" />
+              : <Ionicons name={habitIcon as any} size={12} color={habitColor} />
+            }
           </View>
 
-          {/* Name */}
-          <Text style={[st.itemText, habit.completed_today && st.itemTextDone]}>
+          <Text
+            style={[st.habitName, habit.completed_today && st.itemDoneText]}
+            numberOfLines={1}
+          >
             {habit.name}
           </Text>
 
-          {/* Streak badge */}
           {habit.current_streak > 0 && (
             <View style={st.streakBadge}>
-              <Text style={st.streakEmoji}>🔥</Text>
+              <Text style={st.streakFire}>🔥</Text>
               <Text style={st.streakText}>{habit.current_streak}</Text>
             </View>
           )}
@@ -779,7 +715,73 @@ function HabitRowCard({ habit, onToggle, onDelete }: {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────
+// ── TodoRowCard ────────────────────────────────────────────────────────────────
+
+function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
+  todo: Todo; onToggle: () => void; onDelete: () => void; onLongPress: () => void;
+}) {
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const pillarColor = todo.pillar_name
+    ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent)
+    : null;
+
+  return (
+    <SwipeableRow onDelete={onDelete}>
+      <Animated.View style={[animStyle, todo.completed && st.completedRow]}>
+        <TouchableOpacity
+          style={st.todoRow}
+          onPress={onToggle}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+          onLongPress={onLongPress}
+        >
+          {/* 20px rounded-square checkbox */}
+          <View style={[
+            st.todoCheck,
+            todo.completed && { backgroundColor: colors.accent, borderColor: colors.accent },
+          ]}>
+            {todo.completed && <Ionicons name="checkmark" size={11} color="#fff" />}
+          </View>
+
+          {/* Task text */}
+          <Text
+            style={[st.todoText, todo.completed && st.itemDoneText]}
+            numberOfLines={2}
+          >
+            {todo.text}
+          </Text>
+
+          {/* Right meta: pillar + time */}
+          {(pillarColor || (todo.estimated_minutes != null && todo.estimated_minutes > 0)) && (
+            <View style={st.todoMeta}>
+              {pillarColor && (
+                <View style={[st.pillarTag, {
+                  backgroundColor: pillarColor + '15',
+                  borderColor: pillarColor + '30',
+                }]}>
+                  <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
+                  <Text
+                    style={[st.pillarTagText, { color: pillarColor }]}
+                    numberOfLines={1}
+                  >
+                    {todo.pillar_name}
+                  </Text>
+                </View>
+              )}
+              {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
+                <View style={st.estBadge}>
+                  <Text style={st.estText}>{todo.estimated_minutes}m</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </TouchableOpacity>
+      </Animated.View>
+    </SwipeableRow>
+  );
+}
+
+// ── Styles ─────────────────────────────────────────────────────────────────────
 
 const st = StyleSheet.create({
   container: { flex: 1 },
@@ -789,80 +791,145 @@ const st = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
 
-  // Header
+  // ── Header ──
   header: { marginBottom: spacing.md },
-  dateHero: { ...typography.title1, color: colors.text, marginBottom: spacing.xs },
-  contextLine: { flexDirection: 'row', alignItems: 'center' },
+  heroDate: {
+    ...typography.title1,
+    color: colors.text,
+    marginBottom: 4,
+  },
+  contextLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
   contextText: { ...typography.caption, color: colors.textTertiary },
   contextSep: { ...typography.caption, color: colors.textTertiary },
-  recoveryDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
+  recoveryDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 4,
+  },
 
-  // Blockquote quote
+  // ── Quote blockquote ──
   quoteBlock: {
     flexDirection: 'row',
-    marginBottom: spacing.lg,
     backgroundColor: 'rgba(99,102,241,0.04)',
-    borderTopRightRadius: radius.md,
-    borderBottomRightRadius: radius.md,
+    borderRadius: radius.sm,
+    marginBottom: spacing.lg,
     overflow: 'hidden',
   },
-  quoteAccent: {
+  quoteBorder: {
     width: 2,
     backgroundColor: colors.accent,
-    borderTopLeftRadius: 0,
-    borderBottomLeftRadius: 0,
+    borderRadius: 1,
   },
-  quoteBody: { flex: 1, padding: spacing.md },
   quoteText: {
     ...typography.body,
     color: colors.textSecondary,
     fontStyle: 'italic',
     lineHeight: 22,
-    marginBottom: 6,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: 6,
   },
-  quoteAuthor: { ...typography.caption, color: colors.textTertiary },
+  quoteAuthor: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+  },
 
-  // Progress bar
+  // ── Progress bar ──
   progressContainer: { marginBottom: spacing.lg },
-  progressLabelRow: {
+  progressLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
+    marginBottom: 6,
   },
-  progressDoneLabel: { ...typography.caption, color: colors.textTertiary },
-  progressCount: { ...typography.caption, color: colors.textTertiary, fontWeight: '700' },
+  progressLeft: { ...typography.caption, color: colors.textTertiary },
+  progressRight: { ...typography.caption, color: colors.accent, fontWeight: '700' },
   progressTrack: {
     height: 3,
     backgroundColor: colors.border,
-    borderRadius: radius.pill,
+    borderRadius: 2,
     overflow: 'hidden',
   },
-  progressFill: { height: 3, borderRadius: radius.pill },
+  progressFill: {
+    height: 3,
+    borderRadius: 2,
+  },
 
-  // Section divider
+  // ── Section dividers ──
   sectionDivider: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
-  sectionLabel: { ...typography.micro, color: colors.textTertiary, letterSpacing: 1 },
-  sectionLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  sectionLabel: {
+    ...typography.micro,
+    color: colors.textTertiary,
+    letterSpacing: 1,
+  },
+  sectionLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  sectionCount: { ...typography.micro, color: colors.textTertiary },
+  sectionAddBtn: { padding: 2 },
 
-  // Shared item row
-  itemRow: {
+  // ── Completed item dimming ──
+  completedRow: { opacity: 0.35 },
+  itemDoneText: { textDecorationLine: 'line-through', color: colors.textTertiary },
+
+  // ── Habit rows ──
+  habitRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: spacing.xs,
     marginBottom: 2,
   },
-  itemContent: { flex: 1 },
-  itemText: { fontSize: 15, color: colors.text, lineHeight: 22 },
-  itemTextDone: { textDecorationLine: 'line-through', color: colors.textTertiary },
+  habitCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+    flexShrink: 0,
+  },
+  habitName: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.text,
+    fontFamily: 'Inter_400Regular',
+  },
+  streakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: spacing.sm,
+  },
+  streakFire: { fontSize: 12 },
+  streakText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
 
-  // Task checkbox (square, rounded 5px)
+  // ── Todo rows ──
+  todoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: spacing.xs,
+    marginBottom: 2,
+  },
   todoCheck: {
     width: 20,
     height: 20,
@@ -872,87 +939,48 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
+    flexShrink: 0,
+    backgroundColor: 'transparent',
   },
-
-  // Habit circle (24px)
-  habitCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
+  todoText: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+    fontFamily: 'Inter_400Regular',
   },
-
-  // Item metadata column (right side)
-  itemMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap', marginTop: 4 },
-
-  // Pillar tag
+  todoMeta: {
+    alignItems: 'flex-end',
+    gap: 4,
+    marginLeft: spacing.sm,
+    flexShrink: 0,
+    maxWidth: 90,
+  },
   pillarTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 6,
+    gap: 3,
+    paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
     borderWidth: 1,
   },
-  pillarDot: { width: 5, height: 5, borderRadius: 2.5 },
-  pillarTagText: { fontSize: 10, fontWeight: '600', letterSpacing: 0.3 },
-
-  // Time estimate badge
+  pillarDot: { width: 5, height: 5, borderRadius: 2.5, flexShrink: 0 },
+  pillarTagText: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    flexShrink: 1,
+  },
   estBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
     paddingHorizontal: 5,
-    paddingVertical: 1,
+    paddingVertical: 2,
     borderRadius: 4,
     backgroundColor: colors.card,
   },
   estText: { fontSize: 10, fontWeight: '500', color: colors.textTertiary },
 
-  // Streak badge
-  streakBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    backgroundColor: 'rgba(245,158,11,0.1)',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  streakEmoji: { fontSize: 11 },
-  streakText: { fontSize: 11, color: colors.warning, fontWeight: '700' },
-
-  // Add task row (dashed-style)
-  addTaskRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  addTaskCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: colors.textTertiary,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
-    opacity: 0.5,
-  },
-
-  // Add row (for habits)
+  // ── Add row ──
   addRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -974,99 +1002,156 @@ const st = StyleSheet.create({
   } as any,
   addBtn: { marginLeft: spacing.sm },
 
-  // Habit icon/color picker
+  // ── Time estimate pills ──
+  timeEstRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+    marginTop: -spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
+  timePill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  timePillActive: {
+    backgroundColor: colors.accentMuted,
+    borderColor: colors.accent,
+  },
+  timePillText: { ...typography.micro, color: colors.textTertiary },
+  timePillTextActive: { color: colors.accent },
+
+  // ── Habit icon/color picker ──
   habitIconPreview: {
-    width: 32, height: 32, borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, marginRight: spacing.sm,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginRight: spacing.sm,
   },
   pickerCard: {
-    backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
-    padding: spacing.md, marginBottom: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
   },
   pickerLabel: { ...typography.micro, color: colors.textTertiary, marginBottom: spacing.sm },
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   iconCell: {
-    width: 40, height: 40, borderRadius: radius.sm,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.input, borderWidth: 1, borderColor: 'transparent',
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.input,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   colorRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
   colorDotActive: { borderColor: '#fff', borderWidth: 3 },
 
-  // Empty habits
-  emptyHabits: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
-    paddingVertical: spacing.lg, opacity: 0.5,
-  },
-  emptyHabitsText: { ...typography.caption, color: colors.textTertiary },
-
-  // Time estimate pills
-  timeEstRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    marginBottom: spacing.md, marginTop: spacing.xs, paddingHorizontal: spacing.xs,
-  },
-  timePill: {
-    paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
-    borderRadius: radius.pill, backgroundColor: colors.card,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  timePillActive: { backgroundColor: colors.accentMuted, borderColor: colors.accent },
-  timePillText: { ...typography.micro, color: colors.textTertiary },
-  timePillTextActive: { color: colors.accent },
-
-  // Wrap up your day
-  wrapUpRow: {
+  // ── Empty state ──
+  emptyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(99,102,241,0.06)',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    opacity: 0.5,
+  },
+  emptyRowText: { ...typography.caption, color: colors.textTertiary },
+
+  // ── Wrap Up prompt ──
+  wrapUpCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(99,102,241,0.15)',
+    borderColor: colors.borderFocus,
     padding: spacing.md,
     marginTop: spacing.lg,
     gap: spacing.md,
   },
-  wrapUpEmoji: { fontSize: 22 },
+  wrapUpEmoji: { fontSize: 24 },
   wrapUpContent: { flex: 1 },
-  wrapUpTitle: { ...typography.bodyBold, color: colors.text, fontSize: 15 },
-  wrapUpSub: { ...typography.caption, color: colors.textTertiary, marginTop: 2 },
+  wrapUpTitle: {
+    ...typography.micro,
+    color: colors.accent,
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  wrapUpSub: { ...typography.caption, color: colors.textSecondary },
 
-  // Edit todo modal
+  // ── Edit todo modal ──
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center', alignItems: 'center',
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalCard: {
-    backgroundColor: colors.cardElevated, borderRadius: radius.xl,
-    padding: spacing.xl, width: '88%', maxWidth: 400,
+    backgroundColor: colors.cardElevated,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    width: '88%',
+    maxWidth: 400,
   },
-  modalTitle: { ...typography.bodyBold, color: colors.text, fontSize: 18, marginBottom: spacing.md },
+  modalTitle: {
+    ...typography.bodyBold,
+    color: colors.text,
+    fontSize: 18,
+    marginBottom: spacing.md,
+  },
   modalInput: {
-    backgroundColor: colors.input, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: colors.border,
-    padding: spacing.md, fontSize: 15, color: colors.text,
-    minHeight: 48, maxHeight: 120, marginBottom: spacing.md,
+    backgroundColor: colors.input,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    fontSize: 15,
+    color: colors.text,
+    minHeight: 48,
+    maxHeight: 120,
+    marginBottom: spacing.md,
     textAlignVertical: 'top',
   },
   modalLabel: {
-    ...typography.micro, color: colors.textTertiary,
-    marginBottom: spacing.sm, letterSpacing: 1,
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginBottom: spacing.sm,
+    letterSpacing: 1,
   },
   modalActions: {
-    flexDirection: 'row', justifyContent: 'flex-end',
-    gap: spacing.sm, marginTop: spacing.lg,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
   },
   modalCancelBtn: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
-    borderRadius: radius.lg, backgroundColor: colors.card,
-    borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   modalCancelText: { ...typography.bodyBold, color: colors.textSecondary, fontSize: 14 },
   modalSaveBtn: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
-    borderRadius: radius.lg, backgroundColor: colors.accent,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
   },
   modalSaveText: { ...typography.bodyBold, color: '#fff', fontSize: 14 },
 });
