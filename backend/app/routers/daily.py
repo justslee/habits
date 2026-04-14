@@ -464,13 +464,13 @@ def get_habit_analytics(
 
 @router.post("/end-of-day")
 async def end_of_day_evaluation(db: Session = Depends(get_db)):
-    """Consolidate completed todos + daily reflection into a single AI evaluation.
+    """Consolidate all completed todos into ONE overall AI evaluation for the day.
 
     Gathers all completed pillar-linked todos for today, combines with the
-    daily reflection (focus, energy, takeaway), and runs one evaluation per
-    pillar that had activity. Skips pillars/entries that are already evaluated.
+    daily reflection (focus, energy, takeaway), and runs a single holistic
+    evaluation across all pillars.
     """
-    from app.services.evaluation import evaluate_entry
+    from app.services.evaluation import evaluate_overall_day
 
     user = db.query(User).first()
     if not user:
@@ -510,89 +510,116 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
     reflection_energy = reflection.energy_level if reflection else None
     reflection_takeaway = reflection.key_takeaway if reflection else None
 
-    # 3. Group todos by pillar
-    pillar_todos: dict[int, list[DailyTodo]] = {}
-    for todo in completed_todos:
-        pillar_todos.setdefault(todo.pillar_id, []).append(todo)
-
-    evaluated = []
-
-    for pillar_id, todos in pillar_todos.items():
-        # Build a consolidated description from all todos in this pillar
-        todo_descriptions = [t.text for t in todos]
-        total_minutes = sum(t.estimated_minutes or 30 for t in todos)
-        description = "; ".join(todo_descriptions)
-
-        # Check if there's already an evaluated entry for this pillar today
-        existing = (
-            db.query(DailyEntry)
-            .join(Evaluation, Evaluation.entry_id == DailyEntry.id)
-            .filter(
-                DailyEntry.user_id == user.id,
-                DailyEntry.entry_date == today,
-                DailyEntry.deleted_at.is_(None),
-                DailyEntry.pillar_tags.contains(str(pillar_id)),
-                Evaluation.deleted_at.is_(None),
-            )
-            .first()
+    # 3. Check if already evaluated today (any entry with pillar tags + evaluation)
+    already_evaluated_entry = (
+        db.query(DailyEntry)
+        .join(Evaluation, Evaluation.entry_id == DailyEntry.id)
+        .filter(
+            DailyEntry.user_id == user.id,
+            DailyEntry.entry_date == today,
+            DailyEntry.deleted_at.is_(None),
+            DailyEntry.pillar_tags.isnot(None),
+            DailyEntry.pillar_tags != "",
+            Evaluation.deleted_at.is_(None),
         )
-        if existing:
-            continue  # Already evaluated for this pillar today
+        .first()
+    )
 
-        # Create or find a consolidated entry for this pillar
-        # Use the first todo's auto-created entry if it exists, otherwise create one
-        entry = None
-        for todo in todos:
-            if todo.entry_id:
-                candidate = db.query(DailyEntry).filter(
-                    DailyEntry.id == todo.entry_id,
-                    DailyEntry.deleted_at.is_(None),
-                ).first()
-                if candidate and not candidate.evaluation:
-                    entry = candidate
-                    break
+    # Build pillars_touched from actual todos (always needed for response)
+    pillar_todos_map: dict[int, list[DailyTodo]] = {}
+    for todo in completed_todos:
+        pillar_todos_map.setdefault(todo.pillar_id, []).append(todo)
 
-        if not entry:
-            entry = DailyEntry(
-                user_id=user.id,
-                entry_date=today,
-                description=description,
-                time_invested_minutes=total_minutes,
-                difficulty_rating=reflection_focus or 5,
-                energy_level=reflection_energy or 5,
-                key_takeaway=reflection_takeaway or f"Completed {len(todos)} tasks",
-            )
-            entry.pillar_tag_list = [pillar_id]
-            db.add(entry)
-            db.flush()
-        else:
-            # Update the entry with consolidated info + reflection data
-            entry.description = description
-            entry.time_invested_minutes = total_minutes
-            if reflection_focus:
-                entry.difficulty_rating = reflection_focus
-            if reflection_energy:
-                entry.energy_level = reflection_energy
-            if reflection_takeaway:
-                entry.key_takeaway = reflection_takeaway
-            db.flush()
+    all_pillar_ids = list(pillar_todos_map.keys())
+    pillar_objs = {p.id: p for p in db.query(Pillar).filter(Pillar.id.in_(all_pillar_ids)).all()}
+    total_minutes = sum(t.estimated_minutes or 30 for t in completed_todos)
 
-        # 4. Run AI evaluation
-        try:
-            evaluation = await evaluate_entry(entry, db)
-            evaluated.append({
-                "pillar_id": pillar_id,
-                "pillar_name": db.query(Pillar).filter(Pillar.id == pillar_id).first().name if db.query(Pillar).filter(Pillar.id == pillar_id).first() else f"Pillar {pillar_id}",
-                "entry_id": entry.id,
-                "depth_score": evaluation.depth_score,
-                "relevance_score": evaluation.relevance_score,
-                "one_percent_better": evaluation.one_percent_better,
-                "verdict_explanation": evaluation.verdict_explanation,
-                "commentary": evaluation.commentary,
-                "time_invested_minutes": entry.time_invested_minutes,
-            })
-        except Exception as e:
-            logger.error(f"End-of-day evaluation failed for pillar {pillar_id}: {e}")
+    pillars_touched = [
+        {
+            "pillar_name": pillar_objs[pid].name if pid in pillar_objs else f"Pillar {pid}",
+            "time_invested_minutes": sum(t.estimated_minutes or 30 for t in todos),
+        }
+        for pid, todos in pillar_todos_map.items()
+    ]
+
+    if already_evaluated_entry:
+        eval_obj = already_evaluated_entry.evaluation
+        return {
+            "evaluated": 1,
+            "result": {
+                "depth_score": eval_obj.depth_score,
+                "one_percent_better": eval_obj.one_percent_better,
+                "verdict_explanation": eval_obj.verdict_explanation,
+                "commentary": eval_obj.commentary,
+                "pillars_touched": pillars_touched,
+                "total_time_minutes": total_minutes,
+            },
+            "reflection_applied": reflection is not None,
+        }
+
+    # 4. Build pillar summaries for the overall prompt
+    pillar_summaries = [
+        {
+            "pillar_id": pid,
+            "pillar_name": pillar_objs[pid].name if pid in pillar_objs else f"Pillar {pid}",
+            "depth_target": pillar_objs[pid].depth_target if pid in pillar_objs else "unspecified",
+            "time_minutes": sum(t.estimated_minutes or 30 for t in todos),
+            "todos": "; ".join(t.text for t in todos),
+        }
+        for pid, todos in pillar_todos_map.items()
+    ]
+
+    # 5. Create one combined DailyEntry covering all pillars
+    combined_description = " | ".join(
+        f"{ps['pillar_name']}: {ps['todos']}" for ps in pillar_summaries
+    )
+
+    entry = None
+    for todo in completed_todos:
+        if todo.entry_id:
+            candidate = db.query(DailyEntry).filter(
+                DailyEntry.id == todo.entry_id,
+                DailyEntry.deleted_at.is_(None),
+            ).first()
+            if candidate and not candidate.evaluation:
+                entry = candidate
+                break
+
+    if not entry:
+        entry = DailyEntry(
+            user_id=user.id,
+            entry_date=today,
+            description=combined_description,
+            time_invested_minutes=total_minutes,
+            difficulty_rating=reflection_focus or 5,
+            energy_level=reflection_energy or 5,
+            key_takeaway=reflection_takeaway or f"Completed {len(completed_todos)} tasks across {len(pillar_summaries)} pillars",
+        )
+        entry.pillar_tag_list = all_pillar_ids
+        db.add(entry)
+        db.flush()
+    else:
+        entry.description = combined_description
+        entry.time_invested_minutes = total_minutes
+        entry.pillar_tag_list = all_pillar_ids
+        if reflection_focus:
+            entry.difficulty_rating = reflection_focus
+        if reflection_energy:
+            entry.energy_level = reflection_energy
+        if reflection_takeaway:
+            entry.key_takeaway = reflection_takeaway
+        db.flush()
+
+    # 6. Run ONE overall AI evaluation
+    try:
+        evaluation = await evaluate_overall_day(entry, pillar_summaries, db)
+    except Exception as e:
+        logger.error(f"End-of-day overall evaluation failed: {e}")
+        return {
+            "evaluated": 0,
+            "results": [],
+            "reflection_applied": reflection is not None,
+        }
 
     # Auto-trigger weekly review on Sundays
     weekly_review = None
@@ -610,8 +637,15 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
             logger.error(f"Sunday weekly review generation failed: {e}")
 
     return {
-        "evaluated": len(evaluated),
-        "results": evaluated,
+        "evaluated": 1,
+        "result": {
+            "depth_score": evaluation.depth_score,
+            "one_percent_better": evaluation.one_percent_better,
+            "verdict_explanation": evaluation.verdict_explanation,
+            "commentary": evaluation.commentary,
+            "pillars_touched": pillars_touched,
+            "total_time_minutes": total_minutes,
+        },
         "reflection_applied": reflection is not None,
         "weekly_review": weekly_review,
     }

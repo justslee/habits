@@ -23,7 +23,13 @@ import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
 import CheckInModal from './CheckInModal';
 
-const TIME_ESTIMATES = [15, 30, 45, 60, 90];
+const TIME_ESTIMATES = [15, 30, 60, 90, 120, 180, 240];
+
+const formatTimePill = (min: number): string => {
+  if (min < 60) return `${min}m`;
+  const h = min / 60;
+  return `${h}h`;
+};
 const HABIT_ICONS: string[] = [
   'flame-outline', 'book-outline', 'barbell-outline', 'water-outline',
   'bed-outline', 'walk-outline', 'code-slash-outline', 'musical-notes-outline',
@@ -549,7 +555,7 @@ export default function DailyScreen() {
                     }}
                   >
                     <Text style={[st.timePillText, selectedTimeEstimate === min && st.timePillTextActive]}>
-                      {min}m
+                      {formatTimePill(min)}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -616,7 +622,7 @@ export default function DailyScreen() {
                         onPress={() => { setEditMinutes(editMinutes === min ? null : min); haptic.selection(); }}
                       >
                         <Text style={[st.timePillText, editMinutes === min && st.timePillTextActive]}>
-                          {min}m
+                          {formatTimePill(min)}
                         </Text>
                       </TouchableOpacity>
                     ))}
