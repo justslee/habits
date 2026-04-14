@@ -1,7 +1,7 @@
 """AI Run Coach — Training plan generation and post-run feedback.
 
-Uses Clawdbot for LLM calls. Generates Runna-style progressive training plans
-with structured run types and pace targets.
+Uses tool_use structured outputs for training plans and generate_text for feedback.
+Generates Runna-style progressive plans with structured run types and pace targets.
 """
 
 import json
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.run import (
     PersonalRecord, PlannedRun, RunSession, RunningProfile, TrainingPlan,
 )
-from app.services.evaluation import call_clawdbot
+from app.services.llm import SONNET, structured_output, generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -92,34 +92,6 @@ Available run days: {days_str}
 {profile_context}
 {run_history}
 
-IMPORTANT: Respond ONLY with valid JSON. No markdown, no explanation. Format:
-{{
-  "total_weeks": {weeks},
-  "weekly_plans": [
-    {{
-      "week": 1,
-      "focus": "base building",
-      "total_miles": 12,
-      "runs": [
-        {{
-          "day_of_week": 1,
-          "run_type": "easy",
-          "distance_miles": 3.0,
-          "target_pace_seconds": 570,
-          "duration_minutes": 30,
-          "description": "Easy 3 miles at conversational pace",
-          "structure": [
-            {{"type": "warmup", "minutes": 5, "pace": "easy"}},
-            {{"type": "work", "minutes": 20, "pace": "9:30/mi"}},
-            {{"type": "cooldown", "minutes": 5, "pace": "easy"}}
-          ]
-        }}
-      ]
-    }}
-  ],
-  "coach_notes": "Overview of the plan and why it's structured this way"
-}}
-
 Day numbers: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
 Pace in seconds per mile (e.g., 570 = 9:30/mi)
 Include warmup/cooldown in all structured runs.
@@ -127,14 +99,65 @@ Week 4, 8, 12 should be deload weeks (~30-40% volume reduction).
 80% easy miles, 20% quality (tempo/intervals).
 DO NOT schedule runs on Mon/Tue/Wed (strength days) or Sat (basketball)."""
 
+    training_plan_schema = {
+        "type": "object",
+        "properties": {
+            "total_weeks": {"type": "integer"},
+            "weekly_plans": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "week": {"type": "integer"},
+                        "focus": {"type": "string"},
+                        "total_miles": {"type": "number"},
+                        "runs": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "day_of_week": {"type": "integer", "description": "0=Mon, 6=Sun"},
+                                    "run_type": {"type": "string", "enum": ["easy", "tempo", "intervals", "long", "recovery", "fartlek", "progression"]},
+                                    "distance_miles": {"type": "number"},
+                                    "target_pace_seconds": {"type": "integer", "description": "Pace in seconds per mile"},
+                                    "duration_minutes": {"type": "integer"},
+                                    "description": {"type": "string"},
+                                    "structure": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {"type": "string", "enum": ["warmup", "work", "cooldown", "recovery"]},
+                                                "minutes": {"type": "integer"},
+                                                "pace": {"type": "string"},
+                                            },
+                                            "required": ["type", "minutes", "pace"],
+                                        },
+                                    },
+                                },
+                                "required": ["day_of_week", "run_type", "distance_miles", "target_pace_seconds", "duration_minutes", "description"],
+                            },
+                        },
+                    },
+                    "required": ["week", "focus", "total_miles", "runs"],
+                },
+            },
+            "coach_notes": {"type": "string", "description": "Overview of the plan and why it's structured this way"},
+        },
+        "required": ["total_weeks", "weekly_plans", "coach_notes"],
+    }
+
     try:
-        result = await call_clawdbot(
-            system_prompt=RUN_COACH_SYSTEM,
+        return await structured_output(
+            system=RUN_COACH_SYSTEM,
             user_prompt=prompt,
+            tool_name="submit_training_plan",
+            tool_description="Submit the structured multi-week training plan with runs, paces, and coaching notes.",
+            output_schema=training_plan_schema,
+            model=SONNET,
+            max_tokens=8192,
         )
-        plan = json.loads(result["choices"][0]["message"]["content"])
-        return plan
-    except (json.JSONDecodeError, Exception) as e:
+    except Exception as e:
         logger.warning(f"Plan generation failed: {e}, using fallback")
         return _fallback_plan(goal_type, fitness_level, weeks, available_days or [1, 4, 6])
 
@@ -285,11 +308,11 @@ Whoop recovery: {run.whoop_recovery_score or 'unknown'}%
 What went well? What to improve? How does this fit the training plan?"""
 
     try:
-        result = await call_clawdbot(
-            system_prompt=RUN_COACH_SYSTEM,
+        return await generate_text(
+            system=RUN_COACH_SYSTEM,
             user_prompt=prompt,
+            model=SONNET,
         )
-        return result["choices"][0]["message"]["content"]
     except Exception:
         return "Run logged successfully. Keep building consistency."
 

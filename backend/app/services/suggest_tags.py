@@ -1,17 +1,16 @@
-"""Auto-suggest pillar tags using Clawdbot (D-012).
+"""Auto-suggest pillar tags using tool_use structured outputs (D-012).
 
 Analyzes entry description text and suggests relevant pillars
-with confidence scores and sub-topic hints.
+with confidence scores and sub-topic hints. Uses Haiku for speed/cost.
 """
 
-import json
 import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.models.pillar import Pillar
-from app.services.evaluation import call_clawdbot
+from app.services.llm import HAIKU, structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +31,27 @@ pillars it belongs to and suggest sub-topic hints.
   (e.g., "stochastic calculus", "derivatives pricing").
 - Be precise. Don't suggest a pillar unless the activity clearly relates to it.
 
-## Response Format
-Respond with valid JSON only. No markdown, no explanation outside the JSON.
-{{
-  "suggestions": [
-    {{
-      "pillar_id": <int>,
-      "pillar_name": "<string>",
-      "confidence": <float 0.0-1.0>,
-      "sub_topics": ["<topic1>", "<topic2>"]
-    }}
-  ]
-}}"""
+Use the submit_tag_suggestions tool to return your suggestions."""
+
+SUGGEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "pillar_id": {"type": "integer"},
+                    "pillar_name": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "sub_topics": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["pillar_id", "pillar_name", "confidence", "sub_topics"],
+            },
+        },
+    },
+    "required": ["suggestions"],
+}
 
 
 def _build_pillars_context(pillars: list[Pillar]) -> str:
@@ -56,6 +64,8 @@ def _build_pillars_context(pillars: list[Pillar]) -> str:
 
 async def suggest_tags(description: str, db: Session) -> list[dict[str, Any]]:
     """Analyze description text and suggest pillar tags.
+
+    Uses Haiku for speed and cost efficiency — this is a simple classification task.
 
     Args:
         description: Free-text description of the learning session.
@@ -70,27 +80,16 @@ async def suggest_tags(description: str, db: Session) -> list[dict[str, Any]]:
 
     user_prompt = f"Classify this learning session:\n\n{description}"
 
-    raw_response = await call_clawdbot(system_prompt, user_prompt)
-    return parse_suggest_response(raw_response, pillars)
+    parsed = await structured_output(
+        system=system_prompt,
+        user_prompt=user_prompt,
+        tool_name="submit_tag_suggestions",
+        tool_description="Submit pillar tag suggestions with confidence scores and sub-topic hints.",
+        output_schema=SUGGEST_SCHEMA,
+        model=HAIKU,
+    )
 
-
-def parse_suggest_response(
-    raw_response: dict[str, Any], pillars: list[Pillar]
-) -> list[dict[str, Any]]:
-    """Parse LLM response into suggestion list."""
-    content = raw_response["choices"][0]["message"]["content"]
-
-    # Strip markdown code fences if present
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-
-    parsed = json.loads(content)
     valid_ids = {p.id for p in pillars}
-
     suggestions = []
     for s in parsed.get("suggestions", []):
         pid = int(s["pillar_id"])
@@ -108,6 +107,5 @@ def parse_suggest_response(
             }
         )
 
-    # Sort by confidence descending
     suggestions.sort(key=lambda x: x["confidence"], reverse=True)
     return suggestions

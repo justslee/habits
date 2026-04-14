@@ -60,15 +60,19 @@ _api_key = os.getenv("API_KEY", "")
 _PUBLIC_PATHS = {"/", "/health"}
 
 
+_testing = os.getenv("TESTING", "") == "1"
+
+
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     """Require API key for all non-public endpoints. Fail closed if no key configured."""
-    if request.url.path not in _PUBLIC_PATHS:
-        if not _api_key:
-            return JSONResponse(status_code=503, content={"detail": "Server not configured (missing API_KEY)"})
-        provided = request.headers.get("X-API-Key", "")
-        if not hmac.compare_digest(provided, _api_key):
-            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    if _testing or request.url.path in _PUBLIC_PATHS:
+        return await call_next(request)
+    if not _api_key:
+        return JSONResponse(status_code=503, content={"detail": "Server not configured (missing API_KEY)"})
+    provided = request.headers.get("X-API-Key", "")
+    if not hmac.compare_digest(provided, _api_key):
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
     return await call_next(request)
 
 

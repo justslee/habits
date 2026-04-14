@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.services.evaluation import call_clawdbot
+from app.services.llm import HAIKU, structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -152,22 +152,27 @@ def _classify_difficulty(ascend_m: float, distance_m: float) -> str:
     return "hilly"
 
 
+ROUTE_NAME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "description": "Creative 2-4 word route name (e.g. 'Riverside Loop', 'Harbor Heights')"},
+        "description": {"type": "string", "description": "One sentence about the route character"},
+    },
+    "required": ["name", "description"],
+}
+
+
 async def _generate_route_name(
     street_names: List[str], distance_miles: float, difficulty: str, index: int
 ) -> Tuple[str, str]:
-    """Use Clawdbot to generate a creative route name and description."""
+    """Use Haiku to generate a creative route name and description."""
     fallback_name = f"Loop Route {index + 1}"
     fallback_desc = f"A {distance_miles:.1f}-mile {difficulty} loop"
 
     if not street_names:
         return fallback_name, fallback_desc
 
-    system = (
-        "You name running routes. Given street names and stats, return a JSON object "
-        "with 'name' (creative 2-4 word name, e.g. 'Riverside Loop', 'Harbor Heights') "
-        "and 'description' (one sentence about the route character). "
-        "No markdown, no code fences — just raw JSON."
-    )
+    system = "You name running routes. Given street names and stats, create a creative route name and description."
     user = (
         f"Streets: {', '.join(street_names)}\n"
         f"Distance: {distance_miles:.1f} miles\n"
@@ -175,15 +180,14 @@ async def _generate_route_name(
     )
 
     try:
-        raw = await call_clawdbot(system, user)
-        import json
-        content = raw["choices"][0]["message"]["content"].strip()
-        # Strip code fences if present
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
-        parsed = json.loads(content.strip())
+        parsed = await structured_output(
+            system=system,
+            user_prompt=user,
+            tool_name="submit_route_name",
+            tool_description="Submit the creative route name and one-sentence description.",
+            output_schema=ROUTE_NAME_SCHEMA,
+            model=HAIKU,
+        )
         return parsed.get("name", fallback_name), parsed.get("description", fallback_desc)
     except Exception as e:
         logger.warning("Route naming failed: %s", e)

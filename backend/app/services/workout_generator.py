@@ -1,19 +1,17 @@
 """AI Workout Generator — "The Coach" (P2-2).
 
-Generates complete workout plans using the Coach persona via Clawdbot.
+Generates complete workout plans using tool_use structured outputs.
 Integrates progressive overload data and Whoop recovery.
 """
 
-import json
 import logging
 from datetime import date
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.user import User
 from app.models.workout import ExerciseProfile, WorkoutSession
-from app.services.evaluation import call_clawdbot
+from app.services.llm import SONNET, structured_output
 from app.services.progressive_overload import (
     calculate_warmup_sets,
     get_next_session_targets,
@@ -48,22 +46,40 @@ Your communication style:
 - Be honest when progress stalls — diagnose the issue, don't just encourage.
 - Celebrate real PRs and milestones. Ignore fake effort.
 
-Respond with valid JSON only:
-{
-  "exercises": [
-    {
-      "name": "Exercise Name",
-      "sets": <int>,
-      "reps": <int or string like "8-12">,
-      "weight": <float or null>,
-      "rest_seconds": <int>,
-      "notes": "coaching note"
-    }
-  ],
-  "pre_jog": {"minutes": 12, "pace": "easy conversational"},
-  "coach_notes": "2-3 sentences about today's session focus",
-  "estimated_duration_minutes": <int>
-}"""
+Use the submit_workout_plan tool to return the structured workout plan."""
+
+WORKOUT_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "exercises": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "sets": {"type": "integer"},
+                    "reps": {"type": "string", "description": "Reps as int or range like '8-12'"},
+                    "weight": {"type": "number", "description": "Weight in lbs, or 0 if bodyweight"},
+                    "rest_seconds": {"type": "integer"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["name", "sets", "reps", "rest_seconds"],
+            },
+        },
+        "pre_jog": {
+            "type": "object",
+            "properties": {
+                "minutes": {"type": "integer"},
+                "pace": {"type": "string"},
+            },
+            "required": ["minutes", "pace"],
+            "description": "Pre-workout jog. Omit for cardio days.",
+        },
+        "coach_notes": {"type": "string", "description": "2-3 sentences about today's session focus"},
+        "estimated_duration_minutes": {"type": "integer"},
+    },
+    "required": ["exercises", "coach_notes", "estimated_duration_minutes"],
+}
 
 
 def _build_workout_context(
@@ -153,18 +169,16 @@ async def generate_workout_plan(
     user_prompt = f"Generate today's {day_type} workout plan.\n\n{context}"
 
     try:
-        raw_response = await call_clawdbot(COACH_SYSTEM_PROMPT, user_prompt)
-        content = raw_response["choices"][0]["message"]["content"]
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-        return json.loads(content)
+        return await structured_output(
+            system=COACH_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            tool_name="submit_workout_plan",
+            tool_description="Submit the structured workout plan with exercises, sets, reps, weights, and coaching notes.",
+            output_schema=WORKOUT_PLAN_SCHEMA,
+            model=SONNET,
+        )
     except Exception as e:
         logger.error(f"Workout generation failed: {e}")
-        # Fallback: generate from profiles without LLM
         return _generate_fallback_plan(user_id, day_type, db)
 
 

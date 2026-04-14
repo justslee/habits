@@ -1,14 +1,13 @@
 """AI Evaluation Engine — Claude integration via Anthropic SDK.
 
 Engineered for brutal honesty (D-003 — no participation trophies).
+Uses tool_use for structured outputs — no more JSON-in-prompt.
 """
 
 import json
 import logging
-import os
-from typing import Any, Optional
+from typing import Any
 
-import anthropic
 from sqlalchemy.orm import Session
 
 from app.models.daily_entry import DailyEntry
@@ -16,26 +15,9 @@ from app.models.evaluation import Evaluation
 from app.models.pillar import Pillar
 from app.models.vision import Vision
 from app.services.adaptive import build_adaptive_context_block, calculate_consistency_multiplier
+from app.services.llm import SONNET, structured_output
 
 logger = logging.getLogger(__name__)
-
-ANTHROPIC_MODEL = "claude-opus-4-6"
-
-# IMPORTANT: Do not hardcode API keys in the repo.
-# Set ANTHROPIC_API_KEY in the environment.
-
-# Module-level singleton — reuses connection pool across all calls.
-_anthropic_client: Optional[anthropic.AsyncAnthropic] = None
-
-
-def _get_client() -> anthropic.AsyncAnthropic:
-    global _anthropic_client
-    if _anthropic_client is None:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise RuntimeError("Missing ANTHROPIC_API_KEY env var")
-        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
-    return _anthropic_client
 
 SYSTEM_PROMPT = """You are the Honest Mirror — a brutally honest AI evaluator for a personal mastery tracking system.
 
@@ -73,18 +55,24 @@ Ask: "If they did exactly this every day for a year, would they be meaningfully 
 ### Concept Identification
 You will also receive a list of the user's tracked concepts for relevant pillars.
 Identify which specific concepts were touched/practiced in this session.
-Return their names EXACTLY as listed (case-sensitive match required).
+Return their names EXACTLY as listed (case-sensitive match required)."""
 
-## Response Format
-You MUST respond with valid JSON only. No markdown, no explanation outside the JSON.
-{
-  "depth_score": <int 0-100>,
-  "relevance_score": <int 0-100>,
-  "one_percent_better": <true|false>,
-  "verdict_explanation": "<1-2 sentences explaining the verdict>",
-  "commentary": "<2-4 sentences of brutally honest feedback>",
-  "concepts_touched": ["<exact concept name 1>", "<exact concept name 2>"]
-}"""
+EVALUATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "depth_score": {"type": "integer", "minimum": 0, "maximum": 100, "description": "How deep the engagement was (0=surface, 100=research-level)"},
+        "relevance_score": {"type": "integer", "minimum": 0, "maximum": 100, "description": "How relevant to the pillar's depth target (0=tangential, 100=bullseye)"},
+        "one_percent_better": {"type": "boolean", "description": "Would doing this daily for a year make them meaningfully better?"},
+        "verdict_explanation": {"type": "string", "description": "1-2 sentences explaining the verdict"},
+        "commentary": {"type": "string", "description": "2-4 sentences of brutally honest feedback"},
+        "concepts_touched": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Exact names of concepts touched in this session (case-sensitive match to provided list)",
+        },
+    },
+    "required": ["depth_score", "relevance_score", "one_percent_better", "verdict_explanation", "commentary", "concepts_touched"],
+}
 
 
 def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar], db: Session = None) -> str:
@@ -129,50 +117,20 @@ def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar], db: Session = N
 Be brutally honest. No sugar coating.{concepts_block}"""
 
 
-async def call_clawdbot(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
-    """Call Claude via Anthropic SDK. Returns an OpenAI-compatible dict for backward compatibility."""
-    client = _get_client()
-    response = await client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=4096,
-        temperature=temperature,
+async def evaluate_with_tool_use(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    """Evaluate an entry using tool_use structured output.
+
+    Returns the parsed evaluation dict directly — no JSON parsing needed.
+    """
+    return await structured_output(
         system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
+        user_prompt=user_prompt,
+        tool_name="submit_evaluation",
+        tool_description="Submit the evaluation scores, verdict, commentary, and concepts touched for this learning session.",
+        output_schema=EVALUATION_SCHEMA,
+        model=SONNET,
+        temperature=0.3,
     )
-    # Wrap in OpenAI-compatible shape so all callers work unchanged.
-    return {"choices": [{"message": {"content": response.content[0].text}}]}
-
-
-def parse_llm_response(raw_response: dict[str, Any]) -> dict[str, Any]:
-    """Parse the LLM response into evaluation fields."""
-    content = raw_response["choices"][0]["message"]["content"]
-
-    # Strip markdown code fences if present
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-
-    parsed = json.loads(content)
-
-    # Validate and clamp scores
-    depth = max(0, min(100, int(parsed["depth_score"])))
-    relevance = max(0, min(100, int(parsed["relevance_score"])))
-
-    concepts_touched = parsed.get("concepts_touched", [])
-    if not isinstance(concepts_touched, list):
-        concepts_touched = []
-
-    return {
-        "depth_score": depth,
-        "relevance_score": relevance,
-        "one_percent_better": bool(parsed["one_percent_better"]),
-        "verdict_explanation": str(parsed["verdict_explanation"]),
-        "commentary": str(parsed["commentary"]),
-        "concepts_touched": concepts_touched,
-    }
 
 
 def _build_vision_context(user_id: int, pillar_ids: list[int], pillars: list[Pillar], db: Session) -> str:
@@ -262,18 +220,21 @@ async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
         entry.user_id, entry.pillar_tag_list, db
     )
 
-    raw_response = await call_clawdbot(system_prompt, user_prompt)
-    parsed = parse_llm_response(raw_response)
+    parsed = await evaluate_with_tool_use(system_prompt, user_prompt)
+
+    # Clamp scores (schema enforces range but belt-and-suspenders)
+    depth = max(0, min(100, int(parsed["depth_score"])))
+    relevance = max(0, min(100, int(parsed["relevance_score"])))
 
     evaluation = Evaluation(
         entry_id=entry.id,
-        depth_score=parsed["depth_score"],
-        relevance_score=parsed["relevance_score"],
+        depth_score=depth,
+        relevance_score=relevance,
         consistency_multiplier=consistency_mult,
-        one_percent_better=parsed["one_percent_better"],
-        verdict_explanation=parsed["verdict_explanation"],
-        commentary=parsed["commentary"],
-        raw_llm_response=json.dumps(raw_response),
+        one_percent_better=bool(parsed["one_percent_better"]),
+        verdict_explanation=str(parsed["verdict_explanation"]),
+        commentary=str(parsed["commentary"]),
+        raw_llm_response=json.dumps(parsed),
     )
 
     db.add(evaluation)

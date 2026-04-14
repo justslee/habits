@@ -1,6 +1,6 @@
 """Tests for the AI evaluation engine (TASK-005).
 
-All LLM calls are mocked — no actual Clawdbot calls in tests.
+All LLM calls are mocked — no actual Claude calls in tests.
 """
 
 import json
@@ -14,47 +14,29 @@ from app.models.daily_entry import DailyEntry
 from app.models.evaluation import Evaluation
 from app.services.evaluation import (
     SYSTEM_PROMPT,
+    EVALUATION_SCHEMA,
     _build_user_prompt,
-    parse_llm_response,
 )
 
 client = TestClient(app)
 
-# Sample LLM response matching expected format
-MOCK_LLM_RESPONSE = {
-    "choices": [
-        {
-            "message": {
-                "content": json.dumps(
-                    {
-                        "depth_score": 72,
-                        "relevance_score": 85,
-                        "one_percent_better": True,
-                        "verdict_explanation": "Working through stochastic calculus proofs is exactly the kind of deep engagement that compounds.",
-                        "commentary": "Solid session. You didn't just read about Itô's lemma — you proved it. That's the difference between knowing and understanding. The 90 minutes was well spent, though I'd push you to attempt the multi-dimensional case next time. Don't get comfortable with 1D.",
-                    }
-                )
-            }
-        }
-    ]
+# Mock structured output — now returns dicts directly (no OpenAI wrapper)
+MOCK_EVAL_RESULT = {
+    "depth_score": 72,
+    "relevance_score": 85,
+    "one_percent_better": True,
+    "verdict_explanation": "Working through stochastic calculus proofs is exactly the kind of deep engagement that compounds.",
+    "commentary": "Solid session. You didn't just read about Itô's lemma — you proved it. That's the difference between knowing and understanding. The 90 minutes was well spent, though I'd push you to attempt the multi-dimensional case next time. Don't get comfortable with 1D.",
+    "concepts_touched": [],
 }
 
-MOCK_LOW_SCORE_RESPONSE = {
-    "choices": [
-        {
-            "message": {
-                "content": json.dumps(
-                    {
-                        "depth_score": 15,
-                        "relevance_score": 30,
-                        "one_percent_better": False,
-                        "verdict_explanation": "Watching a YouTube overview is not learning. It's entertainment with a guilt-free wrapper.",
-                        "commentary": "You spent 20 minutes watching a summary video about options pricing. That's passive consumption, not active learning. You didn't work a single problem, derive a single equation, or build anything. This is the equivalent of watching someone else do pushups and calling it a workout.",
-                    }
-                )
-            }
-        }
-    ]
+MOCK_LOW_SCORE_RESULT = {
+    "depth_score": 15,
+    "relevance_score": 30,
+    "one_percent_better": False,
+    "verdict_explanation": "Watching a YouTube overview is not learning. It's entertainment with a guilt-free wrapper.",
+    "commentary": "You spent 20 minutes watching a summary video about options pricing. That's passive consumption, not active learning. You didn't work a single problem, derive a single equation, or build anything. This is the equivalent of watching someone else do pushups and calling it a workout.",
+    "concepts_touched": [],
 }
 
 
@@ -68,76 +50,6 @@ ENTRY_PAYLOAD = {
 }
 
 
-class TestParseResponse:
-    """Test LLM response parsing."""
-
-    def test_parse_valid_response(self):
-        result = parse_llm_response(MOCK_LLM_RESPONSE)
-        assert result["depth_score"] == 72
-        assert result["relevance_score"] == 85
-        assert result["one_percent_better"] is True
-        assert "stochastic calculus" in result["verdict_explanation"]
-        assert len(result["commentary"]) > 0
-
-    def test_parse_low_score_response(self):
-        result = parse_llm_response(MOCK_LOW_SCORE_RESPONSE)
-        assert result["depth_score"] == 15
-        assert result["relevance_score"] == 30
-        assert result["one_percent_better"] is False
-
-    def test_parse_clamps_scores(self):
-        """Scores outside 0-100 get clamped."""
-        bad_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "depth_score": 150,
-                                "relevance_score": -10,
-                                "one_percent_better": True,
-                                "verdict_explanation": "test",
-                                "commentary": "test",
-                            }
-                        )
-                    }
-                }
-            ]
-        }
-        result = parse_llm_response(bad_response)
-        assert result["depth_score"] == 100
-        assert result["relevance_score"] == 0
-
-    def test_parse_markdown_wrapped_json(self):
-        """Handle LLM wrapping JSON in markdown code fences."""
-        wrapped = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "```json\n"
-                        + json.dumps(
-                            {
-                                "depth_score": 50,
-                                "relevance_score": 60,
-                                "one_percent_better": True,
-                                "verdict_explanation": "test",
-                                "commentary": "test",
-                            }
-                        )
-                        + "\n```"
-                    }
-                }
-            ]
-        }
-        result = parse_llm_response(wrapped)
-        assert result["depth_score"] == 50
-
-    def test_parse_invalid_json_raises(self):
-        bad = {"choices": [{"message": {"content": "not json at all"}}]}
-        with pytest.raises(json.JSONDecodeError):
-            parse_llm_response(bad)
-
-
 class TestSystemPrompt:
     """Test the evaluation prompt design."""
 
@@ -145,11 +57,14 @@ class TestSystemPrompt:
         assert "participation trophies" in SYSTEM_PROMPT.lower()
         assert "brutally honest" in SYSTEM_PROMPT.lower()
 
-    def test_system_prompt_requires_json(self):
-        assert "depth_score" in SYSTEM_PROMPT
-        assert "relevance_score" in SYSTEM_PROMPT
-        assert "one_percent_better" in SYSTEM_PROMPT
-        assert "commentary" in SYSTEM_PROMPT
+    def test_evaluation_schema_has_required_fields(self):
+        """Schema defines all required evaluation fields."""
+        props = EVALUATION_SCHEMA["properties"]
+        assert "depth_score" in props
+        assert "relevance_score" in props
+        assert "one_percent_better" in props
+        assert "commentary" in props
+        assert "concepts_touched" in props
 
     def test_system_prompt_has_scoring_guidelines(self):
         assert "0-20" in SYSTEM_PROMPT
@@ -186,9 +101,9 @@ class TestBuildPrompt:
 class TestEvaluateEndpoint:
     """Test the POST /api/v1/entries/{id}/evaluate endpoint."""
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluate_entry_success(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.evaluation.structured_output", new_callable=AsyncMock)
+    def test_evaluate_entry_success(self, mock_structured, db_session):
+        mock_structured.return_value = MOCK_EVAL_RESULT
 
         # Create an entry first
         resp = client.post("/api/v1/entries", json=ENTRY_PAYLOAD)
@@ -211,9 +126,9 @@ class TestEvaluateEndpoint:
         assert eval_obj is not None
         assert eval_obj.depth_score == 72
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluate_already_evaluated_returns_409(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.evaluation.structured_output", new_callable=AsyncMock)
+    def test_evaluate_already_evaluated_returns_409(self, mock_structured, db_session):
+        mock_structured.return_value = MOCK_EVAL_RESULT
 
         resp = client.post("/api/v1/entries", json=ENTRY_PAYLOAD)
         entry_id = resp.json()["id"]
@@ -230,9 +145,9 @@ class TestEvaluateEndpoint:
         resp = client.post("/api/v1/entries/9999/evaluate")
         assert resp.status_code == 404
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluate_low_score_entry(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LOW_SCORE_RESPONSE
+    @patch("app.services.evaluation.structured_output", new_callable=AsyncMock)
+    def test_evaluate_low_score_entry(self, mock_structured, db_session):
+        mock_structured.return_value = MOCK_LOW_SCORE_RESULT
 
         payload = {
             "description": "Watched a 20-minute YouTube video about options pricing basics",
@@ -252,10 +167,10 @@ class TestEvaluateEndpoint:
         assert data["evaluation"]["depth_score"] == 15
         assert data["evaluation"]["one_percent_better"] is False
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluation_visible_in_get_entry(self, mock_clawdbot, db_session):
+    @patch("app.services.evaluation.structured_output", new_callable=AsyncMock)
+    def test_evaluation_visible_in_get_entry(self, mock_structured, db_session):
         """After evaluation, GET /entries/{id} includes evaluation data."""
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+        mock_structured.return_value = MOCK_EVAL_RESULT
 
         resp = client.post("/api/v1/entries", json=ENTRY_PAYLOAD)
         entry_id = resp.json()["id"]

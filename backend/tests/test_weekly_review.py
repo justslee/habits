@@ -14,28 +14,18 @@ from app.models.weekly_review import WeeklyReview
 from app.services.weekly_review import (
     get_current_week_bounds,
     get_last_week_bounds,
-    parse_review_response_local,
 )
 
 client = TestClient(app)
 
-MOCK_LLM_RESPONSE = {
-    "choices": [
-        {
-            "message": {
-                "content": json.dumps(
-                    {
-                        "pillar_distribution": "QF: 3h (depth 72), ML: 2h (depth 65). Other pillars neglected.",
-                        "comfort_zone_analysis": "Heavy lean toward technical pillars. Public speaking completely ignored for 2 weeks.",
-                        "recommendations": "1. Schedule 30min speaking practice Wed/Fri. 2. Add one macro reading session. 3. Push ML depth — move from textbook to proofs.",
-                        "letter_grade": "C",
-                        "grade_justification": "Decent depth in 2 pillars but ignoring 3 others is not acceptable. Balance matters.",
-                        "quote": '"The only way to do great work is to love what you do." — Steve Jobs',
-                    }
-                )
-            }
-        }
-    ]
+# Mock structured output — now returns dicts directly (no OpenAI wrapper)
+MOCK_REVIEW_RESULT = {
+    "pillar_distribution": "QF: 3h (depth 72), ML: 2h (depth 65). Other pillars neglected.",
+    "comfort_zone_analysis": "Heavy lean toward technical pillars. Public speaking completely ignored for 2 weeks.",
+    "recommendations": "1. Schedule 30min speaking practice Wed/Fri. 2. Add one macro reading session. 3. Push ML depth — move from textbook to proofs.",
+    "letter_grade": "C",
+    "grade_justification": "Decent depth in 2 pillars but ignoring 3 others is not acceptable. Balance matters.",
+    "quote": '"The only way to do great work is to love what you do." — Steve Jobs',
 }
 
 
@@ -51,49 +41,6 @@ class TestWeekBounds:
         assert sunday == date(2026, 2, 22)
 
 
-class TestParseReviewResponse:
-    def test_parse_valid(self):
-        result = parse_review_response_local(MOCK_LLM_RESPONSE)
-        assert result["letter_grade"] == "C"
-        assert "QF" in result["pillar_distribution"]
-        assert "speaking" in result["comfort_zone_analysis"].lower()
-
-    def test_parse_with_code_fences(self):
-        fenced = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '```json\n{"pillar_distribution":"x","comfort_zone_analysis":"y","recommendations":"z","letter_grade":"B","grade_justification":"ok","quote":"q"}\n```'
-                    }
-                }
-            ]
-        }
-        result = parse_review_response_local(fenced)
-        assert result["letter_grade"] == "B"
-
-    def test_invalid_grade_defaults_to_c(self):
-        bad = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "pillar_distribution": "x",
-                                "comfort_zone_analysis": "y",
-                                "recommendations": "z",
-                                "letter_grade": "Z",
-                                "grade_justification": "ok",
-                                "quote": "q",
-                            }
-                        )
-                    }
-                }
-            ]
-        }
-        result = parse_review_response_local(bad)
-        assert result["letter_grade"] == "C"
-
-
 class TestReviewEndpoints:
     def test_list_reviews_empty(self, db_session):
         resp = client.get("/api/v1/reviews/")
@@ -105,9 +52,9 @@ class TestReviewEndpoints:
         assert resp.status_code == 200
         assert resp.json() is None
 
-    @patch("app.services.weekly_review.call_clawdbot", new_callable=AsyncMock)
-    def test_generate_review(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.weekly_review.structured_output", new_callable=AsyncMock)
+    def test_generate_review(self, mock_structured, db_session):
+        mock_structured.return_value = MOCK_REVIEW_RESULT
 
         user = db_session.query(User).first()
         today = date.today()
@@ -133,19 +80,19 @@ class TestReviewEndpoints:
         assert "pillar_distribution" in data
         assert "recommendations" in data
 
-    @patch("app.services.weekly_review.call_clawdbot", new_callable=AsyncMock)
-    def test_generate_review_idempotent(self, mock_clawdbot, db_session):
+    @patch("app.services.weekly_review.structured_output", new_callable=AsyncMock)
+    def test_generate_review_idempotent(self, mock_structured, db_session):
         """Generating review for same week returns existing one."""
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+        mock_structured.return_value = MOCK_REVIEW_RESULT
 
         resp1 = client.post("/api/v1/reviews/generate")
         resp2 = client.post("/api/v1/reviews/generate")
         assert resp1.json()["id"] == resp2.json()["id"]
-        assert mock_clawdbot.call_count == 1  # only called once
+        assert mock_structured.call_count == 1  # only called once
 
-    @patch("app.services.weekly_review.call_clawdbot", new_callable=AsyncMock)
-    def test_list_reviews_after_generate(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.weekly_review.structured_output", new_callable=AsyncMock)
+    def test_list_reviews_after_generate(self, mock_structured, db_session):
+        mock_structured.return_value = MOCK_REVIEW_RESULT
         client.post("/api/v1/reviews/generate")
 
         resp = client.get("/api/v1/reviews/")

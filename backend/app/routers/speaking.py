@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.speaking import SpeakingEvaluation, SpeakingSession
 from app.models.user import User
-from app.services.evaluation import call_clawdbot
+from app.services.llm import SONNET, structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -216,32 +216,45 @@ Evaluate whether pauses are:
 - **Excessive** — too many or too long, breaking flow and losing audience (BAD)
 Include pause assessment in your commentary and factor it into the confidence score.
 
-## Response Format (JSON only)
-{
-  "clarity_score": <int>,
-  "accuracy_score": <int>,
-  "structure_score": <int>,
-  "conciseness_score": <int>,
-  "confidence_score": <int>,
-  "overall_score": <int — use audience-specific weighting described above. Default: clarity 25%, accuracy 25%, structure 20%, conciseness 15%, confidence 15%>,
-  "filler_words": {"um": <count>, "like": <count>, ...},
-  "filler_count": <total filler count>,
-  "pause_assessment": "<1-2 sentences on pause usage — strategic vs hesitation>",
-  "specific_feedback": [
-    {"quote": "<exact text from transcript>", "feedback": "<targeted feedback>", "type": "improvement|strength"},
-    ...
-  ],
-  "commentary": "<3-5 sentences of overall assessment, brutally honest>"
-}"""
+Use the submit_speaking_evaluation tool to return the structured evaluation."""
+
+SPEAKING_EVAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "clarity_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "accuracy_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "structure_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "conciseness_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "overall_score": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Audience-weighted overall. Default: clarity 25%, accuracy 25%, structure 20%, conciseness 15%, confidence 15%"},
+        "filler_words": {"type": "object", "description": "Counts of each filler word type (um, like, etc.)", "additionalProperties": {"type": "integer"}},
+        "filler_count": {"type": "integer", "description": "Total filler word count"},
+        "pause_assessment": {"type": "string", "description": "1-2 sentences on pause usage — strategic vs hesitation"},
+        "specific_feedback": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quote": {"type": "string", "description": "Exact text from transcript"},
+                    "feedback": {"type": "string", "description": "Targeted feedback"},
+                    "type": {"type": "string", "enum": ["improvement", "strength"]},
+                },
+                "required": ["quote", "feedback", "type"],
+            },
+        },
+        "commentary": {"type": "string", "description": "3-5 sentences of brutally honest overall assessment"},
+    },
+    "required": ["clarity_score", "accuracy_score", "structure_score", "conciseness_score", "confidence_score", "overall_score", "filler_words", "filler_count", "pause_assessment", "specific_feedback", "commentary"],
+}
 
 
 async def evaluate_speaking(transcript: str, topic: str, audience: str, duration_seconds: int, pauses: list = None) -> dict:
-    """Evaluate a speaking session transcript."""
+    """Evaluate a speaking session transcript using tool_use structured output."""
     pause_block = ""
     if pauses:
         pause_lines = []
         for p in pauses:
-            pause_lines.append(f"  - {p['duration']}s pause at {p['timestamp']}s (after: \"{p['after_text']}\" → before: \"{p['before_text']}\")")
+            pause_lines.append(f"  - {p['duration']}s pause at {p['timestamp']}s (after: \"{p['after_text']}\" -> before: \"{p['before_text']}\")")
         pause_block = f"\n\n**Pauses detected ({len(pauses)} pauses, {sum(p['duration'] for p in pauses):.1f}s total):**\n" + "\n".join(pause_lines)
 
     user_prompt = f"""Evaluate this spoken explanation:
@@ -255,15 +268,14 @@ async def evaluate_speaking(transcript: str, topic: str, audience: str, duration
 
 Be brutally honest. Reference specific parts of the transcript in your feedback."""
 
-    raw = await call_clawdbot(SPEAKING_EVAL_PROMPT, user_prompt)
-    content = raw["choices"][0]["message"]["content"].strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-
-    parsed = json.loads(content)
+    parsed = await structured_output(
+        system=SPEAKING_EVAL_PROMPT,
+        user_prompt=user_prompt,
+        tool_name="submit_speaking_evaluation",
+        tool_description="Submit the structured speaking evaluation with scores, filler counts, feedback, and commentary.",
+        output_schema=SPEAKING_EVAL_SCHEMA,
+        model=SONNET,
+    )
 
     return {
         "clarity_score": max(0, min(100, int(parsed["clarity_score"]))),
@@ -277,7 +289,7 @@ Be brutally honest. Reference specific parts of the transcript in your feedback.
         "specific_feedback": parsed.get("specific_feedback", []),
         "pause_assessment": str(parsed.get("pause_assessment", "")),
         "commentary": str(parsed["commentary"]),
-        "raw": raw,
+        "raw": parsed,
     }
 
 
@@ -510,18 +522,12 @@ def _session_response(session: SpeakingSession) -> dict:
     }
     if session.evaluation:
         e = session.evaluation
-        # Extract pause_assessment from raw LLM response if available
+        # Extract pause_assessment from raw LLM response (stored as structured dict)
         pause_assessment = ""
         if e.raw_llm_response:
             try:
                 raw = json.loads(e.raw_llm_response)
-                content = raw.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if content.startswith("```"):
-                    content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-                    if content.endswith("```"):
-                        content = content[:-3]
-                parsed_raw = json.loads(content.strip())
-                pause_assessment = parsed_raw.get("pause_assessment", "")
+                pause_assessment = raw.get("pause_assessment", "")
             except Exception:
                 pass
         resp["evaluation"] = {
