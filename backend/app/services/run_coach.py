@@ -1,6 +1,6 @@
 """AI Run Coach — Training plan generation and post-run feedback.
 
-Uses Clawdbot for LLM calls. Generates Runna-style progressive training plans
+Uses Claude for LLM calls. Generates Runna-style progressive training plans
 with structured run types and pace targets.
 """
 
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.run import (
     PersonalRecord, PlannedRun, RunSession, RunningProfile, TrainingPlan,
 )
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ async def generate_training_plan(
     target_race_date: Optional[date],
     db: Session,
 ) -> dict[str, Any]:
-    """Generate a multi-week training plan via Clawdbot."""
+    """Generate a multi-week training plan via Claude."""
 
     # Get recent run history for context
     recent_runs = (
@@ -128,7 +128,7 @@ Week 4, 8, 12 should be deload weeks (~30-40% volume reduction).
 DO NOT schedule runs on Mon/Tue/Wed (strength days) or Sat (basketball)."""
 
     try:
-        result = await call_clawdbot(
+        result = await call_claude(
             system_prompt=RUN_COACH_SYSTEM,
             user_prompt=prompt,
         )
@@ -285,7 +285,7 @@ Whoop recovery: {run.whoop_recovery_score or 'unknown'}%
 What went well? What to improve? How does this fit the training plan?"""
 
     try:
-        result = await call_clawdbot(
+        result = await call_claude(
             system_prompt=RUN_COACH_SYSTEM,
             user_prompt=prompt,
         )

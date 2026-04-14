@@ -105,9 +105,9 @@ class TestReviewEndpoints:
         assert resp.status_code == 200
         assert resp.json() is None
 
-    @patch("app.services.weekly_review.call_clawdbot", new_callable=AsyncMock)
-    def test_generate_review(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.weekly_review.call_claude", new_callable=AsyncMock)
+    def test_generate_review(self, mock_claude, db_session):
+        mock_claude.return_value = MOCK_LLM_RESPONSE
 
         user = db_session.query(User).first()
         today = date.today()
@@ -133,19 +133,19 @@ class TestReviewEndpoints:
         assert "pillar_distribution" in data
         assert "recommendations" in data
 
-    @patch("app.services.weekly_review.call_clawdbot", new_callable=AsyncMock)
-    def test_generate_review_idempotent(self, mock_clawdbot, db_session):
+    @patch("app.services.weekly_review.call_claude", new_callable=AsyncMock)
+    def test_generate_review_idempotent(self, mock_claude, db_session):
         """Generating review for same week returns existing one."""
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+        mock_claude.return_value = MOCK_LLM_RESPONSE
 
         resp1 = client.post("/api/v1/reviews/generate")
         resp2 = client.post("/api/v1/reviews/generate")
         assert resp1.json()["id"] == resp2.json()["id"]
-        assert mock_clawdbot.call_count == 1  # only called once
+        assert mock_claude.call_count == 1  # only called once
 
-    @patch("app.services.weekly_review.call_clawdbot", new_callable=AsyncMock)
-    def test_list_reviews_after_generate(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.weekly_review.call_claude", new_callable=AsyncMock)
+    def test_list_reviews_after_generate(self, mock_claude, db_session):
+        mock_claude.return_value = MOCK_LLM_RESPONSE
         client.post("/api/v1/reviews/generate")
 
         resp = client.get("/api/v1/reviews/")

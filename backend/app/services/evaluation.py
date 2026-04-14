@@ -129,8 +129,8 @@ def _build_user_prompt(entry: DailyEntry, pillars: list[Pillar], db: Session = N
 Be brutally honest. No sugar coating.{concepts_block}"""
 
 
-async def call_clawdbot(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
-    """Call Claude via Anthropic SDK. Returns an OpenAI-compatible dict for backward compatibility."""
+async def call_claude(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
+    """Call Claude via Anthropic SDK. Returns a dict with choices[0].message.content."""
     client = _get_client()
     response = await client.messages.create(
         model=ANTHROPIC_MODEL,
@@ -262,7 +262,7 @@ async def evaluate_entry(entry: DailyEntry, db: Session) -> Evaluation:
         entry.user_id, entry.pillar_tag_list, db
     )
 
-    raw_response = await call_clawdbot(system_prompt, user_prompt)
+    raw_response = await call_claude(system_prompt, user_prompt)
     parsed = parse_llm_response(raw_response)
 
     evaluation = Evaluation(

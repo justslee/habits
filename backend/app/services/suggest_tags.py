@@ -1,4 +1,4 @@
-"""Auto-suggest pillar tags using Clawdbot (D-012).
+"""Auto-suggest pillar tags using Claude (D-012).
 
 Analyzes entry description text and suggests relevant pillars
 with confidence scores and sub-topic hints.
@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.pillar import Pillar
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def suggest_tags(description: str, db: Session) -> list[dict[str, Any]]:
 
     user_prompt = f"Classify this learning session:\n\n{description}"
 
-    raw_response = await call_clawdbot(system_prompt, user_prompt)
+    raw_response = await call_claude(system_prompt, user_prompt)
     return parse_suggest_response(raw_response, pillars)
 
 

@@ -16,8 +16,8 @@ def client(db_session):
     return TestClient(app)
 
 
-def _mock_clawdbot_response(suggestions: list[dict]) -> dict:
-    """Build a mock Clawdbot response."""
+def _mock_claude_response(suggestions: list[dict]) -> dict:
+    """Build a mock Claude response."""
     return {
         "choices": [{"message": {"content": json.dumps({"suggestions": suggestions})}}]
     }
@@ -26,10 +26,10 @@ def _mock_clawdbot_response(suggestions: list[dict]) -> dict:
 class TestSuggestTagsEndpoint:
     """Test POST /api/v1/entries/suggest-tags."""
 
-    @patch("app.services.suggest_tags.call_clawdbot", new_callable=AsyncMock)
-    def test_suggest_quant_finance(self, mock_clawdbot, client, db_session):
+    @patch("app.services.suggest_tags.call_claude", new_callable=AsyncMock)
+    def test_suggest_quant_finance(self, mock_claude, client, db_session):
         """Stochastic calculus should suggest Quant Finance."""
-        mock_clawdbot.return_value = _mock_clawdbot_response(
+        mock_claude.return_value = _mock_claude_response(
             [
                 {
                     "pillar_id": 1,
@@ -52,10 +52,10 @@ class TestSuggestTagsEndpoint:
         assert data["suggestions"][0]["confidence"] == 0.95
         assert "stochastic calculus" in data["suggestions"][0]["sub_topics"]
 
-    @patch("app.services.suggest_tags.call_clawdbot", new_callable=AsyncMock)
-    def test_suggest_multiple_pillars(self, mock_clawdbot, client, db_session):
+    @patch("app.services.suggest_tags.call_claude", new_callable=AsyncMock)
+    def test_suggest_multiple_pillars(self, mock_claude, client, db_session):
         """ML for finance should suggest both ML Math and Quant Finance."""
-        mock_clawdbot.return_value = _mock_clawdbot_response(
+        mock_claude.return_value = _mock_claude_response(
             [
                 {
                     "pillar_id": 3,
@@ -85,15 +85,15 @@ class TestSuggestTagsEndpoint:
         # Should be sorted by confidence desc
         assert suggestions[0]["confidence"] >= suggestions[1]["confidence"]
 
-    @patch("app.services.suggest_tags.call_clawdbot", new_callable=AsyncMock)
-    def test_suggest_with_code_fences(self, mock_clawdbot, client, db_session):
+    @patch("app.services.suggest_tags.call_claude", new_callable=AsyncMock)
+    def test_suggest_with_code_fences(self, mock_claude, client, db_session):
         """LLM response wrapped in code fences should still parse."""
         content = (
             '```json\n{"suggestions": [{"pillar_id": 5, '
             '"pillar_name": "Public Speaking & Communication", '
             '"confidence": 0.9, "sub_topics": ["pitch delivery"]}]}\n```'
         )
-        mock_clawdbot.return_value = {"choices": [{"message": {"content": content}}]}
+        mock_claude.return_value = {"choices": [{"message": {"content": content}}]}
 
         resp = client.post(
             "/api/v1/entries/suggest-tags",
@@ -103,10 +103,10 @@ class TestSuggestTagsEndpoint:
         assert resp.status_code == 200
         assert resp.json()["suggestions"][0]["pillar_id"] == 5
 
-    @patch("app.services.suggest_tags.call_clawdbot", new_callable=AsyncMock)
-    def test_low_confidence_filtered(self, mock_clawdbot, client, db_session):
+    @patch("app.services.suggest_tags.call_claude", new_callable=AsyncMock)
+    def test_low_confidence_filtered(self, mock_claude, client, db_session):
         """Suggestions below 0.3 confidence should be filtered out."""
-        mock_clawdbot.return_value = _mock_clawdbot_response(
+        mock_claude.return_value = _mock_claude_response(
             [
                 {
                     "pillar_id": 1,
@@ -141,10 +141,10 @@ class TestSuggestTagsEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("app.services.suggest_tags.call_clawdbot", new_callable=AsyncMock)
-    def test_invalid_pillar_id_filtered(self, mock_clawdbot, client, db_session):
+    @patch("app.services.suggest_tags.call_claude", new_callable=AsyncMock)
+    def test_invalid_pillar_id_filtered(self, mock_claude, client, db_session):
         """Invalid pillar IDs from LLM should be filtered out."""
-        mock_clawdbot.return_value = _mock_clawdbot_response(
+        mock_claude.return_value = _mock_claude_response(
             [
                 {
                     "pillar_id": 999,
@@ -180,7 +180,7 @@ class TestParseSuggestResponse:
         from app.models.pillar import Pillar
 
         pillars = db_session.query(Pillar).all()
-        raw = _mock_clawdbot_response(
+        raw = _mock_claude_response(
             [
                 {
                     "pillar_id": 1,
@@ -202,7 +202,7 @@ class TestParseSuggestResponse:
         from app.models.pillar import Pillar
 
         pillars = db_session.query(Pillar).all()
-        raw = _mock_clawdbot_response(
+        raw = _mock_claude_response(
             [
                 {
                     "pillar_id": 1,

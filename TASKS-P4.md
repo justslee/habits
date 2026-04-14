@@ -57,7 +57,7 @@
 - **Status**: [x] done
 - **Depends on**: TASK-P4-011
 - **Acceptance Criteria**:
-  - [ ] Generate multi-week plan via Clawdbot based on goal, fitness level, schedule
+  - [ ] Generate multi-week plan via Claude based on goal, fitness level, schedule
   - [ ] Plan respects strength schedule (Mon/Tue/Wed) and basketball (Sat)
   - [ ] Weekly mileage ramp ~10%/week with deload every 4th week
   - [ ] 80/20 easy/hard distribution
@@ -66,7 +66,7 @@
   - [ ] Adaptive replanning when runs are missed
   - [ ] Whoop recovery integration (< 50% → easy or rest)
   - [ ] Post-run AI feedback generation
-  - [ ] Fallback plan if Clawdbot unavailable
+  - [ ] Fallback plan if Claude unavailable
 - **Verify**: `pytest tests/test_run_coach.py`
 
 ---

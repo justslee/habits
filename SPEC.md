@@ -298,7 +298,7 @@ Tap to view full session →
 - [ ] AC-P2-2.5: AI tracks mesocycle phase and programs accordingly
 - [ ] AC-P2-2.6: AI targets RPE 7-8 on working sets
 - [ ] AC-P2-2.7: AI accounts for cross-day fatigue (Sat basketball → Mon push, Tue pull → Wed legs)
-- [ ] AC-P2-2.8: All LLM calls route through Clawdbot at localhost:18789
+- [ ] AC-P2-2.8: All LLM calls use Anthropic SDK via `call_claude()`
 
 ### Feature P2-3: Live Workout Chat Interface
 
@@ -333,7 +333,7 @@ today given the shoulder tightness. 3×8 @ 90.
 - [ ] AC-P2-3.4: Adjusts remaining workout on the fly based on early set performance
 - [ ] AC-P2-3.5: Flags form concerns if discomfort or unusual difficulty reported
 - [ ] AC-P2-3.6: Voice input supported for hands-free logging
-- [ ] AC-P2-3.7: All parsing and coaching via Clawdbot LLM routing
+- [ ] AC-P2-3.7: All parsing and coaching via Claude (`call_claude()`)
 
 ### Feature P2-4: Progressive Overload Engine
 
@@ -604,7 +604,7 @@ Live GPS run tracking with AI coaching that adapts progressive running plans bas
 - [ ] AC-P3-3.6: Post-run AI feedback: what went well, what to improve
 - [ ] AC-P3-3.7: Progressive overload: mileage increases ~10% per week (standard rule)
 - [ ] AC-P3-3.8: Deload weeks automatically scheduled every 4th week
-- [ ] AC-P3-3.9: LLM calls via Clawdbot at localhost:18789 (never direct Claude API)
+- [ ] AC-P3-3.9: LLM calls via Anthropic SDK (`call_claude()`)
 
 ### Feature P3-4: Running Stats & Analytics
 
@@ -770,7 +770,7 @@ Transform the app from functional prototype into a polished, Runna-quality runni
 - [ ] AC-P4-3.7: Plan view: calendar showing upcoming runs with type, distance, target pace
 - [ ] AC-P4-3.8: "Today's Run" card on Run tab showing what's planned with tap-to-start
 - [ ] AC-P4-3.9: Post-run AI feedback: pace analysis, effort assessment, next-run preview
-- [ ] AC-P4-3.10: LLM calls via Clawdbot at localhost:18789
+- [ ] AC-P4-3.10: LLM calls via Anthropic SDK (`call_claude()`)
 
 ### Feature P4-4: Post-Run Summary & Detail
 
