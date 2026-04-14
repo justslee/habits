@@ -292,10 +292,10 @@ class TestAdaptiveContextBlock:
 class TestEvaluationIntegration:
     """Test that evaluate_entry uses adaptive context end-to-end."""
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluation_uses_adaptive_context(self, mock_clawdbot, db_session):
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_evaluation_uses_adaptive_context(self, mock_claude, db_session):
         """When prior history exists, evaluation prompt includes adaptive context."""
-        mock_clawdbot.return_value = MOCK_HIGH_SCORE
+        mock_claude.return_value = MOCK_HIGH_SCORE
 
         today = date.today()
         # Create prior history
@@ -321,15 +321,15 @@ class TestEvaluationIntegration:
         resp = client.post(f"/api/v1/entries/{entry_id}/evaluate")
         assert resp.status_code == 200
 
-        # Verify the system prompt passed to clawdbot included adaptive context
-        call_args = mock_clawdbot.call_args
+        # Verify the system prompt passed to Claude included adaptive context
+        call_args = mock_claude.call_args
         system_prompt = call_args[1]["system_prompt"] if "system_prompt" in (call_args[1] or {}) else call_args[0][0]
         assert "Current Level" in system_prompt or "Calibration" in system_prompt
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_consistency_multiplier_from_streak(self, mock_clawdbot, db_session):
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_consistency_multiplier_from_streak(self, mock_claude, db_session):
         """Consistency multiplier is calculated from actual streak data."""
-        mock_clawdbot.return_value = MOCK_HIGH_SCORE
+        mock_claude.return_value = MOCK_HIGH_SCORE
 
         # Create a streak
         _create_streak(db_session, 1, 1, current_streak=10)
@@ -355,10 +355,10 @@ class TestEvaluationIntegration:
         assert eval_obj.consistency_multiplier != 1.0
         assert eval_obj.consistency_multiplier > 1.0  # 10-day streak = bonus
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_no_history_still_works(self, mock_clawdbot, db_session):
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_no_history_still_works(self, mock_claude, db_session):
         """Evaluation works fine with no prior history (new user)."""
-        mock_clawdbot.return_value = MOCK_HIGH_SCORE
+        mock_claude.return_value = MOCK_HIGH_SCORE
 
         payload = {
             "description": "First ever study session on options pricing",

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ def _classify_difficulty(ascend_m: float, distance_m: float) -> str:
 async def _generate_route_name(
     street_names: List[str], distance_miles: float, difficulty: str, index: int
 ) -> Tuple[str, str]:
-    """Use Clawdbot to generate a creative route name and description."""
+    """Use Claude to generate a creative route name and description."""
     fallback_name = f"Loop Route {index + 1}"
     fallback_desc = f"A {distance_miles:.1f}-mile {difficulty} loop"
 
@@ -175,7 +175,7 @@ async def _generate_route_name(
     )
 
     try:
-        raw = await call_clawdbot(system, user)
+        raw = await call_claude(system, user)
         import json
         content = raw["choices"][0]["message"]["content"].strip()
         # Strip code fences if present

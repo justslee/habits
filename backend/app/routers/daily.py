@@ -634,8 +634,8 @@ Respond with ONLY valid JSON: {{"pillar_id": <int or null>, "confidence": <0.0-1
 If the task is general/lifestyle (workout, errands, etc.), return {{"pillar_id": null, "confidence": 0.0}}"""
 
     try:
-        from app.services.evaluation import call_clawdbot
-        result = await call_clawdbot(
+        from app.services.evaluation import call_claude
+        result = await call_claude(
             "You classify tasks into learning pillars. Be precise. Only return JSON.",
             prompt,
         )

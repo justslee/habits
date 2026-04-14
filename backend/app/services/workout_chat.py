@@ -1,6 +1,6 @@
 """Live Workout Chat — Elite AI Coach during sessions (P2-3).
 
-Routes ALL messages through Clawdbot for intelligent coaching.
+Routes ALL messages through Claude for intelligent coaching.
 Handles set logging, conversation, motivation, form tips, and adjustments.
 """
 
@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 from app.services.progressive_overload import estimate_1rm
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,7 @@ async def process_chat_message(
 ) -> dict[str, Any]:
     """Process a chat message during a live workout.
 
-    Routes through Clawdbot for intelligent coaching responses.
+    Routes through Claude for intelligent coaching responses.
     Falls back gracefully if LLM is unavailable.
     """
     context = _build_chat_context(session, db)
@@ -161,7 +161,7 @@ async def process_chat_message(
 ATHLETE SAYS: {message}"""
 
     try:
-        raw_response = await call_clawdbot(COACH_SYSTEM_PROMPT, user_prompt)
+        raw_response = await call_claude(COACH_SYSTEM_PROMPT, user_prompt)
         content = raw_response["choices"][0]["message"]["content"].strip()
 
         # Strip markdown code fences if present
@@ -186,7 +186,7 @@ ATHLETE SAYS: {message}"""
         except Exception:
             return _fallback_response(message, session, db)
     except Exception as e:
-        logger.error(f"Clawdbot chat call failed: {e}")
+        logger.error(f"Claude chat call failed: {e}")
         return _fallback_response(message, session, db)
 
     # Log parsed sets to the session
@@ -265,7 +265,7 @@ ATHLETE SAYS: {message}"""
 def _fallback_response(
     message: str, session: WorkoutSession, db: Session
 ) -> dict[str, Any]:
-    """Fallback when Clawdbot is unavailable. Still tries to be useful."""
+    """Fallback when Claude is unavailable. Still tries to be useful."""
     msg_lower = message.lower().strip()
 
     # Completion detection

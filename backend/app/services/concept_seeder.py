@@ -25,7 +25,7 @@ from app.models.concept import PillarConcept
 from app.models.pillar import Pillar
 from app.models.user import User
 from app.models.vision import Vision
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 from app.services.notion_kb import get_kb_summary_for_pillar, KBSummary
 from app.services.web_research import research_pillar, ResearchBrief
 
@@ -364,7 +364,7 @@ async def _seed_quick_mode(
 ) -> list[dict]:
     """Original single-call seeding with Vision context only."""
     user_prompt = _build_quick_prompt(pillar, vision)
-    raw_response = await call_clawdbot(SEEDER_SYSTEM_PROMPT, user_prompt)
+    raw_response = await call_claude(SEEDER_SYSTEM_PROMPT, user_prompt)
     return _parse_seeder_response(raw_response)
 
 
@@ -413,5 +413,5 @@ async def _seed_research_mode(
     user_prompt = _build_research_prompt(pillar, vision, kb_summary, research_brief)
 
     # Use the research-enhanced system prompt
-    raw_response = await call_clawdbot(RESEARCH_SEEDER_SYSTEM_PROMPT, user_prompt)
+    raw_response = await call_claude(RESEARCH_SEEDER_SYSTEM_PROMPT, user_prompt)
     return _parse_seeder_response(raw_response)

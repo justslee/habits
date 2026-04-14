@@ -52,7 +52,7 @@
   - [ ] Track mesocycle phase (AC-P2-2.5)
   - [ ] Target RPE 7-8 (AC-P2-2.6)
   - [ ] Account for cross-day fatigue (AC-P2-2.7)
-  - [ ] Route through Clawdbot (AC-P2-2.8)
+  - [ ] Route through Claude (AC-P2-2.8)
   - [ ] Coach persona system prompt injected
 - **Verify**: `pytest tests/test_workout_generator.py`
 

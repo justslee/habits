@@ -1,6 +1,6 @@
 """AI Workout Generator — "The Coach" (P2-2).
 
-Generates complete workout plans using the Coach persona via Clawdbot.
+Generates complete workout plans using the Coach persona via Claude.
 Integrates progressive overload data and Whoop recovery.
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.workout import ExerciseProfile, WorkoutSession
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 from app.services.progressive_overload import (
     calculate_warmup_sets,
     get_next_session_targets,
@@ -153,7 +153,7 @@ async def generate_workout_plan(
     user_prompt = f"Generate today's {day_type} workout plan.\n\n{context}"
 
     try:
-        raw_response = await call_clawdbot(COACH_SYSTEM_PROMPT, user_prompt)
+        raw_response = await call_claude(COACH_SYSTEM_PROMPT, user_prompt)
         content = raw_response["choices"][0]["message"]["content"]
         content = content.strip()
         if content.startswith("```"):

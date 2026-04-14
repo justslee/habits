@@ -123,16 +123,15 @@
 
 ---
 
-### D-012: LLM Calls Through Clawdbot Only
-**Decision**: All LLM calls route through Clawdbot at localhost:18789. Never call Claude API directly.
+### D-012: LLM Calls via Anthropic SDK
+**Decision**: All LLM calls use the Anthropic SDK directly (`anthropic.AsyncAnthropic`). Set `ANTHROPIC_API_KEY` in the backend environment.
 
 **Rationale**: 
-- Clawdbot is already authenticated with Claude
-- Avoids duplicate API costs
-- Centralized LLM management
-- Can leverage Clawdbot's context/memory if needed
+- Direct SDK is simpler — no intermediary process to manage
+- Type-safe, officially maintained client
+- No local gateway required
 
-**Implementation**: Backend calls `http://localhost:18789/v1/chat/completions` with OpenAI-compatible format.
+**Implementation**: `backend/app/services/evaluation.py` — `call_claude(system_prompt, user_prompt)` wraps `client.messages.create()` and returns an OpenAI-compatible dict shape for all callers.
 
 **Status**: Accepted
 
@@ -143,7 +142,7 @@
 
 **Rationale**:
 - No cloud hosting costs
-- Backend can access local resources (Clawdbot, SQLite files)
+- Backend can access local resources (SQLite files)
 - HTTPS automatically provided by Cloudflare
 - Simple setup, reliable
 
@@ -170,11 +169,11 @@
 ---
 
 ### D-016: Coach Persona System Prompt
-**Decision**: The "Coach" persona system prompt for Phase 2 fitness module should be injected at the backend level for every LLM call to Clawdbot.
+**Decision**: The "Coach" persona system prompt for Phase 2 fitness module should be injected at the backend level for every LLM call to Claude.
 
 **Rationale**: Every fitness-related LLM interaction (morning briefing, live chat, workout generation, stall diagnosis) needs the same elite S&C coach identity. Centralizing the system prompt ensures consistency.
 
-**Implementation**: Backend prepends the Coach system prompt to all Clawdbot `/v1/chat/completions` calls for the fitness module.
+**Implementation**: Backend prepends the Coach system prompt to all Claude `/v1/chat/completions` calls for the fitness module.
 
 **Status**: Accepted
 

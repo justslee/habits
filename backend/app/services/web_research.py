@@ -6,7 +6,7 @@ then synthesizes results into a research brief that feeds the concept tree gener
 Supports multiple search providers:
 - Brave Search API (default, free tier: 1000 queries/month)
 - Tavily API (optimized for AI agents)
-- Fallback: Clawdbot-based research (uses LLM's training data as research proxy)
+- Fallback: Claude-based research (uses LLM's training data as research proxy)
 
 The research pipeline:
 1. Generate targeted search queries for the pillar
@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ async def _generate_search_queries(
         user_prompt += f"\nSpecific goal: {vision_target}"
 
     try:
-        raw = await call_clawdbot(QUERY_GEN_PROMPT, user_prompt)
+        raw = await call_claude(QUERY_GEN_PROMPT, user_prompt)
         content = raw["choices"][0]["message"]["content"]
         # Strip markdown fences
         content = content.strip()
@@ -270,7 +270,7 @@ async def _synthesize_results(
     user_prompt += "\n\nSynthesize these search results into a comprehensive research brief."
 
     try:
-        raw = await call_clawdbot(SYNTHESIS_SYSTEM_PROMPT, user_prompt)
+        raw = await call_claude(SYNTHESIS_SYSTEM_PROMPT, user_prompt)
         content = raw["choices"][0]["message"]["content"]
         # Strip markdown fences
         content = content.strip()
@@ -310,7 +310,7 @@ async def _llm_only_research(
     )
 
     try:
-        raw = await call_clawdbot(SYNTHESIS_SYSTEM_PROMPT, user_prompt)
+        raw = await call_claude(SYNTHESIS_SYSTEM_PROMPT, user_prompt)
         content = raw["choices"][0]["message"]["content"]
         content = content.strip()
         if content.startswith("```"):

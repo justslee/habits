@@ -1,6 +1,6 @@
 """Weekly Review generation service — AI-powered weekly summary.
 
-Generates honest weekly reviews via Clawdbot (D-012).
+Generates honest weekly reviews via Claude (D-012).
 """
 
 import json
@@ -18,7 +18,7 @@ from app.models.pillar import Pillar
 from app.models.streak import Streak
 from app.models.user import User
 from app.models.weekly_review import WeeklyReview
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ async def generate_weekly_review(
 
     user_prompt = _build_week_summary(user_id, week_start, week_end, db)
 
-    raw_response = await call_clawdbot(REVIEW_SYSTEM_PROMPT, user_prompt)
+    raw_response = await call_claude(REVIEW_SYSTEM_PROMPT, user_prompt)
     parsed = parse_review_response_local(raw_response)
 
     review = WeeklyReview(

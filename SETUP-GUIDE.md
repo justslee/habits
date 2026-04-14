@@ -1,4 +1,4 @@
-# SETUP-GUIDE.md — How to Apply This to Clawdbot / OpenClaw
+# SETUP-GUIDE.md — Project Setup Guide
 
 ## What You Just Got
 
@@ -83,42 +83,16 @@ git add SPEC.md && git commit -m "feat: define product spec"
 
 ---
 
-## Step 4: Configure Clawdbot Skills
+## Step 4: Configure Claude Code Skills
 
-This is where you connect the starter kit to Clawdbot. Skills live in `~/clawd/` based
-on your existing setup.
-
-### Option A: Copy Agent Files as Clawdbot Skills
-
-Each `.md` file in `AGENTS/` becomes a skill that Clawdbot can use:
-
-```bash
-# Copy agent specs into your Clawdbot skills directory
-cp AGENTS/manager.md ~/clawd/skills/manager.md
-cp AGENTS/builder.md ~/clawd/skills/builder.md
-cp AGENTS/tester.md ~/clawd/skills/tester.md
-cp AGENTS/reviewer.md ~/clawd/skills/reviewer.md
-cp AGENTS/deployer.md ~/clawd/skills/deployer.md
-```
-
-### Option B: Point Clawdbot at the Repo
-
-If Clawdbot supports project directories, point it at your repo root.
-It should pick up the AGENTS/ folder and markdown files automatically.
-
-Check your Clawdbot config:
-```bash
-cat ~/.clawdbot/clawdbot.json
-```
-
-Look for a `workspace` or `projects` setting and point it at your repo.
+The AGENTS/ directory contains skill files that Claude Code can use. No additional
+setup is required — Claude Code reads them directly from the repo.
 
 ---
 
 ## Step 5: Kick Off the Manager Loop
 
-In your Clawdbot dashboard (`http://127.0.0.1:18789/`) or via Telegram (@schwaebot),
-send the manager prompt:
+Via Claude Code (or your Claude interface of choice), send the manager prompt:
 
 ```
 You are the Manager agent. Read AGENTS/manager.md for your full instructions.
@@ -144,8 +118,8 @@ The Manager will read its instructions, pick the first task, and start coordinat
 You have three ways to check what's happening:
 
 1. **STATUS.md** — Manager updates this after every cycle. `cat STATUS.md` to see progress.
-2. **Clawdbot Dashboard** — `http://127.0.0.1:18789/` shows agent activity.
-3. **Telegram** — @schwaebot will send updates if configured.
+2. **Claude Code** — Review tool calls and output in the session.
+3. **Git log** — Each completed cycle produces a commit.
 
 ### When the Manager asks you a question:
 It will ask ONE question at a time with a proposed default. Either answer it or accept the default.
@@ -211,5 +185,5 @@ Everything else (agent roles, loop logic, deployment targets) stays the same.
 | Builder uses wrong tech | Check CONTEXT.md is complete and DECISIONS.md has no conflicts |
 | Vercel deploy fails | Run `vercel logs` or check dashboard |
 | Tunnel drops | Restart: `cloudflared tunnel --url http://localhost:8000` |
-| Agents ignore instructions | Ensure AGENTS/*.md files are in Clawdbot's skills path |
+| Agents ignore instructions | Ensure AGENTS/*.md files are in the repo root |
 | Cost concerns | STATUS.md budget section tracks cycle count; all cloud ops require your approval |

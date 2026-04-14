@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.speaking import SpeakingEvaluation, SpeakingSession
 from app.models.user import User
-from app.services.evaluation import call_clawdbot
+from app.services.evaluation import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ async def evaluate_speaking(transcript: str, topic: str, audience: str, duration
 
 Be brutally honest. Reference specific parts of the transcript in your feedback."""
 
-    raw = await call_clawdbot(SPEAKING_EVAL_PROMPT, user_prompt)
+    raw = await call_claude(SPEAKING_EVAL_PROMPT, user_prompt)
     content = raw["choices"][0]["message"]["content"].strip()
     if content.startswith("```"):
         content = content.split("\n", 1)[1] if "\n" in content else content[3:]

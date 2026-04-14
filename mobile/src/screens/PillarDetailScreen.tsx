@@ -91,7 +91,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
       setExpandedTiers(nonEmpty);
       haptic.success();
     } catch (err) {
-      Alert.alert('Seeding Failed', 'Could not generate concepts. Make sure Clawdbot is running.');
+      Alert.alert('Seeding Failed', 'Could not generate concepts. Check that ANTHROPIC_API_KEY is set on the backend.');
       console.warn('Seed failed:', err);
     } finally {
       setSeeding(false);

@@ -16,7 +16,7 @@
 | Cycles remaining | 8                        |
 
 ### Cycle 7 Summary
-- Fixed Clawdbot auth (was returning Unauthorized — missing gateway token)
+- Fixed Claude API auth (was returning Unauthorized — missing ANTHROPIC_API_KEY)
 - Rewrote workout chat: full AI coach persona (no more regex parser)
 - Built guided audio coaching for runs (expo-speech)
 - Built route pace coloring (green/yellow/red polyline)
@@ -107,7 +107,7 @@ TASK-018: TestFlight deployment — needs:
 
 **Tasks completed**:
 - TASK-013: Compounding progress view (theoretical 1% curve vs actual, timeframe selector)
-- TASK-015: Weekly review engine (model, service, API endpoints, AI generation via Clawdbot)
+- TASK-015: Weekly review engine (model, service, API endpoints, AI generation via Claude)
 
 **Commit**: `dcfbea1`
 

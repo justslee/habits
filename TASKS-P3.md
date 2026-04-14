@@ -53,7 +53,7 @@
 - **Status**: [x] done
 - **Depends on**: TASK-P3-004
 - **Acceptance Criteria**:
-  - [ ] Generate weekly running plan via Clawdbot (AC-P3-3.1, AC-P3-3.2)
+  - [ ] Generate weekly running plan via Claude (AC-P3-3.1, AC-P3-3.2)
   - [ ] Adapt plan on missed runs (AC-P3-3.3)
   - [ ] Whoop recovery integration (AC-P3-3.4)
   - [ ] Post-run AI feedback (AC-P3-3.6)

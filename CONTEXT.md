@@ -19,7 +19,7 @@
 | Pkg (FE)   | npm (Expo default) | Expo compatibility                     |
 | Formatter  | ruff (BE), prettier (FE) | Non-negotiable, run before commit  |
 | Port (BE)  | 8000             | FastAPI default                          |
-| AI Backend | Clawdbot @ localhost:18789 | Route through Clawdbot, never call Claude API directly |
+| AI Backend | Anthropic SDK (claude-opus-4-6) | Call via `call_claude()` in `evaluation.py`; requires `ANTHROPIC_API_KEY` |
 
 ## Architecture
 
@@ -50,9 +50,9 @@
 │           │                                                   │
 │           │ LLM calls                                         │
 │           ▼                                                   │
-│  ┌─────────────────┐     ┌─────────────────┐                 │
-│  │ Clawdbot :18789 │────▶│  Claude (Opus)  │                 │
-│  └─────────────────┘     └─────────────────┘                 │
+│  ┌──────────────────────────────────────┐                    │
+│  │  Anthropic SDK → Claude (Opus 4.6)  │                    │
+│  └──────────────────────────────────────┘                    │
 │                                                               │
 │  ┌─────────────────┐                                         │
 │  │   Whoop API     │ (read-only)                             │
@@ -67,7 +67,7 @@
 - API routes: `/api/v1/<resource>` (RESTful, plural nouns).
 - Branch strategy: `main` is always deployable. Feature branches: `feat/<task-id>-<short-name>`.
 - Commits: conventional commits (`feat:`, `fix:`, `test:`, `chore:`).
-- LLM calls go through Clawdbot at `localhost:18789`. Never call Claude API directly.
+- LLM calls use the Anthropic SDK directly via `call_claude()` in `app/services/evaluation.py`.
 - Whoop API is read-only.
 
 ## Deployment Targets
@@ -76,7 +76,7 @@
 |-----------|-------------------------|------------------------------------|
 | Frontend  | iPhone via TestFlight   | Expo EAS Build                     |
 | Backend   | Local MacBook :8000     | Cloudflare Tunnel (HTTPS)          |
-| Clawdbot  | Local MacBook :18789    | localhost only (backend calls)     |
+| Anthropic | api.anthropic.com       | ANTHROPIC_API_KEY env var          |
 
 ## Expo / React Native Notes
 

@@ -1,6 +1,6 @@
 """Tests for the AI evaluation engine (TASK-005).
 
-All LLM calls are mocked — no actual Clawdbot calls in tests.
+All LLM calls are mocked — no actual Claude API calls in tests.
 """
 
 import json
@@ -186,9 +186,9 @@ class TestBuildPrompt:
 class TestEvaluateEndpoint:
     """Test the POST /api/v1/entries/{id}/evaluate endpoint."""
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluate_entry_success(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_evaluate_entry_success(self, mock_claude, db_session):
+        mock_claude.return_value = MOCK_LLM_RESPONSE
 
         # Create an entry first
         resp = client.post("/api/v1/entries", json=ENTRY_PAYLOAD)
@@ -211,9 +211,9 @@ class TestEvaluateEndpoint:
         assert eval_obj is not None
         assert eval_obj.depth_score == 72
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluate_already_evaluated_returns_409(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_evaluate_already_evaluated_returns_409(self, mock_claude, db_session):
+        mock_claude.return_value = MOCK_LLM_RESPONSE
 
         resp = client.post("/api/v1/entries", json=ENTRY_PAYLOAD)
         entry_id = resp.json()["id"]
@@ -230,9 +230,9 @@ class TestEvaluateEndpoint:
         resp = client.post("/api/v1/entries/9999/evaluate")
         assert resp.status_code == 404
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluate_low_score_entry(self, mock_clawdbot, db_session):
-        mock_clawdbot.return_value = MOCK_LOW_SCORE_RESPONSE
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_evaluate_low_score_entry(self, mock_claude, db_session):
+        mock_claude.return_value = MOCK_LOW_SCORE_RESPONSE
 
         payload = {
             "description": "Watched a 20-minute YouTube video about options pricing basics",
@@ -252,10 +252,10 @@ class TestEvaluateEndpoint:
         assert data["evaluation"]["depth_score"] == 15
         assert data["evaluation"]["one_percent_better"] is False
 
-    @patch("app.services.evaluation.call_clawdbot", new_callable=AsyncMock)
-    def test_evaluation_visible_in_get_entry(self, mock_clawdbot, db_session):
+    @patch("app.services.evaluation.call_claude", new_callable=AsyncMock)
+    def test_evaluation_visible_in_get_entry(self, mock_claude, db_session):
         """After evaluation, GET /entries/{id} includes evaluation data."""
-        mock_clawdbot.return_value = MOCK_LLM_RESPONSE
+        mock_claude.return_value = MOCK_LLM_RESPONSE
 
         resp = client.post("/api/v1/entries", json=ENTRY_PAYLOAD)
         entry_id = resp.json()["id"]
