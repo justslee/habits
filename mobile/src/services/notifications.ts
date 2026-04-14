@@ -110,6 +110,34 @@ export async function scheduleEODCheckIn(): Promise<string | null> {
 }
 
 /**
+ * Schedule daily review reminder at 10:00 PM every day.
+ */
+export async function scheduleDailyReview(): Promise<string | null> {
+  // Cancel existing daily review notifications
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  for (const notif of scheduled) {
+    if (notif.content.data?.screen === 'DailyReview') {
+      await Notifications.cancelScheduledNotificationAsync(notif.identifier);
+    }
+  }
+
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title: '📋 Daily Review',
+      body: "Time to complete your daily review. How did today go?",
+      data: { screen: 'DailyReview' },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
+      hour: 22,
+      minute: 0,
+    },
+  });
+
+  return id;
+}
+
+/**
  * Send an immediate local notification (for testing or on-demand delivery).
  */
 export async function sendLocalNotification(

@@ -1,11 +1,13 @@
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { View, Animated } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
+import * as Notifications from 'expo-notifications';
+import { registerForPushNotifications, scheduleDailyReview } from './src/services/notifications';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import DailyScreen from './src/screens/DailyScreen';
 import TrainHomeScreen from './src/screens/TrainHomeScreen';
@@ -29,6 +31,8 @@ import { haptic } from './src/utils/haptics';
 const Tab = createBottomTabNavigator();
 const TrainStack = createStackNavigator();
 const ProgressStack = createStackNavigator();
+
+const navigationRef = createNavigationContainerRef<any>();
 
 const HEADER_STYLE = {
   backgroundColor: colors.bg,
@@ -138,11 +142,29 @@ export default function App() {
     Inter_700Bold,
   });
 
+  useEffect(() => {
+    // Request permissions and schedule daily review notification
+    registerForPushNotifications().then((token) => {
+      if (token !== null) {
+        scheduleDailyReview();
+      }
+    });
+
+    // Handle notification tap — navigate to Daily tab
+    const subscription = Notifications.addNotificationResponseReceivedListener(() => {
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('Daily');
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   if (!fontsLoaded) return null;
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <Tab.Navigator
           screenOptions={({ route }) => ({
             headerShown: false,
