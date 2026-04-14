@@ -13,20 +13,23 @@ import { Skeleton } from './Skeleton';
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.92;
 
-interface EvalResult {
-  pillar_id: number;
+interface PillarTouched {
   pillar_name: string;
+  time_invested_minutes: number;
+}
+
+interface OverallEvalResult {
   depth_score: number;
-  relevance_score: number;
   one_percent_better: boolean;
   verdict_explanation: string;
   commentary: string;
-  time_invested_minutes: number;
+  pillars_touched: PillarTouched[];
+  total_time_minutes: number;
 }
 
 interface EndOfDayResponse {
   evaluated: number;
-  results: EvalResult[];
+  result?: OverallEvalResult;
   reflection_applied: boolean;
 }
 
@@ -59,7 +62,7 @@ export default function CheckInModal({
   const [submitting, setSubmitting] = useState(false);
   const [screenState, setScreenState] = useState<ScreenState>('form');
   const [evalResponse, setEvalResponse] = useState<EndOfDayResponse | null>(null);
-  const [expandedPillar, setExpandedPillar] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [pulseAnim] = useState(new Animated.Value(0.3));
 
   const sheetAnim = useRef(new Animated.Value(SHEET_HEIGHT)).current;
@@ -127,7 +130,7 @@ export default function CheckInModal({
   const handleClose = () => {
     setFocus(5); setEnergy(5); setTakeaway('');
     setScreenState('form'); setEvalResponse(null);
-    setExpandedPillar(null); setSubmitting(false);
+    setExpanded(false); setSubmitting(false);
     evalSlideAnim.setValue(0);
     resultsAnim.setValue(0);
     onClose();
@@ -178,8 +181,8 @@ export default function CheckInModal({
     }
   };
 
-  const onePercentCount = evalResponse?.results.filter(r => r.one_percent_better).length ?? 0;
-  const totalEvaluated = evalResponse?.results.length ?? 0;
+  const hasEval = (evalResponse?.evaluated ?? 0) > 0 && !!evalResponse?.result;
+  const isOnePercent = evalResponse?.result?.one_percent_better ?? false;
 
   const formTranslateY = evalSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -50] });
   const formOpacity = evalSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
@@ -278,93 +281,102 @@ export default function CheckInModal({
   );
 
   // ===== RESULTS =====
-  const renderResults = () => (
-    <Animated.View style={{ opacity: resultsOpacity, transform: [{ translateY: resultsTranslateY }] }}>
-      {totalEvaluated > 0 ? (
-        <>
-          <View style={m.resultsSummary}>
-            <Text style={m.resultsEmoji}>
-              {onePercentCount === totalEvaluated ? '🔥' : onePercentCount > 0 ? '📈' : '😤'}
-            </Text>
-            <Text style={m.resultsTitle}>
-              {onePercentCount === totalEvaluated
-                ? '1% better across the board'
-                : onePercentCount > 0
-                  ? `1% better in ${onePercentCount}/${totalEvaluated} pillars`
-                  : 'No growth today — dig deeper tomorrow'}
-            </Text>
-            <Text style={m.resultsSub}>Focus: {focus}/10 · Energy: {energy}/10</Text>
-          </View>
+  const renderResults = () => {
+    const result = evalResponse?.result;
+    const scoreColor = result
+      ? result.depth_score >= 60 ? colors.success
+        : result.depth_score >= 40 ? colors.warning : colors.error
+      : colors.textTertiary;
 
-          {evalResponse!.results.map(result => {
-            const isExpanded = expandedPillar === result.pillar_id;
-            const scoreColor = result.depth_score >= 60 ? colors.success
-              : result.depth_score >= 40 ? colors.warning : colors.error;
-            return (
-              <TouchableOpacity
-                key={result.pillar_id}
-                style={m.evalCard}
-                onPress={() => { haptic.light(); setExpandedPillar(isExpanded ? null : result.pillar_id); }}
-                activeOpacity={0.7}
-              >
-                <View style={m.evalCardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={m.evalPillarName}>{result.pillar_name}</Text>
-                    <Text style={m.evalTime}>{formatTime(result.time_invested_minutes)}</Text>
+    return (
+      <Animated.View style={{ opacity: resultsOpacity, transform: [{ translateY: resultsTranslateY }] }}>
+        {hasEval && result ? (
+          <>
+            <View style={m.resultsSummary}>
+              <Text style={m.resultsEmoji}>{isOnePercent ? '🔥' : '😤'}</Text>
+              <Text style={m.resultsTitle}>
+                {isOnePercent ? '1% better today' : 'No growth today — dig deeper tomorrow'}
+              </Text>
+              <Text style={m.resultsSub}>Focus: {focus}/10 · Energy: {energy}/10</Text>
+            </View>
+
+            <TouchableOpacity
+              style={m.evalCard}
+              onPress={() => { haptic.light(); setExpanded(!expanded); }}
+              activeOpacity={0.7}
+            >
+              <View style={m.evalCardHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={m.evalPillarName}>Today's Assessment</Text>
+                  <Text style={m.evalTime}>{formatTime(result.total_time_minutes)} total</Text>
+                </View>
+                <View style={m.evalScoreCol}>
+                  <View style={[m.depthRing, { borderColor: scoreColor }]}>
+                    <Text style={[m.depthScore, { color: scoreColor }]}>{result.depth_score}</Text>
                   </View>
-                  <View style={m.evalScoreCol}>
-                    <View style={[m.depthRing, { borderColor: scoreColor }]}>
-                      <Text style={[m.depthScore, { color: scoreColor }]}>{result.depth_score}</Text>
+                  {result.one_percent_better ? (
+                    <View style={m.verdictBadgeYes}>
+                      <Ionicons name="arrow-up" size={10} color={colors.success} />
+                      <Text style={m.verdictTextYes}>1%</Text>
                     </View>
-                    {result.one_percent_better ? (
-                      <View style={m.verdictBadgeYes}>
-                        <Ionicons name="arrow-up" size={10} color={colors.success} />
-                        <Text style={m.verdictTextYes}>1%</Text>
-                      </View>
-                    ) : (
-                      <View style={m.verdictBadgeNo}>
-                        <Text style={m.verdictTextNo}>flat</Text>
-                      </View>
-                    )}
-                  </View>
+                  ) : (
+                    <View style={m.verdictBadgeNo}>
+                      <Text style={m.verdictTextNo}>flat</Text>
+                    </View>
+                  )}
                 </View>
-                <Text style={m.verdictExplanation}>{result.verdict_explanation}</Text>
-                {isExpanded && (
-                  <View style={m.commentaryBox}>
-                    <Text style={m.commentaryLabel}>HONEST MIRROR</Text>
-                    <Text style={m.commentaryText}>{result.commentary}</Text>
-                  </View>
-                )}
-                <View style={m.expandHint}>
-                  <Ionicons
-                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                    size={14}
-                    color={colors.textTertiary}
-                  />
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </>
-      ) : (
-        <View style={m.simpleSuccess}>
-          <View style={m.successRing}>
-            <Ionicons name="checkmark" size={40} color={colors.success} />
-          </View>
-          <Text style={m.successTitle}>Reflection Saved</Text>
-          <Text style={m.successSub}>
-            {completedCount === 0
-              ? 'No pillar-linked todos completed today'
-              : 'Your reflection has been logged'}
-          </Text>
-        </View>
-      )}
+              </View>
 
-      <TouchableOpacity style={m.doneBtn} onPress={handleClose}>
-        <Text style={m.doneBtnText}>Done</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  );
+              {/* Pillar chips */}
+              {result.pillars_touched.length > 0 && (
+                <View style={m.pillarChips}>
+                  {result.pillars_touched.map((p, i) => (
+                    <View key={i} style={m.pillarChip}>
+                      <Text style={m.pillarChipText}>
+                        {p.pillar_name} {formatTime(p.time_invested_minutes)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <Text style={m.verdictExplanation}>{result.verdict_explanation}</Text>
+
+              {expanded && (
+                <View style={m.commentaryBox}>
+                  <Text style={m.commentaryLabel}>HONEST MIRROR</Text>
+                  <Text style={m.commentaryText}>{result.commentary}</Text>
+                </View>
+              )}
+              <View style={m.expandHint}>
+                <Ionicons
+                  name={expanded ? 'chevron-up' : 'chevron-down'}
+                  size={14}
+                  color={colors.textTertiary}
+                />
+              </View>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={m.simpleSuccess}>
+            <View style={m.successRing}>
+              <Ionicons name="checkmark" size={40} color={colors.success} />
+            </View>
+            <Text style={m.successTitle}>Reflection Saved</Text>
+            <Text style={m.successSub}>
+              {completedCount === 0
+                ? 'No pillar-linked todos completed today'
+                : 'Your reflection has been logged'}
+            </Text>
+          </View>
+        )}
+
+        <TouchableOpacity style={m.doneBtn} onPress={handleClose}>
+          <Text style={m.doneBtnText}>Done</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
 
   return (
     <Modal
@@ -544,6 +556,16 @@ const m = StyleSheet.create({
   evalCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
   evalPillarName: { ...typography.bodyBold, color: colors.text, fontSize: 16 },
   evalTime: { ...typography.caption, color: colors.textTertiary, marginTop: 2 },
+  pillarChips: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+    marginBottom: spacing.sm, marginTop: spacing.xs,
+  },
+  pillarChip: {
+    backgroundColor: colors.accent + '18',
+    borderRadius: radius.pill,
+    paddingHorizontal: 10, paddingVertical: 3,
+  },
+  pillarChipText: { fontSize: 11, fontWeight: '600', color: colors.accent },
   evalScoreCol: { alignItems: 'center', gap: 4 },
   depthRing: {
     width: 48, height: 48, borderRadius: 24, borderWidth: 3,
