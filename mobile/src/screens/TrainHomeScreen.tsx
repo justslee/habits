@@ -15,7 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
 import { haptic } from '../utils/haptics';
 import {
   getRecentTraining, getWeekSummary, getTodayWorkout, getTodayRun,
@@ -697,7 +697,8 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
 
   screenTitle: {
-    ...typography.title1, color: colors.text,
+    fontFamily: fonts.serifItalic, fontSize: 30, color: colors.text,
+    letterSpacing: -0.6,
     paddingHorizontal: spacing.lg, marginBottom: spacing.md,
   },
 
@@ -735,7 +736,7 @@ const styles = StyleSheet.create({
 
   // Section
   sectionTitle: {
-    ...typography.micro, color: colors.textTertiary,
+    fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8,
     paddingHorizontal: spacing.lg, marginBottom: spacing.xs, marginTop: spacing.sm,
   },
   swipeHint: {

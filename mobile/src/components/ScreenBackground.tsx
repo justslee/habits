@@ -10,12 +10,12 @@ interface Props {
 
 /**
  * Gradient background for all screens.
- * Indigo-tinted top → smooth fade → dark base.
+ * Warm off-black → flat base.
  */
 export default function ScreenBackground({ children, style }: Props) {
   return (
     <LinearGradient
-      colors={['#1C1A3A', '#151430', '#101025', colors.bg]}
+      colors={['#1B1C2A', '#16172A', '#121221', colors.bg]}
       locations={[0, 0.3, 0.6, 1]}
       style={[styles.root, style]}
     >

@@ -20,7 +20,7 @@ import {
 } from '../api/client';
 import { haptic } from '../utils/haptics';
 import ConceptGraph from '../components/ConceptGraph';
-import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
+import { colors, spacing, typography, radius, fonts, cardStyle, PILLAR_COLORS } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton, SkeletonRow } from '../components/Skeleton';
 
@@ -641,8 +641,10 @@ const st = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   title: {
-    ...typography.title2,
-    fontWeight: '700',
+    fontFamily: fonts.serifItalic,
+    fontSize: 26,
+    color: colors.text,
+    letterSpacing: -0.5,
   },
   subtitle: {
     ...typography.caption,
@@ -666,10 +668,10 @@ const st = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   progressPct: {
+    fontFamily: fonts.monoMedium,
     fontSize: 32,
-    fontWeight: '700',
     color: colors.text,
-    fontVariant: ['tabular-nums'],
+    letterSpacing: -1,
   },
   progressLabel: {
     ...typography.caption,

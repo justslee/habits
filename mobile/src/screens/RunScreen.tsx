@@ -18,7 +18,7 @@ import { getTodayRun, TodayRunData, getPostRunFeedback, API_URL, apiHeaders } fr
 import { haptic } from '../utils/haptics';
 import MapView, { Polyline } from '../components/MapView';
 import PacePolyline from '../components/PacePolyline';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 
 const RUN_TYPE_COLORS: Record<string, string> = {
@@ -584,14 +584,14 @@ const s = StyleSheet.create({
   // Pre-run
   preContent: { padding: spacing.lg },
   preHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
-  screenTitle: { ...typography.title1, color: colors.text },
+  screenTitle: { fontFamily: fonts.serifItalic, fontSize: 30, color: colors.text, letterSpacing: -0.6 },
   historyBtn: { padding: spacing.sm },
 
   card: {
     backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1,
     borderColor: colors.border, padding: spacing.lg, marginBottom: spacing.md,
   },
-  cardLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
+  cardLabel: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8, marginBottom: spacing.md },
 
   todayHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
   typeBadge: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },

@@ -9,6 +9,8 @@ import { useRef, useCallback, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { registerForPushNotifications, scheduleDailyReview } from './src/services/notifications';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import { InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif';
+import { JetBrainsMono_400Regular, JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import DailyScreen from './src/screens/DailyScreen';
 import TrainHomeScreen from './src/screens/TrainHomeScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
@@ -120,10 +122,10 @@ function AnimatedTabIcon({ focused, color, iconName }: { focused: boolean; color
       style={[
         { transform: [{ scale }] },
         focused ? {
-          backgroundColor: 'rgba(99,102,241,0.18)',
+          backgroundColor: 'rgba(155,138,232,0.18)',
           borderRadius: 12,
           borderWidth: 1,
-          borderColor: 'rgba(99,102,241,0.12)',
+          borderColor: 'rgba(155,138,232,0.22)',
           paddingHorizontal: 14,
           paddingVertical: 4,
         } : undefined,
@@ -140,6 +142,9 @@ export default function App() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    InstrumentSerif_400Regular_Italic,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_500Medium,
   });
 
   useEffect(() => {
