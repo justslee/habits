@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton, SkeletonRow } from '../components/Skeleton';
 
@@ -254,7 +254,7 @@ const s = StyleSheet.create({
   container: { padding: spacing.lg },
   centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
+  screenTitle: { fontFamily: fonts.serifItalic, fontSize: 30, color: colors.text, letterSpacing: -0.6, marginBottom: spacing.lg },
 
   // === Main card ===
   card: {
@@ -273,7 +273,7 @@ const s = StyleSheet.create({
   // === Sections ===
   section: { marginTop: spacing.lg },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
-  sectionLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionLabel: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8 },
   sectionBody: { ...typography.body, color: colors.text, fontSize: 14, lineHeight: 20 },
 
   // === Quote ===

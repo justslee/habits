@@ -15,13 +15,14 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { haptic } from '../utils/haptics';
-import { colors, spacing, typography, radius, PILLAR_COLORS_BY_NAME } from '../theme';
+import { colors, spacing, typography, radius, fonts, PILLAR_COLORS_BY_NAME } from '../theme';
 import { API_URL, apiHeaders } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
 import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
 import CheckInModal from './CheckInModal';
+import CompoundingHero from '../components/CompoundingHero';
 
 const TIME_ESTIMATES = [15, 30, 60, 90, 120, 180, 240];
 
@@ -37,7 +38,7 @@ const HABIT_ICONS: string[] = [
   'bulb-outline', 'fitness-outline', 'cafe-outline', 'bicycle-outline',
 ];
 const HABIT_COLORS = [
-  '#6366F1', '#8B5CF6', '#EC4899', '#EF4444', '#F59E0B',
+  '#9B8AE8', '#8B5CF6', '#EC4899', '#EF4444', '#F59E0B',
   '#22C55E', '#06B6D4', '#3B82F6', '#F97316', '#10B981',
 ];
 
@@ -332,6 +333,16 @@ export default function DailyScreen() {
     ? `${Math.min(100, Math.round((totalComplete / totalItems) * 100))}%`
     : '0%';
 
+  // "Day N" of the compounding journey — derived from the longest active habit streak.
+  // Falls back to total completions, then 1, so the hero never shows zero.
+  const heroDay = (() => {
+    if (habits.length === 0) return 1;
+    const byStreak = Math.max(...habits.map(h => h.longest_streak || 0));
+    if (byStreak > 0) return byStreak;
+    const byTotal = Math.max(...habits.map(h => h.total_completions || 0));
+    return Math.max(1, byTotal);
+  })();
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -382,6 +393,9 @@ export default function DailyScreen() {
                 </View>
               </View>
             )}
+
+            {/* ── Compounding Hero ── */}
+            <CompoundingHero day={heroDay} />
 
             {/* ── Progress bar ── */}
             {totalItems > 0 && (
@@ -800,8 +814,10 @@ const st = StyleSheet.create({
   // ── Header ──
   header: { marginBottom: spacing.md },
   heroDate: {
-    ...typography.title1,
+    fontFamily: fonts.serifItalic,
+    fontSize: 26,
     color: colors.text,
+    letterSpacing: -0.5,
     marginBottom: 4,
   },
   contextLine: {
@@ -821,7 +837,7 @@ const st = StyleSheet.create({
   // ── Quote blockquote ──
   quoteBlock: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(99,102,241,0.04)',
+    backgroundColor: 'rgba(155,138,232,0.04)',
     borderRadius: radius.sm,
     marginBottom: spacing.lg,
     overflow: 'hidden',
@@ -875,16 +891,17 @@ const st = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   sectionLabel: {
-    ...typography.micro,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.textTertiary,
-    letterSpacing: 1,
+    letterSpacing: 1.8,
   },
   sectionLine: {
     flex: 1,
     height: 1,
     backgroundColor: colors.border,
   },
-  sectionCount: { ...typography.micro, color: colors.textTertiary },
+  sectionCount: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 0.8 },
   sectionAddBtn: { padding: 2 },
 
   // ── Completed item dimming ──

@@ -6,9 +6,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getTodayWorkout, chatWithCoach, WorkoutSession } from '../api/client';
-import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton } from '../components/Skeleton';
+import LiftLogger from '../components/LiftLogger';
 import { haptic } from '../utils/haptics';
 
 interface ChatMessage { role: 'user' | 'coach'; text: string; }
@@ -168,6 +169,23 @@ export default function WorkoutScreen() {
             )}
           </View>
         )}
+
+        {/* Lift Logger — fast-path manual set entry */}
+        {session && !sessionComplete && session.day_type !== 'cardio' && session.day_type !== 'rest' && session.day_type !== 'basketball' && (() => {
+          const planExercises: string[] = (plan?.exercises || [])
+            .map((ex: any) => ex.name)
+            .filter(Boolean);
+          const exerciseList = planExercises.length > 0 ? planExercises : undefined;
+          const initialSetCount = session.exercises?.length ?? 0;
+          return (
+            <LiftLogger
+              sessionId={session.id}
+              exercises={exerciseList}
+              initialSetCount={initialSetCount}
+              onLogged={() => { fetchWorkout(); }}
+            />
+          );
+        })()}
 
         {/* Workout Summary + Completed Sets — grouped by exercise */}
         {session?.exercises && session.exercises.length > 0 && (() => {
@@ -372,7 +390,7 @@ const s = StyleSheet.create({
   scroll: { flex: 1 },
   container: { padding: spacing.lg, paddingBottom: 20 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
-  screenTitle: { ...typography.title1, color: colors.text, marginBottom: spacing.lg },
+  screenTitle: { fontFamily: fonts.serifItalic, fontSize: 30, color: colors.text, letterSpacing: -0.6, marginBottom: spacing.lg },
 
   skeleton: { gap: spacing.md, width: '80%' },
   skeletonBar: { height: 16, backgroundColor: colors.input, borderRadius: radius.sm, width: '100%' },

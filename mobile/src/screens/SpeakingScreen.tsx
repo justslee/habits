@@ -15,7 +15,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton, SkeletonRow } from '../components/Skeleton';
 import { usePressScale } from '../hooks/usePressScale';
@@ -60,17 +60,19 @@ interface SpeakingStats {
 type ScreenState = 'setup' | 'recording' | 'processing' | 'results' | 'history';
 
 const AUDIENCES = [
-  { id: 'junior_analyst', label: 'Junior Analyst' },
-  { id: 'lp_meeting', label: 'LP Meeting' },
-  { id: 'technical_peer', label: 'Technical Peer' },
-  { id: 'podcast', label: 'Podcast' },
-  { id: 'general', label: 'General' },
+  { id: 'lp_meeting', label: 'LP / Investor', sub: 'Skeptical · 90s patience' },
+  { id: 'junior_analyst', label: 'Junior Analyst', sub: 'Internal · jargon ok' },
+  { id: 'podcast', label: 'Podcast', sub: 'No technical chops' },
+  { id: 'technical_peer', label: 'Technical Peer', sub: 'Deep · precise terms' },
+  { id: 'general', label: 'General audience', sub: 'Zero context · be human' },
 ];
 
 const TARGETS = [
-  { seconds: 120, label: '2 min' },
-  { seconds: 180, label: '3 min' },
-  { seconds: 300, label: '5 min' },
+  { seconds: 30, label: '30s' },
+  { seconds: 60, label: '1m' },
+  { seconds: 120, label: '2m' },
+  { seconds: 180, label: '3m' },
+  { seconds: 300, label: '5m' },
 ];
 
 const SCORE_DIMENSIONS = [
@@ -100,12 +102,16 @@ export default function SpeakingScreen() {
   const [pulseAnim] = useState(new Animated.Value(1));
   const recordBtnScale = usePressScale(0.95);
 
-  // Fetch suggestions on mount
+  // Fetch suggestions and stats on mount
   useEffect(() => {
     (async () => {
       try {
-        const resp = await fetch(`${API_URL}/api/v1/speaking/topics/suggest`, { headers: apiHeaders() });
-        if (resp.ok) setSuggestions(await resp.json());
+        const [topicResp, statsResp] = await Promise.all([
+          fetch(`${API_URL}/api/v1/speaking/topics/suggest`, { headers: apiHeaders() }),
+          fetch(`${API_URL}/api/v1/speaking/stats`, { headers: apiHeaders() }),
+        ]);
+        if (topicResp.ok) setSuggestions(await topicResp.json());
+        if (statsResp.ok) setStats(await statsResp.json());
       } catch {}
     })();
   }, []);
@@ -231,69 +237,126 @@ export default function SpeakingScreen() {
 
   // ===== SETUP =====
   if (screenState === 'setup') {
+    const sessionLabel = `SESSION ${String((stats?.total_sessions ?? 0) + 1).padStart(3, '0')} · DAILY REP`;
+    const targetLabel = targetSeconds < 60 ? `${targetSeconds}s` : `${Math.round(targetSeconds / 60)} MIN`;
     return (
       <ScreenBackground>
       <ScrollView style={st.scroll} contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]} keyboardShouldPersistTaps="handled">
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={st.screenTitle}>Speak</Text>
+        {/* Header — serif title + session eyebrow */}
+        <View style={st.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={st.screenTitleSerif}>Speak</Text>
+            <Text style={st.eyebrow}>{sessionLabel}</Text>
+          </View>
           <TouchableOpacity onPress={loadHistory} style={st.historyBtn}>
             <Ionicons name="time-outline" size={18} color={colors.accent} />
             <Text style={st.historyBtnText}>History</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={st.label}>WHAT ARE YOU EXPLAINING?</Text>
-        <TextInput
-          style={st.input}
-          placeholder="e.g. Itô's Lemma, Black-Scholes intuition..."
-          placeholderTextColor={colors.textTertiary}
-          value={topic}
-          onChangeText={setTopic}
-        />
+        {/* Topic hero */}
+        <View style={st.topicHero}>
+          <View style={st.topicPill}>
+            <Text style={st.topicPillText}>DAILY · {targetLabel}</Text>
+          </View>
+          <Text style={st.heroEyebrow}>WHAT ARE YOU SAYING?</Text>
+          <TextInput
+            style={st.topicInput}
+            placeholder="One sentence. The thing you have to nail."
+            placeholderTextColor={colors.textTertiary}
+            value={topic}
+            onChangeText={setTopic}
+            multiline
+          />
+          {suggestions.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={st.recentChipsScroll}
+              contentContainerStyle={st.recentChipsRow}
+            >
+              {suggestions.slice(0, 6).map((s, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={st.recentChip}
+                  onPress={() => { haptic.light(); setTopic(s.topic); }}
+                >
+                  <Text style={st.recentChipText} numberOfLines={1}>{s.topic}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
 
-        {suggestions.length > 0 && !topic && (
-          <View style={st.suggestionsBox}>
-            <Text style={st.suggestLabel}>FROM YOUR WEEK</Text>
-            {suggestions.slice(0, 5).map((s, i) => (
-              <TouchableOpacity key={i} style={st.suggestionChip}
-                onPress={() => { haptic.light(); setTopic(s.topic); }}>
-                <Ionicons name={s.source === 'concept' ? 'bulb-outline' : 'checkbox-outline'}
-                  size={14} color={colors.accent} />
-                <Text style={st.suggestionText} numberOfLines={1}>{s.topic}</Text>
+        {/* Audience picker — 2 column grid */}
+        <View style={st.sectionRow}>
+          <Text style={st.sectionTitleSerif}>Audience</Text>
+          <Text style={st.sectionMore}>WHO ARE YOU TALKING TO?</Text>
+        </View>
+        <View style={st.audienceGrid}>
+          {AUDIENCES.map(a => {
+            const active = audience === a.id;
+            return (
+              <TouchableOpacity
+                key={a.id}
+                style={[st.audienceCard, active && st.audienceCardActive]}
+                onPress={() => { haptic.light(); setAudience(a.id); }}
+              >
+                <Text style={[st.audienceLabel, active && { color: colors.accent }]}>{a.label}</Text>
+                <Text style={st.audienceSub}>{a.sub}</Text>
               </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Duration + record orb */}
+        <View style={st.recordCard}>
+          <View style={st.recordCardHeader}>
+            <Text style={st.eyebrow}>TARGET DURATION</Text>
+            <Text style={st.recordCardValue}>{targetLabel}</Text>
+          </View>
+          <View style={st.durationRow}>
+            {TARGETS.map(t => {
+              const active = targetSeconds === t.seconds;
+              return (
+                <TouchableOpacity
+                  key={t.seconds}
+                  style={[st.durationChip, active && st.durationChipActive]}
+                  onPress={() => { haptic.light(); setTargetSeconds(t.seconds); }}
+                >
+                  <Text style={[st.durationChipText, active && st.durationChipTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Animated.View style={[recordBtnScale.animStyle, st.orbWrap]}>
+            <TouchableOpacity
+              style={st.recordOrb}
+              onPress={startRecording}
+              onPressIn={recordBtnScale.onPressIn}
+              onPressOut={recordBtnScale.onPressOut}
+              activeOpacity={0.85}
+            >
+              <View style={st.recordOrbCenter} />
+            </TouchableOpacity>
+            <Text style={st.recordOrbHint}>TAP · GO</Text>
+          </Animated.View>
+
+          {/* Static waveform preview */}
+          <View style={st.waveformRow}>
+            {Array.from({ length: 36 }).map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  st.waveBar,
+                  { height: 6 + Math.abs(Math.sin(i * 0.7)) * 22 },
+                ]}
+              />
             ))}
           </View>
-        )}
-
-        <Text style={st.label}>AUDIENCE</Text>
-        <View style={st.chipRow}>
-          {AUDIENCES.map(a => (
-            <TouchableOpacity key={a.id}
-              style={[st.chip, audience === a.id && st.chipActive]}
-              onPress={() => { haptic.light(); setAudience(a.id); }}>
-              <Text style={[st.chipText, audience === a.id && st.chipTextActive]}>{a.label}</Text>
-            </TouchableOpacity>
-          ))}
         </View>
-
-        <Text style={st.label}>TARGET TIME</Text>
-        <View style={st.chipRow}>
-          {TARGETS.map(t => (
-            <TouchableOpacity key={t.seconds}
-              style={[st.chip, targetSeconds === t.seconds && st.chipActive]}
-              onPress={() => { haptic.light(); setTargetSeconds(t.seconds); }}>
-              <Text style={[st.chipText, targetSeconds === t.seconds && st.chipTextActive]}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Animated.View style={recordBtnScale.animStyle}>
-          <TouchableOpacity style={st.recordBtn} onPress={startRecording}
-            onPressIn={recordBtnScale.onPressIn} onPressOut={recordBtnScale.onPressOut}>
-            <Ionicons name="mic" size={24} color={colors.text} />
-            <Text style={st.recordBtnText}>Start Recording</Text>
-          </TouchableOpacity>
-        </Animated.View>
+        <View style={{ height: 40 }} />
       </ScrollView>
       </ScreenBackground>
     );
@@ -309,7 +372,7 @@ export default function SpeakingScreen() {
 
         <Animated.View style={[st.micRing, { transform: [{ scale: pulseAnim }] }]}>
           <View style={st.micInner}>
-            <Ionicons name="mic" size={48} color="#EF4444" />
+            <Ionicons name="mic" size={48} color={colors.accent} />
           </View>
         </Animated.View>
 
@@ -641,9 +704,154 @@ function PastSessionCard({ session: s, isExpanded, onToggle, scoreColor, formatT
 
 const st = StyleSheet.create({
   scroll: { flex: 1 },
-  container: { padding: spacing.lg },
+  container: { paddingHorizontal: spacing.md, paddingBottom: spacing.lg },
   centerScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
   screenTitle: { ...typography.title1, color: colors.text },
+
+  // Setup hero
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md, paddingHorizontal: spacing.xs },
+  screenTitleSerif: { fontFamily: fonts.serifItalic, fontSize: 32, color: colors.text, letterSpacing: -0.7 },
+  eyebrow: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8, marginTop: 2 },
+  topicHero: {
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    padding: 22,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  topicPill: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: 'rgba(15,15,24,0.55)',
+    marginBottom: spacing.sm,
+  },
+  topicPillText: { fontFamily: fonts.mono, fontSize: 10, color: colors.textSecondary, letterSpacing: 1.6 },
+  heroEyebrow: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8 },
+  topicInput: {
+    marginTop: 12,
+    minHeight: 64,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(15,15,24,0.6)',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    color: colors.text,
+    fontFamily: fonts.serifItalic,
+    fontSize: 19,
+    lineHeight: 26,
+    textAlignVertical: 'top',
+  },
+  recentChipsScroll: { marginTop: 10 },
+  recentChipsRow: { gap: 6, paddingBottom: 4 },
+  recentChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: 'transparent',
+  },
+  recentChipText: { fontFamily: fonts.mono, fontSize: 11, color: colors.textTertiary, letterSpacing: 0.4 },
+
+  // Sections
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  sectionTitleSerif: { fontFamily: fonts.serifItalic, fontSize: 22, color: colors.text, letterSpacing: -0.5 },
+  sectionMore: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.6 },
+
+  // Audience grid
+  audienceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: spacing.md,
+  },
+  audienceCard: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    padding: 14,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  audienceCardActive: {
+    backgroundColor: 'rgba(155,138,232,0.10)',
+    borderColor: colors.accent,
+  },
+  audienceLabel: { fontFamily: fonts.serifItalic, fontSize: 18, color: colors.text, letterSpacing: -0.4 },
+  audienceSub: { fontFamily: fonts.mono, fontSize: 9, color: colors.textTertiary, letterSpacing: 1.4, marginTop: 4 },
+
+  // Record card
+  recordCard: {
+    padding: 18,
+    borderRadius: radius.xl,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  recordCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 10,
+  },
+  recordCardValue: { fontFamily: fonts.mono, fontSize: 14, color: colors.accent, letterSpacing: 0.4 },
+  durationRow: { flexDirection: 'row', gap: 6, marginBottom: 24 },
+  durationChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+  },
+  durationChipActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  durationChipText: { fontFamily: fonts.mono, fontSize: 11, color: colors.textSecondary, letterSpacing: 1 },
+  durationChipTextActive: { color: colors.bg },
+  orbWrap: { alignItems: 'center', marginBottom: 16 },
+  recordOrb: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(155,138,232,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recordOrbCenter: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.accent,
+  },
+  recordOrbHint: { fontFamily: fonts.mono, fontSize: 11, color: colors.textTertiary, letterSpacing: 1.8, marginTop: 12 },
+  waveformRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    height: 28,
+  },
+  waveBar: { width: 3, borderRadius: 2, backgroundColor: colors.line },
 
   // Setup
   label: {
@@ -677,21 +885,28 @@ const st = StyleSheet.create({
   historyBtnText: { ...typography.caption, color: colors.accent, fontWeight: '600' },
 
   // Recording
-  recordingTopic: { ...typography.bodyBold, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
+  recordingTopic: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 22,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.xl,
+    letterSpacing: -0.4,
+  },
   micRing: {
     width: 140, height: 140, borderRadius: 70,
-    backgroundColor: '#EF444415', borderWidth: 2, borderColor: '#EF444440',
+    backgroundColor: 'rgba(155,138,232,0.12)', borderWidth: 2, borderColor: 'rgba(155,138,232,0.38)',
     alignItems: 'center', justifyContent: 'center',
   },
   micInner: {
     width: 100, height: 100, borderRadius: 50,
-    backgroundColor: '#EF444420', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(155,138,232,0.20)', alignItems: 'center', justifyContent: 'center',
   },
   timerText: { ...typography.title1, color: colors.text, fontSize: 48, marginTop: spacing.xl, fontVariant: ['tabular-nums'] as any },
   timerTarget: { ...typography.caption, color: colors.textTertiary, marginTop: spacing.xs },
   stopBtn: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: '#EF4444', borderRadius: radius.lg,
+    backgroundColor: colors.accent, borderRadius: radius.lg,
     paddingHorizontal: spacing.xl, paddingVertical: spacing.md, marginTop: spacing.xxl,
   },
   stopSquare: { width: 14, height: 14, borderRadius: 2, backgroundColor: '#fff' },

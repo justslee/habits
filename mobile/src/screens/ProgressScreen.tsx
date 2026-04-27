@@ -18,7 +18,7 @@ import { haptic } from '../utils/haptics';
 import CompoundingChart from '../components/CompoundingChart';
 import { ProgressSkeleton, Skeleton } from '../components/Skeleton';
 import UndoToast from '../components/UndoToast';
-import { colors, spacing, typography, radius, cardStyle, PILLAR_COLORS } from '../theme';
+import { colors, spacing, typography, radius, fonts, cardStyle, PILLAR_COLORS } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
 
@@ -67,10 +67,10 @@ const TREND_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color
 // Indigo shades: 0=bg (empty), 1-4=increasingly bright indigo
 const HEATMAP_COLORS = [
   '#0B0D1A',
-  'rgba(99,102,241,0.25)',
-  'rgba(99,102,241,0.45)',
-  'rgba(99,102,241,0.70)',
-  'rgba(99,102,241,0.92)',
+  'rgba(155,138,232,0.25)',
+  'rgba(155,138,232,0.45)',
+  'rgba(155,138,232,0.70)',
+  'rgba(155,138,232,0.92)',
 ];
 
 function intensityLevel(count: number): number {
@@ -303,7 +303,7 @@ export default function ProgressScreen() {
   const todayStr = new Date().toISOString().split('T')[0];
   const discScore: number = disciplineData?.discipline_score ?? 0;
   const discGrade = discScore >= 80 ? 'A' : discScore >= 60 ? 'B' : discScore >= 40 ? 'C' : discScore >= 20 ? 'D' : 'F';
-  const discGradeColor = discGrade === 'A' ? '#6366F1' : discGrade === 'B' ? '#22C55E' : discGrade === 'C' ? '#F59E0B' : discGrade === 'D' ? '#F97316' : '#EF4444';
+  const discGradeColor = discGrade === 'A' ? '#9B8AE8' : discGrade === 'B' ? '#22C55E' : discGrade === 'C' ? '#F59E0B' : discGrade === 'D' ? '#F97316' : '#EF4444';
   const dates30 = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(); d.setDate(d.getDate() - 29 + i); return d.toISOString().split('T')[0];
   });
@@ -658,7 +658,7 @@ export default function ProgressScreen() {
               </View>
               <View style={[dsr.dotsRow, { marginTop: spacing.md }]}>
                 {dots30.map(({ date, status }) => {
-                  const dotBg = status === 'perfect' ? '#6366F1' : status === 'partial' ? 'rgba(99,102,241,0.3)' : 'rgba(36,38,69,0.6)';
+                  const dotBg = status === 'perfect' ? '#9B8AE8' : status === 'partial' ? 'rgba(155,138,232,0.3)' : 'rgba(31,32,48,0.6)';
                   return (
                     <View
                       key={date}
@@ -976,7 +976,7 @@ const s = StyleSheet.create({
   tabTextActive: { color: colors.accent },
 
   card: { ...cardStyle, marginBottom: spacing.md },
-  cardLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
+  cardLabel: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8, marginBottom: spacing.md },
   sectionHeader: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
   divider: { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: spacing.md, marginBottom: spacing.md },
 
@@ -1046,18 +1046,17 @@ const ms = StyleSheet.create({
     marginBottom: spacing.md,
   },
   heroNumber: {
+    fontFamily: fonts.monoMedium,
     fontSize: 56,
-    fontWeight: '700',
-    color: colors.accentLight,
-    fontVariant: ['tabular-nums'],
+    color: colors.accent,
     letterSpacing: -2,
   },
   heroLabel: {
-    ...typography.caption,
+    fontFamily: fonts.mono,
+    fontSize: 11,
     color: colors.textSecondary,
     marginTop: spacing.xs,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.6,
   },
   heroSub: {
     ...typography.caption,
@@ -1102,10 +1101,10 @@ const ms = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(99,102,241,0.06)',
+    backgroundColor: 'rgba(155,138,232,0.06)',
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(99,102,241,0.18)',
+    borderColor: 'rgba(155,138,232,0.18)',
     padding: spacing.lg,
     marginBottom: spacing.md,
   },
@@ -1417,12 +1416,12 @@ const dsr = StyleSheet.create({
     borderRightWidth: 1,
     borderBottomWidth: 1,
     borderLeftWidth: 3,
-    borderTopColor: 'rgba(99,102,241,0.15)',
-    borderRightColor: 'rgba(99,102,241,0.15)',
-    borderBottomColor: 'rgba(99,102,241,0.15)',
+    borderTopColor: 'rgba(155,138,232,0.15)',
+    borderRightColor: 'rgba(155,138,232,0.15)',
+    borderBottomColor: 'rgba(155,138,232,0.15)',
     borderLeftColor: colors.accent,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(99,102,241,0.06)',
+    backgroundColor: 'rgba(155,138,232,0.06)',
     padding: spacing.md,
     marginBottom: spacing.md,
     gap: spacing.sm,

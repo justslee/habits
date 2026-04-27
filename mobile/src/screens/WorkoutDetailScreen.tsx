@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getWorkoutSession, getWhoopData, getWhoopSnapshot, WorkoutSession, ExerciseLogData, WhoopData } from '../api/client';
 import WhoopCard from '../components/WhoopCard';
-import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
 
@@ -348,7 +348,7 @@ const s = StyleSheet.create({
 
   // Cards
   card: { ...cardStyle, marginBottom: spacing.md },
-  cardLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase' as const, marginBottom: spacing.md },
+  cardLabel: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8, marginBottom: spacing.md },
 
   // Stats grid (Whoop-style)
   statsGrid: { flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap' },
