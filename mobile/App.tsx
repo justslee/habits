@@ -23,16 +23,19 @@ import WorkoutDetailScreen from './src/screens/WorkoutDetailScreen';
 import RouteMapScreen from './src/screens/RouteMapScreen';
 import RouteSuggestionsScreen from './src/screens/RouteSuggestionsScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
+import NorthStarScreen from './src/screens/NorthStarScreen';
 import PillarDetailScreen from './src/screens/PillarDetailScreen';
 import WeeklyReviewScreen from './src/screens/WeeklyReviewScreen';
 import SpeakingScreen from './src/screens/SpeakingScreen';
+import MeScreen from './src/screens/MeScreen';
+import CustomTabBar from './src/components/CustomTabBar';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
 import { haptic } from './src/utils/haptics';
 
 const Tab = createBottomTabNavigator();
 const TrainStack = createStackNavigator();
-const ProgressStack = createStackNavigator();
+const NorthStarStack = createStackNavigator();
 
 const navigationRef = createNavigationContainerRef<any>();
 
@@ -75,10 +78,10 @@ function TrainStackScreen() {
   );
 }
 
-function ProgressStackScreen() {
+function NorthStarStackScreen() {
   return (
-    <ErrorBoundary name="ProgressStack">
-      <ProgressStack.Navigator
+    <ErrorBoundary name="NorthStarStack">
+      <NorthStarStack.Navigator
         screenOptions={{
           headerShown: true,
           headerBackTitle: ' ',
@@ -87,10 +90,11 @@ function ProgressStackScreen() {
           headerTitleStyle: HEADER_TITLE_STYLE,
         }}
       >
-        <ProgressStack.Screen name="ProgressMain" component={ProgressScreen} options={{ headerShown: false }} />
-        <ProgressStack.Screen name="PillarDetail" component={PillarDetailScreen} options={{ title: '' }} />
-        <ProgressStack.Screen name="WeeklyReview" component={WeeklyReviewScreen} options={{ title: '' }} />
-      </ProgressStack.Navigator>
+        <NorthStarStack.Screen name="NorthStarMain" component={NorthStarScreen} options={{ headerShown: false }} />
+        <NorthStarStack.Screen name="NorthStarLegacy" component={ProgressScreen} options={{ title: 'Mastery (legacy)' }} />
+        <NorthStarStack.Screen name="PillarDetail" component={PillarDetailScreen} options={{ title: '' }} />
+        <NorthStarStack.Screen name="WeeklyReview" component={WeeklyReviewScreen} options={{ title: '' }} />
+      </NorthStarStack.Navigator>
     </ErrorBoundary>
   );
 }
@@ -99,7 +103,8 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
   Daily: { active: 'today', inactive: 'today-outline' },
   Train: { active: 'fitness', inactive: 'fitness-outline' },
   Speak: { active: 'mic', inactive: 'mic-outline' },
-  Progress: { active: 'stats-chart', inactive: 'stats-chart-outline' },
+  NorthStar: { active: 'star', inactive: 'star-outline' },
+  Me: { active: 'person', inactive: 'person-outline' },
 };
 
 /** Animated tab icon with spring scale on focus change. */
@@ -171,34 +176,14 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer ref={navigationRef}>
         <Tab.Navigator
-          screenOptions={({ route }) => ({
-            headerShown: false,
-            tabBarStyle: {
-              backgroundColor: colors.bg,
-              borderTopWidth: 0,
-              elevation: 0,
-              paddingTop: 8,
-            },
-            tabBarActiveTintColor: colors.accent,
-            tabBarInactiveTintColor: colors.textTertiary,
-            tabBarLabelStyle: {
-              fontSize: 10,
-              fontWeight: '600',
-              fontFamily: 'Inter_600SemiBold',
-              marginTop: 2,
-              letterSpacing: 0.3,
-            },
-            tabBarIcon: ({ focused, color }) => {
-              const icons = TAB_ICONS[route.name];
-              const iconName = focused ? icons.active : icons.inactive;
-              return <AnimatedTabIcon focused={focused} color={color} iconName={iconName} />;
-            },
-          })}
+          tabBar={props => <CustomTabBar {...props} />}
+          screenOptions={{ headerShown: false }}
         >
           <Tab.Screen name="Daily" component={DailyScreen} options={{ tabBarLabel: 'Daily' }} />
           <Tab.Screen name="Train" component={TrainStackScreen} options={{ tabBarLabel: 'Train' }} />
           <Tab.Screen name="Speak" component={SpeakingScreen} options={{ tabBarLabel: 'Speak' }} />
-          <Tab.Screen name="Progress" component={ProgressStackScreen} options={{ tabBarLabel: 'Progress' }} />
+          <Tab.Screen name="NorthStar" component={NorthStarStackScreen} options={{ tabBarLabel: 'North Star' }} />
+          <Tab.Screen name="Me" component={MeScreen} options={{ tabBarLabel: 'Me' }} />
         </Tab.Navigator>
         <StatusBar style="light" />
       </NavigationContainer>

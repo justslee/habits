@@ -337,8 +337,8 @@ const s = StyleSheet.create({
 
   // Hero
   heroSection: { alignItems: 'center', marginBottom: spacing.lg, gap: spacing.xs },
-  heroDay: { ...typography.title1, color: colors.text },
-  heroDate: { ...typography.caption, color: colors.textSecondary },
+  heroDay: { fontFamily: fonts.serifItalic, fontSize: 32, color: colors.text, letterSpacing: -0.6 },
+  heroDate: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.6, marginTop: 4 },
   statusBadge: { borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 4, marginTop: spacing.xs },
   statusCompleted: { backgroundColor: colors.success + '15' },
   statusPlanned: { backgroundColor: colors.accent + '15' },

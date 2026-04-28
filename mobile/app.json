@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#09090F"
+      "backgroundColor": "#0E0E14"
     },
     "ios": {
       "supportsTablet": true,
@@ -53,8 +53,8 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "backgroundColor": "#09090F",
-      "themeColor": "#6366F1",
+      "backgroundColor": "#0E0E14",
+      "themeColor": "#9B8AE8",
       "name": "Mastery Tracker",
       "shortName": "Mastery",
       "description": "Daily mastery, fitness, and run tracking",

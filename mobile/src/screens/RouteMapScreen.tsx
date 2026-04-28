@@ -222,7 +222,7 @@ export default function RouteMapScreen({ route: navRoute, navigation }: any) {
           {displayCoords.length > 1 && (
             <Polyline
               coordinates={displayCoords}
-              strokeColor={'#6366F1'}
+              strokeColor={colors.accent}
               strokeWidth={5}
               lineCap="round"
               lineJoin="round"

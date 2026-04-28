@@ -12,7 +12,7 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 import { API_URL, apiHeaders, deleteRun, restoreRun } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
@@ -138,6 +138,12 @@ export default function RunHistoryScreen({ navigation }: any) {
       contentContainerStyle={{ paddingTop: 12 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
+      {/* Title block */}
+      <View style={styles.titleBlock}>
+        <Text style={styles.eyebrow}>HISTORY · RUNS</Text>
+        <Text style={styles.titleSerif}>Recent runs</Text>
+      </View>
+
       {/* Stats summary */}
       {stats && stats.total_runs > 0 && (
         <View style={styles.statsRow}>
@@ -229,6 +235,9 @@ export default function RunHistoryScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+  titleBlock: { paddingHorizontal: spacing.md, marginBottom: spacing.md },
+  eyebrow: { fontFamily: fonts.mono, fontSize: 9, color: colors.textTertiary, letterSpacing: 2.2 },
+  titleSerif: { fontFamily: fonts.serifItalic, fontSize: 28, color: colors.text, letterSpacing: -0.6, marginTop: 4 },
   container: { flex: 1 },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.lg },

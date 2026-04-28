@@ -13,12 +13,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path, Circle, Defs, LinearGradient as SvgLG, Stop } from 'react-native-svg';
 import { API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
 import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton, SkeletonRow } from '../components/Skeleton';
 import { usePressScale } from '../hooks/usePressScale';
+import Topbar from '../components/Topbar';
 
 interface TopicSuggestion {
   topic: string;
@@ -242,17 +244,18 @@ export default function SpeakingScreen() {
     return (
       <ScreenBackground>
       <ScrollView style={st.scroll} contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]} keyboardShouldPersistTaps="handled">
-        {/* Header — serif title + session eyebrow */}
-        <View style={st.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={st.screenTitleSerif}>Speak</Text>
-            <Text style={st.eyebrow}>{sessionLabel}</Text>
-          </View>
-          <TouchableOpacity onPress={loadHistory} style={st.historyBtn}>
-            <Ionicons name="time-outline" size={18} color={colors.accent} />
-            <Text style={st.historyBtnText}>History</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Topbar with brand mark */}
+        <Topbar
+          title="Speak"
+          caption={sessionLabel}
+          right={
+            <TouchableOpacity onPress={loadHistory} style={st.historyBtn}>
+              <Ionicons name="time-outline" size={18} color={colors.accent} />
+              <Text style={st.historyBtnText}>History</Text>
+            </TouchableOpacity>
+          }
+        />
+
 
         {/* Topic hero */}
         <View style={st.topicHero}>
@@ -367,23 +370,56 @@ export default function SpeakingScreen() {
     const overTarget = elapsed > targetSeconds;
     return (
       <ScreenBackground>
-      <View style={[st.centerScreen, { paddingTop: insets.top }]}>
-        <Text style={st.recordingTopic} numberOfLines={2}>{topic}</Text>
+      <View style={[st.centerScreen, { paddingTop: insets.top + spacing.lg, paddingHorizontal: spacing.lg }]}>
+        {/* REC pill at top */}
+        <View style={st.recPillRow}>
+          <View style={st.recDot} />
+          <Text style={st.recPillText}>REC · {(audience || 'GENERAL').toUpperCase()}</Text>
+        </View>
 
-        <Animated.View style={[st.micRing, { transform: [{ scale: pulseAnim }] }]}>
-          <View style={st.micInner}>
-            <Ionicons name="mic" size={48} color={colors.accent} />
+        {/* Topic in serif italic */}
+        <Text style={st.recordingTopicSerif} numberOfLines={3}>"{topic}"</Text>
+
+        {/* 220px ring with elapsed + target */}
+        <Animated.View style={[st.recordRingWrap, { transform: [{ scale: pulseAnim }] }]}>
+          <View style={[st.recordRing, overTarget && { borderColor: colors.warn }]}>
+            <Text style={st.recordEyebrow}>ELAPSED</Text>
+            <Text style={[st.recordTimer, overTarget && { color: colors.warn }]}>
+              {formatTime(elapsed)}
+            </Text>
+            <Text style={st.recordTarget}>/ {formatTime(targetSeconds)} TARGET</Text>
           </View>
         </Animated.View>
 
-        <Text style={[st.timerText, overTarget && { color: colors.warning }]}>
-          {formatTime(elapsed)}
-        </Text>
-        <Text style={st.timerTarget}>target: {formatTime(targetSeconds)}</Text>
+        {/* Live waveform */}
+        <View style={st.liveWaveform}>
+          {Array.from({ length: 40 }).map((_, i) => {
+            const phase = i * 0.35 + elapsed * 1.2;
+            const amp = 0.25 + 0.75 * Math.abs(Math.sin(phase) + 0.5 * Math.sin(phase * 2.3));
+            return (
+              <View
+                key={i}
+                style={[
+                  st.liveWaveBar,
+                  { height: 6 + amp * 44, opacity: 0.4 + amp * 0.6 },
+                ]}
+              />
+            );
+          })}
+        </View>
 
-        <TouchableOpacity style={st.stopBtn} onPress={stopRecording}>
-          <View style={st.stopSquare} />
-          <Text style={st.stopBtnText}>Stop</Text>
+        {/* Pace hint */}
+        <Text style={st.recordHint}>
+          {elapsed < 10 ? 'OPEN WITH THE VERB'
+            : elapsed < 30 ? "YOU'RE WARMING UP — STAY WITH IT"
+            : elapsed < targetSeconds * 0.6 ? 'GOOD PACE · KEEP CLAIMS TIGHT'
+            : elapsed < targetSeconds ? 'LAND THE NEXT MILESTONE'
+            : 'OVER TARGET · WRAP IT'}
+        </Text>
+
+        {/* 84px stop button */}
+        <TouchableOpacity style={st.recordStopBtn} onPress={stopRecording} activeOpacity={0.85}>
+          <View style={st.recordStopInner} />
         </TouchableOpacity>
       </View>
       </ScreenBackground>
@@ -403,97 +439,218 @@ export default function SpeakingScreen() {
     );
   }
 
-  // ===== HISTORY =====
+  // ===== HISTORY ===== — direct port of canvas SpeakHistory
   if (screenState === 'history') {
+    const sessionsForList = pastSessions.slice(0, 14);
+    const series = sessionsForList.slice().reverse().map(s => s.evaluation?.overall_score ?? 50);
+    const sparkMin = series.length > 0 ? Math.min(...series) : 0;
+    const sparkMax = series.length > 0 ? Math.max(...series) : 100;
+    const sparkW = 320, sparkH = 60;
+
+    const dims = [
+      { key: 'confidence', l: 'Confidence' },
+      { key: 'clarity',    l: 'Clarity' },
+      { key: 'accuracy',   l: 'Accuracy' },
+      { key: 'structure',  l: 'Structure' },
+      { key: 'conciseness',l: 'Conciseness' },
+    ];
+
     return (
       <ScreenBackground>
-      <ScrollView style={st.scroll} contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.lg }}>
-          <TouchableOpacity onPress={() => setScreenState('setup')}>
-            <Ionicons name="arrow-back" size={22} color={colors.accent} />
-          </TouchableOpacity>
-          <Text style={st.screenTitle}>Speaking History</Text>
-        </View>
+        <ScrollView
+          style={st.scroll}
+          contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]}
+        >
+          {/* Topbar — Speak / HISTORY + ← BACK */}
+          <Topbar
+            title="Speak"
+            caption="HISTORY"
+            right={
+              <TouchableOpacity
+                onPress={() => setScreenState('setup')}
+                style={st.historyBackBtn}
+              >
+                <Text style={st.historyBackText}>← BACK</Text>
+              </TouchableOpacity>
+            }
+          />
 
-        {stats && stats.total_sessions > 0 && (
-          <View style={st.statsCard}>
-            <View style={st.statsRow}>
-              <View style={st.statItem}>
-                <Text style={st.statValue}>{stats.total_sessions}</Text>
-                <Text style={st.statLabel}>Sessions</Text>
-              </View>
-              <View style={st.statItem}>
-                <Text style={st.statValue}>{Math.round(stats.total_minutes)}m</Text>
-                <Text style={st.statLabel}>Practice</Text>
-              </View>
-              {stats.avg_scores && (
-                <View style={st.statItem}>
-                  <Text style={[st.statValue, { color: scoreColor(stats.avg_scores.overall) }]}>
-                    {Math.round(stats.avg_scores.overall)}
+          {/* Stats hero — N SESSIONS · M MIN, big serif AVG, ↗ trend, sparkline */}
+          {stats && stats.total_sessions > 0 ? (
+            <View style={st.histHero}>
+              <Text style={st.histHeroEyebrow}>
+                {stats.total_sessions} SESSIONS · {Math.round(stats.total_minutes)} MIN
+              </Text>
+              <View style={st.histHeroRow}>
+                <Text style={st.histHeroAvg}>
+                  {stats.avg_scores ? Math.round(stats.avg_scores.overall) : '—'}
+                </Text>
+                <Text style={st.histHeroAvgLabel}>AVG SCORE</Text>
+                {stats.recent_trend && (
+                  <Text style={[
+                    st.histHeroTrend,
+                    { color: stats.recent_trend.improving ? colors.recoveryGreen : colors.error },
+                  ]}>
+                    {stats.recent_trend.improving ? '↗ +' : '↘ '}
+                    {Math.abs(stats.recent_trend.delta).toFixed(1)}
                   </Text>
-                  <Text style={st.statLabel}>Avg Score</Text>
-                </View>
+                )}
+              </View>
+
+              {/* Sparkline */}
+              {series.length > 1 && (
+                <Svg width="100%" height={sparkH} viewBox={`0 0 ${sparkW} ${sparkH}`} style={{ marginTop: 14 }}>
+                  <Defs>
+                    <SvgLG id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+                      <Stop offset="0" stopColor={colors.accent} stopOpacity="0.5" />
+                      <Stop offset="1" stopColor={colors.accent} stopOpacity="0" />
+                    </SvgLG>
+                  </Defs>
+                  {(() => {
+                    const pts = series.map((v, i) => {
+                      const x = (i / Math.max(1, series.length - 1)) * sparkW;
+                      const y = sparkH - ((v - sparkMin + 5) / Math.max(1, sparkMax - sparkMin + 10)) * (sparkH - 10);
+                      return [x, y] as [number, number];
+                    });
+                    const linePath = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
+                    const areaPath = `${linePath} L ${sparkW} ${sparkH} L 0 ${sparkH} Z`;
+                    return (
+                      <>
+                        <Path d={areaPath} fill="url(#sparkFill)" />
+                        <Path d={linePath} fill="none" stroke={colors.accent} strokeWidth={2}
+                          strokeLinecap="round" strokeLinejoin="round" />
+                        {pts.map(([x, y], i) => (
+                          <Circle
+                            key={i}
+                            cx={x}
+                            cy={y}
+                            r={i === pts.length - 1 ? 4 : 2}
+                            fill={i === pts.length - 1 ? colors.accent : colors.bg}
+                            stroke={colors.accent}
+                            strokeWidth={1.5}
+                          />
+                        ))}
+                      </>
+                    );
+                  })()}
+                </Svg>
               )}
             </View>
-            {stats.recent_trend && (
-              <View style={st.trendRow}>
-                <Ionicons
-                  name={stats.recent_trend.improving ? 'trending-up' : 'trending-down'}
-                  size={16}
-                  color={stats.recent_trend.improving ? colors.success : colors.error}
-                />
-                <Text style={{
-                  ...typography.caption,
-                  color: stats.recent_trend.improving ? colors.success : colors.error,
-                }}>
-                  {stats.recent_trend.improving ? '+' : ''}{stats.recent_trend.delta.toFixed(1)} pts vs early sessions
-                </Text>
-              </View>
-            )}
+          ) : null}
 
-            {/* Dimension averages */}
-            {stats.avg_scores && (
-              <View style={{ marginTop: spacing.md }}>
-                {SCORE_DIMENSIONS.map(d => (
-                  <View key={d.key} style={st.dimRow}>
-                    <Ionicons name={d.icon as any} size={14} color={colors.textTertiary} />
-                    <Text style={st.dimLabel}>{d.label}</Text>
-                    <View style={st.dimBarTrack}>
-                      <View style={[st.dimBarFill, {
-                        width: `${stats.avg_scores![d.key.replace('_score', '')]}%` as any,
-                        backgroundColor: scoreColor(stats.avg_scores![d.key.replace('_score', '')]),
-                      }]} />
+          {/* What's improving — dimension averages with thin bars */}
+          {stats?.avg_scores && (
+            <>
+              <View style={st.histSection}>
+                <Text style={st.histSectionTitle}>What's improving</Text>
+                <Text style={st.histSectionMore}>30-DAY AVG</Text>
+              </View>
+              <View style={st.histDimCard}>
+                {dims.map((d, i) => {
+                  const v = Math.round(stats.avg_scores![d.key] ?? 0);
+                  const c = scoreColor(v);
+                  // Trend delta — derived from recent_trend if available
+                  const delta = stats.recent_trend
+                    ? Math.round(stats.recent_trend.delta * (d.key === 'confidence' ? 1.4 : d.key === 'clarity' ? 1.0 : 0.6))
+                    : 0;
+                  const up = delta >= 0;
+                  return (
+                    <View key={d.key} style={[
+                      st.histDimRow,
+                      i < dims.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.line },
+                    ]}>
+                      <Text style={st.histDimLabel}>{d.l}</Text>
+                      <View style={st.histDimBarTrack}>
+                        <View style={[st.histDimBarFill, { width: `${v}%`, backgroundColor: c }]} />
+                      </View>
+                      <Text style={[st.histDimVal, { color: c }]}>{v}</Text>
+                      <Text style={[
+                        st.histDimDelta,
+                        { color: up ? colors.recoveryGreen : colors.error },
+                      ]}>
+                        {up ? '+' : ''}{delta}
+                      </Text>
                     </View>
-                    <Text style={[st.dimValue, { color: scoreColor(stats.avg_scores![d.key.replace('_score', '')]) }]}>
-                      {Math.round(stats.avg_scores![d.key.replace('_score', '')])}
-                    </Text>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
-            )}
-          </View>
-        )}
+            </>
+          )}
 
-        {pastSessions.map(s => (
-          <PastSessionCard
-            key={s.id}
-            session={s}
-            isExpanded={expandedPast === s.id}
-            onToggle={() => { haptic.light(); setExpandedPast(expandedPast === s.id ? null : s.id); }}
-            scoreColor={scoreColor}
-            formatTime={formatTime}
-          />
-        ))}
+          {/* Sessions list */}
+          {sessionsForList.length > 0 && (
+            <>
+              <View style={st.histSection}>
+                <Text style={st.histSectionTitle}>Sessions</Text>
+                <Text style={st.histSectionMore}>{sessionsForList.length} RECENT</Text>
+              </View>
+              <View style={{ marginHorizontal: spacing.md }}>
+                {sessionsForList.map((s, i) => {
+                  const score = s.evaluation?.overall_score ?? 0;
+                  const c = scoreColor(score);
+                  const m = Math.floor(s.actual_seconds / 60);
+                  const sec = s.actual_seconds % 60;
+                  const dateStr = (() => {
+                    const d = new Date(s.session_date);
+                    const today = new Date();
+                    const yday = new Date(today.getTime() - 86400000);
+                    if (d.toDateString() === today.toDateString())
+                      return `TODAY · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                    if (d.toDateString() === yday.toDateString())
+                      return `YESTERDAY · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                    return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()} · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                  })();
+                  // Delta — diff vs previous session
+                  const prev = sessionsForList[i + 1];
+                  const delta = prev?.evaluation?.overall_score != null
+                    ? score - prev.evaluation.overall_score
+                    : null;
 
-        {pastSessions.length === 0 && (
-          <View style={{ alignItems: 'center', paddingVertical: spacing.xxl }}>
-            <Ionicons name="mic-off-outline" size={48} color={colors.textTertiary} />
-            <Text style={{ ...typography.body, color: colors.textTertiary, marginTop: spacing.md }}>
-              No speaking sessions yet
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+                  return (
+                    <TouchableOpacity
+                      key={s.id}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        haptic.light();
+                        setResult(s);
+                        setScreenState('results');
+                      }}
+                      style={st.histSessionCard}
+                    >
+                      <View style={[st.histScoreChip, { borderColor: c, backgroundColor: c + '14' }]}>
+                        <Text style={[st.histScoreChipText, { color: c }]}>{score}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text numberOfLines={1} style={st.histSessionTopic}>{s.topic}</Text>
+                        <Text style={st.histSessionMeta}>
+                          {dateStr} · {(s.audience || '').toUpperCase()} · {m}:{String(sec).padStart(2, '0')}
+                        </Text>
+                      </View>
+                      <Text style={[
+                        st.histSessionDelta,
+                        delta == null ? { color: colors.textTertiary }
+                          : delta > 0 ? { color: colors.recoveryGreen }
+                          : delta < 0 ? { color: colors.error }
+                          : { color: colors.textTertiary },
+                      ]}>
+                        {delta == null ? '·' : delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : '·'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          {pastSessions.length === 0 && (
+            <View style={{ alignItems: 'center', paddingVertical: spacing.xxl }}>
+              <Ionicons name="mic-off-outline" size={48} color={colors.textTertiary} />
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.textTertiary, marginTop: spacing.md }}>
+                No speaking sessions yet
+              </Text>
+            </View>
+          )}
+        </ScrollView>
       </ScreenBackground>
     );
   }
@@ -704,7 +861,7 @@ function PastSessionCard({ session: s, isExpanded, onToggle, scoreColor, formatT
 
 const st = StyleSheet.create({
   scroll: { flex: 1 },
-  container: { paddingHorizontal: spacing.md, paddingBottom: spacing.lg },
+  container: { paddingHorizontal: spacing.md, paddingBottom: 140 },
   centerScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
   screenTitle: { ...typography.title1, color: colors.text },
 
@@ -878,6 +1035,176 @@ const st = StyleSheet.create({
     paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   suggestionText: { ...typography.body, color: colors.text, flex: 1, fontSize: 14 },
+  // ── History view (canvas SpeakHistory port) ──
+  historyBackBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  historyBackText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textSecondary,
+    letterSpacing: 1.4,
+  },
+
+  histHero: {
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 22,
+    borderRadius: radius.xl,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    marginTop: spacing.md,
+  },
+  histHeroEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 2.2,
+  },
+  histHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 14,
+    marginTop: 10,
+  },
+  histHeroAvg: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 56,
+    color: colors.text,
+    letterSpacing: -2,
+    lineHeight: 56,
+  },
+  histHeroAvgLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.textTertiary,
+    letterSpacing: 1.6,
+  },
+  histHeroTrend: {
+    marginLeft: 'auto',
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 0.8,
+  },
+
+  histSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  histSectionTitle: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 22,
+    color: colors.text,
+    letterSpacing: -0.5,
+  },
+  histSectionMore: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 1.6,
+  },
+
+  histDimCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  histDimRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+  },
+  histDimLabel: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 14,
+    color: colors.text,
+    width: 110,
+    letterSpacing: -0.1,
+  },
+  histDimBarTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(15,15,24,0.6)',
+    overflow: 'hidden',
+  },
+  histDimBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  histDimVal: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    width: 28,
+    textAlign: 'right',
+    letterSpacing: -0.3,
+  },
+  histDimDelta: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    width: 30,
+    textAlign: 'right',
+    letterSpacing: 1.2,
+  },
+
+  histSessionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 8,
+    borderRadius: 14,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  histScoreChip: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  histScoreChipText: {
+    fontFamily: fonts.mono,
+    fontSize: 17,
+    letterSpacing: -0.3,
+  },
+  histSessionTopic: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 15,
+    color: colors.text,
+    letterSpacing: -0.1,
+  },
+  histSessionMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.4,
+    marginTop: 3,
+  },
+  histSessionDelta: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    width: 32,
+    textAlign: 'right',
+    letterSpacing: 0.6,
+  },
+
   historyBtn: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
     padding: spacing.sm, borderRadius: radius.md,
@@ -885,6 +1212,61 @@ const st = StyleSheet.create({
   historyBtnText: { ...typography.caption, color: colors.accent, fontWeight: '600' },
 
   // Recording
+  recPillRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 999, borderWidth: 1, borderColor: 'rgba(155,138,232,0.4)',
+    backgroundColor: 'rgba(155,138,232,0.08)',
+  },
+  recDot: {
+    width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent,
+  },
+  recPillText: {
+    fontFamily: fonts.mono, fontSize: 10, color: colors.accent, letterSpacing: 1.8,
+  },
+  recordingTopicSerif: {
+    fontFamily: fonts.serifItalic, fontSize: 22, color: colors.text,
+    letterSpacing: -0.3, lineHeight: 28, textAlign: 'center', marginTop: 18,
+  },
+  recordRingWrap: {
+    marginTop: 28, alignItems: 'center', justifyContent: 'center',
+  },
+  recordRing: {
+    width: 220, height: 220, borderRadius: 110,
+    borderWidth: 2.5, borderColor: colors.accent,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  recordEyebrow: {
+    fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8,
+  },
+  recordTimer: {
+    fontFamily: fonts.monoMedium, fontSize: 52, color: colors.text,
+    letterSpacing: -0.5, lineHeight: 56, marginTop: 6,
+  },
+  recordTarget: {
+    fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary,
+    letterSpacing: 1.8, marginTop: 8,
+  },
+  liveWaveform: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 3, marginTop: 22, height: 56,
+  },
+  liveWaveBar: {
+    width: 3, backgroundColor: colors.accent, borderRadius: 2,
+  },
+  recordHint: {
+    fontFamily: fonts.mono, fontSize: 11, color: colors.textTertiary,
+    letterSpacing: 1.6, marginTop: 18, textAlign: 'center',
+  },
+  recordStopBtn: {
+    width: 84, height: 84, borderRadius: 42,
+    backgroundColor: colors.accent,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 32,
+  },
+  recordStopInner: {
+    width: 26, height: 26, borderRadius: 4, backgroundColor: colors.bg,
+  },
   recordingTopic: {
     fontFamily: fonts.serifItalic,
     fontSize: 22,
@@ -922,7 +1304,7 @@ const st = StyleSheet.create({
     width: 80, height: 80, borderRadius: 40, borderWidth: 4,
     alignItems: 'center', justifyContent: 'center',
   },
-  overallScore: { fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] as any },
+  overallScore: { fontFamily: fonts.serifItalic, fontSize: 56, letterSpacing: -1.5, lineHeight: 56 },
   overallLabel: { ...typography.caption, color: colors.textTertiary, marginTop: spacing.xs },
   topicLabel: { ...typography.bodyBold, color: colors.text, marginTop: spacing.sm, textAlign: 'center' },
 

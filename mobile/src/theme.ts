@@ -1,11 +1,12 @@
 import { Platform } from 'react-native';
 
 // --- Colors: Ink theme — cool deep blue-violet with violet accent ---
-// Approximated from oklch(L C h) palette (h=280 violet hue).
+// Mirrors `[data-theme="ink"]` from the design canvas (oklch L C h, h=280).
 export const colors = {
   // Backgrounds — deep ink
   bg: '#0F0F18',
-  card: '#1B1C28',
+  bg2: '#15161F',           // sheet/secondary panels (≈ oklch 0.17 0.008 280)
+  card: '#1B1C28',          // surface
   cardElevated: '#23243A',
   input: '#15161F',
   surface2: '#1F2030',
@@ -15,18 +16,27 @@ export const colors = {
   textSecondary: '#B8B8CB',
   textTertiary: '#6F708A',
 
-  // Accent — violet ink
-  accent: '#9B8AE8',
-  accentLight: '#B7A8EF',
+  // Accent — violet on ink (oklch 0.78 0.14 280) — matches `[data-theme="ink"]` from styles.css.
+  // Amber/ember is reserved for the NSBrandHeader cosmic gradient and the App Logo's north star.
+  accent: '#9B8AE8',        // violet
+  accent2: '#D89AD9',       // pink-violet (accent-2 oklch 0.82 0.12 320)
+  accentLight: '#B7A8EF',   // softer violet for hover states
   accentSecondary: '#D89AD9',
   accentMuted: 'rgba(155,138,232,0.14)',
   accentGlow: 'rgba(155,138,232,0.3)',
+  // Amber accents — used only by NSBrandHeader, App Logo, and "north star" decorations
+  amber: '#E0B775',
+  amberSoft: 'rgba(224,183,117,0.4)',
 
   // Semantic
   success: '#76C99C',
   warning: '#D2C56F',
   error: '#E27A6E',
   info: '#7AB0E8',
+  good: '#76C99C',          // alias for design parity (canvas calls success "good")
+  warn: '#D2C56F',          // alias for design parity
+  recoveryGreen: '#7DD3A4', // Whoop recovery (≈ oklch 0.78 0.16 150)
+  prGold: '#D9C56F',        // PR badges (≈ oklch 0.78 0.13 90)
 
   // Pillar colors — load-bearing, unchanged
   pillarQuant: '#8B5CF6',
@@ -35,12 +45,12 @@ export const colors = {
   pillarAI: '#22D3EE',
   pillarSpeaking: '#EC4899',
 
-  // Borders — violet-tinted
+  // Borders
   border: 'rgba(165,160,200,0.08)',
   borderFocus: 'rgba(155,138,232,0.35)',
   line: '#272838',
 
-  // Chart
+  // Chart — violet curve on ink
   chartLine: '#9B8AE8',
   chartFill: 'rgba(155,138,232,0.1)',
 };
@@ -106,11 +116,13 @@ export const typography = {
   // Editorial italic — section titles, mantras
   serifTitle: { fontFamily: serifItalic, fontSize: 22, letterSpacing: -0.5, color: colors.text },
   serifLarge: { fontFamily: serifItalic, fontSize: 28, letterSpacing: -0.7, color: colors.text },
+  serifHero:  { fontFamily: serifItalic, fontSize: 36, letterSpacing: -0.9, color: colors.text },
 
   // Numerics — mono, tabular
   monoNumber: { fontFamily: mono, fontSize: 22, letterSpacing: -0.5, color: colors.text },
-  monoLarge: { fontFamily: monoMedium, fontSize: 56, letterSpacing: -2, color: colors.text },
-  monoSmall: { fontFamily: mono, fontSize: 11, letterSpacing: 0.5, color: colors.textTertiary },
+  monoLarge:  { fontFamily: monoMedium, fontSize: 56, letterSpacing: -2, color: colors.text },
+  monoHuge:   { fontFamily: monoMedium, fontSize: 88, letterSpacing: -3, color: colors.text },
+  monoSmall:  { fontFamily: mono, fontSize: 11, letterSpacing: 0.5, color: colors.textTertiary },
 
   // Eyebrow — small caps mono labels
   eyebrow: { fontFamily: mono, fontSize: 10, letterSpacing: 1.8, color: colors.textTertiary, textTransform: 'uppercase' as const },

@@ -229,10 +229,20 @@ export default function RunScreen({ navigation, route }: any) {
   if (phase === 'countdown') {
     return (
       <View style={s.countdownContainer}>
+        {/* Soft ember bloom behind the number */}
+        <View style={s.countdownBloom} />
         <RNAnimated.Text style={[s.countdownNum, { transform: [{ scale: countdownScale }] }]}>
-          {countdownNum}
+          {countdownNum > 0 ? countdownNum : 'GO'}
         </RNAnimated.Text>
-        <Text style={s.countdownLabel}>GET READY</Text>
+        <Text style={s.countdownLabel}>
+          GET READY · {(planned?.run_type || 'EASY').toUpperCase()}
+        </Text>
+        <TouchableOpacity
+          style={s.countdownSkip}
+          onPress={() => navigation?.goBack?.()}
+        >
+          <Text style={s.countdownSkipText}>CANCEL</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -628,8 +638,46 @@ const s = StyleSheet.create({
 
   // Countdown
   countdownContainer: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  countdownNum: { fontSize: 120, fontWeight: '200', color: colors.accent },
-  countdownLabel: { ...typography.micro, color: colors.textTertiary, marginTop: spacing.md, letterSpacing: 3 },
+  countdownBloom: {
+    position: 'absolute',
+    top: '20%',
+    width: 360,
+    height: 360,
+    borderRadius: 180,
+    backgroundColor: colors.accent,
+    opacity: 0.18,
+  },
+  countdownNum: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 220,
+    color: colors.accent,
+    letterSpacing: -8,
+    lineHeight: 220,
+    textShadowColor: colors.accent,
+    textShadowRadius: 60,
+  },
+  countdownLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 28,
+    letterSpacing: 5,
+  },
+  countdownSkip: {
+    position: 'absolute',
+    bottom: 64,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  countdownSkipText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textSecondary,
+    letterSpacing: 4,
+  },
 
   // Active
   map: { flex: 1 },
@@ -708,9 +756,9 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)',
   },
   prBannerText: { fontSize: 14, fontWeight: '700', color: '#F59E0B', letterSpacing: 1 },
-  summaryTitle: { ...typography.micro, color: colors.success, letterSpacing: 2, textTransform: 'uppercase', marginBottom: spacing.lg },
+  summaryTitle: { fontFamily: fonts.mono, fontSize: 9, color: colors.accent, letterSpacing: 3, textTransform: 'uppercase', marginBottom: spacing.lg },
   summaryHero: { flexDirection: 'row', alignItems: 'baseline', marginBottom: spacing.xl },
-  heroDistance: { fontSize: 72, fontWeight: '200', color: colors.text, fontVariant: ['tabular-nums'] },
+  heroDistance: { fontFamily: fonts.serifItalic, fontSize: 96, color: colors.text, letterSpacing: -3, lineHeight: 96 },
   heroUnit: { ...typography.title2, color: colors.textTertiary, marginLeft: spacing.sm },
   summaryStats: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xl, width: '100%', justifyContent: 'space-around' },
   summaryStat: { alignItems: 'center' },
