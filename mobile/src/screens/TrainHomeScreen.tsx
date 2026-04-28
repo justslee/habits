@@ -6,7 +6,7 @@
  * recent sessions, and navigation to deeper screens.
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   RefreshControl, Animated, AppState,
@@ -32,18 +32,27 @@ import {
 import ScreenBackground from '../components/ScreenBackground';
 import { formatPace } from '../services/gps';
 import { usePressScale } from '../hooks/usePressScale';
+import SegmentedSwitch from '../components/SegmentedSwitch';
+import CoachHero from '../components/CoachHero';
+import CoachSheet from '../components/CoachSheet';
+import Topbar from '../components/Topbar';
+import WhoopHeroCard from '../components/WhoopHeroCard';
+import WorkoutStartCard from '../components/WorkoutStartCard';
+import SessionListCard from '../components/SessionListCard';
+import Svg, { Defs, Pattern, Path, Rect, Circle } from 'react-native-svg';
 
-type Segment = 'train' | 'run' | 'plan';
+type Segment = 'today' | 'run' | 'lift' | 'plan';
 
 const SEGMENTS: { key: Segment; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'train', label: 'Train', icon: 'barbell-outline' },
-  { key: 'run', label: 'Run', icon: 'footsteps-outline' },
-  { key: 'plan', label: 'Plan', icon: 'calendar-outline' },
+  { key: 'today', label: 'Today', icon: 'sunny-outline' },
+  { key: 'run',   label: 'Run',   icon: 'footsteps-outline' },
+  { key: 'lift',  label: 'Lift',  icon: 'barbell-outline' },
+  { key: 'plan',  label: 'Plan',  icon: 'calendar-outline' },
 ];
 
 export default function TrainHomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const [segment, setSegment] = useState<Segment>('train');
+  const [segment, setSegment] = useState<Segment>('today');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -56,6 +65,7 @@ export default function TrainHomeScreen({ navigation }: any) {
   const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
 
   const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
+  const [coachOpen, setCoachOpen] = useState(false);
   const heroScale = usePressScale(0.97);
   const appState = useRef(AppState.currentState);
 
@@ -149,274 +159,270 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   // --- Segment content ---
 
-  const renderLiftSegment = () => (
+  const renderLiftSegment = () => {
+    const todayVolume = (todayWorkout?.exercises ?? []).reduce(
+      (acc, ex) => acc + ((ex.weight ?? 0) * (ex.reps ?? 0)),
+      0,
+    );
+    const lastLift = liftItems[0];
+    const lastVolume = (() => {
+      const detail = (lastLift as any)?.detail as string | undefined;
+      if (!detail) return null;
+      const m = detail.match(/([\d,]+)\s*lb/);
+      return m ? Number(m[1].replace(/,/g, '')) : null;
+    })();
+
+    return (
     <>
-      {/* Today's Workout Hero Card */}
+      {/* CoachHero with embedded last/target volume — canvas Lift view */}
+      <View style={{ paddingHorizontal: spacing.md }}>
+        <CoachHero
+          pill={`${(todayWorkout?.day_type ?? 'PUSH').toUpperCase()} · TODAY`}
+          ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
+          line={
+            todayWorkout
+              ? <>{DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day. Top set is the lift that matters — <Text style={{ color: colors.accent }}>everything else is volume</Text>. Don't grind the accessories.</>
+              : <>No lift today. Mobility, walk, sleep — those are the work.</>
+          }
+          meta={todayWorkout ? `${(todayWorkout.exercises?.length ?? 0)} LIFTS · ~45 MIN` : undefined}
+          onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
+        >
+          {lastVolume != null && (
+            <View style={styles.liftVolumeGrid}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.liftVolumeLabel}>LAST · VOLUME</Text>
+                <Text style={styles.liftVolumeNum}>
+                  {lastVolume.toLocaleString()}
+                  <Text style={styles.liftVolumeUnit}> lb</Text>
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.liftVolumeLabel}>TARGET TODAY</Text>
+                <Text style={[styles.liftVolumeNum, { color: colors.accent }]}>
+                  {Math.round(lastVolume * 1.03).toLocaleString()}
+                  <Text style={[styles.liftVolumeUnit, { color: colors.accent, opacity: 0.7 }]}> lb</Text>
+                </Text>
+              </View>
+            </View>
+          )}
+        </CoachHero>
+      </View>
+
+      {/* Open today's workout */}
       {todayWorkout && (
-        <Animated.View style={heroScale.animStyle}>
+        <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}>
           <TouchableOpacity
-            style={styles.heroCard}
+            style={styles.openWorkoutBtn}
+            activeOpacity={0.85}
             onPress={() => {
               haptic.light();
               todayWorkout.status === 'completed'
                 ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
                 : navigation?.navigate?.('TodayWorkout');
             }}
-            onPressIn={heroScale.onPressIn}
-            onPressOut={heroScale.onPressOut}
-            activeOpacity={0.8}
           >
-            <View style={styles.heroHeader}>
-              <View style={[styles.heroIndicator, { backgroundColor: colors.success }]} />
-              <Text style={styles.heroLabel}>TODAY</Text>
-            </View>
-            <Text style={styles.heroTitle}>
-              {DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type}
+            <Text style={styles.openWorkoutBtnText}>
+              {todayWorkout.status === 'completed' ? '▶ VIEW WORKOUT' : '▶ OPEN TODAY · LOG IT'}
             </Text>
-            <View style={styles.heroMeta}>
-              {(whoopData?.recovery_score ?? todayWorkout.whoop_recovery_score) != null && (
-                <Text style={styles.heroMetaText}>
-                  Recovery {(whoopData?.recovery_score ?? todayWorkout.whoop_recovery_score)!.toFixed(0)}%
-                </Text>
-              )}
-              <Text style={styles.heroMetaText}>
-                {todayWorkout.status === 'completed' ? '\u2705 Done' : todayWorkout.status === 'in_progress' ? '\uD83D\uDD35 In Progress' : ''}
-              </Text>
-            </View>
-            <View style={styles.heroCta}>
-              <Text style={styles.heroCtaText}>
-                {todayWorkout.status === 'completed' ? 'View Workout' : 'Start Workout'}
-              </Text>
-              <Ionicons name="arrow-forward" size={16} color={colors.accent} />
-            </View>
+            <Text style={[styles.openWorkoutBtnText, { opacity: 0.6 }]}>→</Text>
           </TouchableOpacity>
-        </Animated.View>
-      )}
-
-            {/* Whoop Card — compact in train view */}
-      {whoopData && whoopData.recovery_score != null && (
-        <View style={{ marginHorizontal: spacing.lg }}>
-          <WhoopCard data={whoopData} compact />
+          {todayVolume > 0 && (
+            <Text style={styles.openWorkoutMeta}>
+              {todayVolume.toLocaleString()} LB LOGGED TODAY · {todayWorkout.exercises?.length ?? 0} SETS
+            </Text>
+          )}
         </View>
       )}
 
-      {/* Recent Lifts */}
-      {liftItems.length > 0 && (
-        <>
-          <Text style={styles.sectionTitle}>RECENT SESSIONS</Text>
-          <Text style={styles.swipeHint}>← swipe to delete</Text>
-          {liftItems.slice(0, 7).map(item => (
-            <LiftSessionCard key={`w-${item.id}`} item={item}
-              onDelete={() => handleDelete(item)}
-              onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: item.id })} />
-          ))}
-          <TouchableOpacity
-            style={styles.seeAllBtn}
-            onPress={() => navigation?.navigate?.('WorkoutHistory')}
-          >
-            <Text style={styles.seeAllText}>See All History</Text>
-            <Ionicons name="arrow-forward" size={16} color={colors.accent} />
-          </TouchableOpacity>
-        </>
-      )}
-
-      {liftItems.length === 0 && !loading && (
+      {/* Recent lifts as canvas-style session table */}
+      {liftItems.length > 0 ? (
+        <SessionListCard
+          sessions={liftItems.slice(0, 6).map(item => {
+            const dateStr = new Date(item.date + 'T12:00:00');
+            const dayShort = dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+            const monthDay = dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const detail = (item as any).detail as string | undefined;
+            const m = detail?.match(/([\d,]+)\s*lb/);
+            const vol = m ? m[1] : '—';
+            const lifts = detail?.match(/(\d+)\s*lifts?/)?.[1] ?? '—';
+            return {
+              id: item.id,
+              day: dayShort,
+              when: monthDay,
+              title: (DAY_LABELS as any)[item.day_type ?? ''] || item.day_type || 'Workout',
+              metrics: [`${vol} lb`, `${lifts} lifts`, item.rpe != null ? `RPE ${item.rpe}` : '—'] as [string, string, string],
+              active: false,
+            };
+          })}
+          labels={['VOLUME', 'LIFTS', 'TOP']}
+          onPress={s => navigation?.navigate?.('WorkoutDetail', { sessionId: Number(s.id) })}
+        />
+      ) : !loading ? (
         <View style={styles.emptyState}>
           <Ionicons name="barbell-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No training sessions yet</Text>
-          <Text style={styles.emptySubtext}>Start today's workout above</Text>
+          <Text style={styles.emptyText}>No lifts yet</Text>
+          <Text style={styles.emptySubtext}>Open today's workout to log your first set</Text>
         </View>
-      )}
+      ) : null}
+
+      <TouchableOpacity
+        style={styles.seeAllBtn}
+        onPress={() => navigation?.navigate?.('WorkoutHistory')}
+      >
+        <Text style={styles.seeAllText}>SEE ALL HISTORY</Text>
+        <Ionicons name="arrow-forward" size={16} color={colors.accent} />
+      </TouchableOpacity>
     </>
-  );
+    );
+  };
+
+  // Stable demo polyline for the run-view embedded map
+  const runRoute = useMemo(() => {
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= 50; i++) {
+      const t = i / 50;
+      const x = 20 + t * 320 + Math.sin(t * 7) * 22;
+      const y = 90 + Math.sin(t * 4.5) * 38 + Math.cos(t * 2) * 14;
+      pts.push([x, y]);
+    }
+    return pts;
+  }, []);
 
   const renderRunSegment = () => {
     const planned = todayRun?.planned_run;
     const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
-    const segments: any[] = (() => {
-      if (!planned?.structure) return [];
-      try { return JSON.parse(planned.structure); } catch { return []; }
-    })();
+    const runTitle = planned ? (
+      planned.run_type === 'easy' ? 'Easy run · Z2'
+      : planned.run_type === 'tempo' ? 'Tempo'
+      : planned.run_type === 'long' ? 'Long run'
+      : planned.run_type === 'intervals' ? 'Intervals'
+      : planned.run_type === 'recovery' ? 'Recovery'
+      : 'Run'
+    ) : 'Free run';
+    const distMi = planned?.target_distance_miles ?? null;
+    const paceFmt = planned?.target_pace_seconds != null ? formatPace(planned.target_pace_seconds) : null;
+    const hr = (planned as any)?.target_hr_max ?? 142;
 
     return (
-      <>
-        {/* Planned run card or empty state */}
-        {planned ? (
-          <View style={[styles.runCard, { borderColor: runTypeColor + '40', marginHorizontal: spacing.lg }]}>  
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md }}>
-              <View style={[styles.typeBadge, { backgroundColor: runTypeColor + '20', paddingHorizontal: spacing.md, paddingVertical: spacing.xs }]}>
-                <Text style={[styles.typeBadgeText, { color: runTypeColor }]}>{planned.run_type.toUpperCase()}</Text>
-              </View>
-              {todayRun?.plan_name && (
-                <Text style={{ ...typography.caption, color: colors.textTertiary }}>
-                  {todayRun.plan_name} · Week {todayRun.week_number}/{todayRun.total_weeks}
-                </Text>
-              )}
-            </View>
+    <>
+      {/* CoachHero with embedded route map + START · ROUTES — canvas Run view */}
+      <View style={{ paddingHorizontal: spacing.md }}>
+        <CoachHero
+          pill={planned ? `${(planned.run_type || 'EASY').toUpperCase()} · Z2` : 'FREE RUN'}
+          ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
+          line={
+            planned
+              ? <>Today is your aerobic deposit — <Text style={{ color: colors.accent }}>{distMi ?? '—'}{distMi != null ? ' mi' : ''}{paceFmt ? ` at ${paceFmt}/mi` : ''}{hr ? `, HR ≤ ${hr}` : ''}</Text>. Breathe through the nose. Negative split if it feels easy. The point is showing up, not the pace.</>
+              : <>No planned run today. Free run if the body wants it; rest if it doesn't.</>
+          }
+          meta={planned ? `${distMi ?? '—'} MI · TARGET RPE 5` : 'GPS LOCKED · WHOOP CONNECTED'}
+          onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
+        >
+          {/* Route polyline preview — animated path on a grid */}
+          <View style={styles.runMapBox}>
+            <Svg viewBox="0 0 360 200" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+              <Defs>
+                <Pattern id="run-grid" width={20} height={20} patternUnits="userSpaceOnUse">
+                  <Path d="M20 0H0v20" fill="none" stroke={colors.line} strokeWidth={0.5} />
+                </Pattern>
+              </Defs>
+              <Rect width={360} height={200} fill="url(#run-grid)" />
+              <Path
+                d={'M ' + runRoute.map(p => p.join(',')).join(' L ')}
+                fill="none"
+                stroke={colors.accent}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              />
+              <Circle cx={runRoute[0][0]} cy={runRoute[0][1]} r={4} fill={colors.text} stroke={colors.bg} strokeWidth={1.5} />
+              <Circle cx={runRoute[runRoute.length - 1][0]} cy={runRoute[runRoute.length - 1][1]} r={5} fill={colors.accent} />
+            </Svg>
+            <Text style={styles.runMapLabel}>{distMi != null ? `${distMi} MI · LOOP` : 'PICK A ROUTE'}</Text>
+          </View>
 
-            {planned.description && (
-              <Text style={{ ...typography.body, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 22 }}>
-                {planned.description}
+          {/* START + ROUTES button row */}
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
+              style={[styles.runStartFlex, { backgroundColor: runTypeColor }]}
+            >
+              <Text style={styles.runStartFlexText}>
+                ▶ START · {distMi != null ? `${distMi}MI ${(planned?.run_type || 'EASY').toUpperCase()}` : 'FREE RUN'}
               </Text>
-            )}
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-              {planned.target_distance_miles && (
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] as any }}>{planned.target_distance_miles}</Text>
-                  <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 4 }}>MILES</Text>
-                </View>
-              )}
-              {planned.target_pace_seconds && (
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] as any }}>{formatPace(planned.target_pace_seconds)}</Text>
-                  <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 4 }}>PACE</Text>
-                </View>
-              )}
-              {planned.target_duration_minutes && (
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] as any }}>{planned.target_duration_minutes}</Text>
-                  <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 4 }}>MIN</Text>
-                </View>
-              )}
-            </View>
-
-            {segments.length > 0 && (
-              <View style={{ marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md }}>
-                <Text style={{ ...typography.micro, color: colors.textTertiary, marginBottom: spacing.sm }}>STRUCTURE</Text>
-                {segments.map((seg: any, i: number) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
-                    <View style={{
-                      width: 8, height: 8, borderRadius: 4,
-                      backgroundColor: seg.type === 'warmup' || seg.type === 'cooldown' ? colors.textTertiary
-                        : seg.type === 'work' ? runTypeColor : colors.info,
-                    }} />
-                    <Text style={{ ...typography.caption, color: colors.textSecondary }}>
-                      {seg.type === 'warmup' ? 'Warm up' : seg.type === 'cooldown' ? 'Cool down' : seg.type === 'work' ? 'Work' : seg.type}
-                      {seg.minutes ? ` · ${seg.minutes}min` : ''}
-                      {seg.pace ? ` · ${seg.pace}` : ''}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => navigation?.navigate?.('RouteSuggestions')}
+              style={styles.runRoutesBtn}
+            >
+              <Text style={styles.runRoutesBtnText}>ROUTES</Text>
+            </TouchableOpacity>
           </View>
-        ) : (
-          <View style={[styles.runCard, { marginHorizontal: spacing.lg }]}>
-            <Text style={{ ...typography.title3, color: colors.text, marginBottom: spacing.xs }}>No planned run today</Text>
-            <Text style={{ ...typography.body, color: colors.textTertiary }}>Start a free run or create a training plan</Text>
-          </View>
-        )}
-
-        {/* Audio Coach Toggle */}
-        <TouchableOpacity
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.md, marginHorizontal: spacing.lg }}
-          onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
-        >
-          <Ionicons
-            name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
-            size={20}
-            color={audioCoachEnabled ? colors.accent : colors.textTertiary}
-          />
-          <Text style={{ ...typography.caption, color: audioCoachEnabled ? colors.accent : colors.textTertiary }}>
-            Audio Coach {audioCoachEnabled ? 'On' : 'Off'}
+          <Text style={styles.runFooter}>
+            GPS LOCKED · {whoopData ? 'WHOOP CONNECTED' : 'NO WEARABLE'} · WEATHER 12° / CLEAR
           </Text>
-        </TouchableOpacity>
+        </CoachHero>
+      </View>
 
-        {/* Start / Free Run button */}
-        <TouchableOpacity
-          style={[styles.runStartBtn, { backgroundColor: planned ? runTypeColor : colors.accent }]}
-          onPress={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="play" size={22} color="#fff" />
-          <Text style={styles.runStartText}>{planned ? 'Start Run' : 'Free Run'}</Text>
-        </TouchableOpacity>
+      {/* Audio coach toggle — keep accessible */}
+      <TouchableOpacity
+        style={styles.audioCoachToggle}
+        onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
+      >
+        <Ionicons
+          name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
+          size={16}
+          color={audioCoachEnabled ? colors.accent : colors.textTertiary}
+        />
+        <Text style={[
+          { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 1.6 },
+          { color: audioCoachEnabled ? colors.accent : colors.textTertiary },
+        ]}>
+          AUDIO COACH · {audioCoachEnabled ? 'ON' : 'OFF'}
+        </Text>
+      </TouchableOpacity>
 
-        {/* Quick actions row */}
-        <View style={styles.runQuickRow}>
-          <TouchableOpacity style={styles.runQuickBtn} onPress={() => navigation?.navigate?.('RouteSuggestions')}>
-            <Ionicons name="compass-outline" size={20} color={colors.accent} />
-            <Text style={styles.runQuickLabel}>Discover</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.runQuickBtn} onPress={() => navigation?.navigate?.('RouteLibrary')}>
-            <Ionicons name="map-outline" size={20} color={colors.accent} />
-            <Text style={styles.runQuickLabel}>Routes</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.runQuickBtn} onPress={() => navigation?.navigate?.('RunHistory')}>
-            <Ionicons name="time-outline" size={20} color={colors.accent} />
-            <Text style={styles.runQuickLabel}>History</Text>
-          </TouchableOpacity>
+      {/* Last run · splits — only if we have any runs */}
+      {runItems.length > 0 && (
+        <SessionListCard
+          sessions={runItems.slice(0, 6).map(item => {
+            const dateStr = new Date(item.date + 'T12:00:00');
+            const dayShort = dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+            const monthDay = dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const dist = item.distance_miles != null ? `${item.distance_miles.toFixed(1)} mi` : '—';
+            const pace = item.avg_pace_seconds != null ? formatPace(item.avg_pace_seconds) : '—';
+            return {
+              id: `r-${item.id}`,
+              day: dayShort,
+              when: monthDay,
+              title: (item.run_type || 'Run').replace(/^\w/, c => c.toUpperCase()),
+              metrics: [dist, pace, item.is_pr ? 'PR' : '—'] as [string, string, string],
+              active: false,
+              pr: !!item.is_pr,
+            };
+          })}
+          labels={['DISTANCE', 'PACE', 'NOTE']}
+          onPress={() => navigation?.navigate?.('RunHistory')}
+        />
+      )}
+
+      {runItems.length === 0 && !loading && (
+        <View style={styles.emptyState}>
+          <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
+          <Text style={styles.emptyText}>No runs yet</Text>
+          <Text style={styles.emptySubtext}>Tap START above to log your first one</Text>
         </View>
+      )}
 
-        {/* This Week Stats */}
-        {weekSummary && (weekSummary.runs > 0 || weekSummary.run_miles > 0) && (
-          <View style={styles.weekStatsRow}>
-            <View style={styles.weekStat}>
-              <Text style={styles.weekStatValue}>{weekSummary.run_miles}</Text>
-              <Text style={styles.weekStatLabel}>MI THIS WEEK</Text>
-            </View>
-            <View style={styles.weekStat}>
-              <Text style={styles.weekStatValue}>{weekSummary.runs}</Text>
-              <Text style={styles.weekStatLabel}>RUNS</Text>
-            </View>
-          </View>
-        )}
-
-        {/* Recent Runs */}
-        {runItems.length > 0 && (
-          <>
-            <Text style={styles.sectionTitle}>RECENT RUNS</Text>
-            {runItems.slice(0, 5).map(item => {
-              const typeColor = RUN_TYPE_COLORS[item.run_type || 'easy'] || colors.accent;
-              const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
-                weekday: 'short', month: 'short', day: 'numeric',
-              });
-              return (
-                <SwipeableRow key={`r-${item.id}`} onDelete={() => handleDelete(item)}>
-                  <View style={styles.sessionCard}>
-                    <View style={styles.sessionLeft}>
-                      <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
-                        <Ionicons name="footsteps-outline" size={18} color={typeColor} />
-                      </View>
-                    </View>
-                    <View style={styles.sessionCenter}>
-                      <View style={styles.sessionTop}>
-                        <Text style={styles.sessionLabel}>
-                          {item.distance_miles?.toFixed(1)} mi
-                        </Text>
-                        <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
-                          <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-                            {(item.run_type || 'EASY').toUpperCase()}
-                          </Text>
-                        </View>
-                        {item.is_pr && (
-                          <Text style={styles.prBadge}>🏆 PR!</Text>
-                        )}
-                      </View>
-                      <Text style={styles.sessionDate}>{dateStr}</Text>
-                    </View>
-                    <View style={styles.sessionRight}>
-                      <Text style={[styles.sessionDetail, { color: colors.accent }]}>
-                        {item.pace_formatted}
-                      </Text>
-                      <Text style={styles.sessionRpe}>/mi</Text>
-                    </View>
-                  </View>
-                </SwipeableRow>
-              );
-            })}
-          </>
-        )}
-
-        {runItems.length === 0 && !loading && (
-          <View style={[styles.emptyState, { paddingTop: spacing.xl }]}>
-            <Ionicons name="footsteps-outline" size={40} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>No runs yet</Text>
-            <Text style={styles.emptySubtext}>Hit the button above and get moving</Text>
-          </View>
-        )}
-      </>
+      <TouchableOpacity
+        style={styles.seeAllBtn}
+        onPress={() => navigation?.navigate?.('RunHistory')}
+      >
+        <Text style={styles.seeAllText}>SEE ALL RUNS</Text>
+        <Ionicons name="arrow-forward" size={16} color={colors.accent} />
+      </TouchableOpacity>
+    </>
     );
   };
 
@@ -424,160 +430,181 @@ export default function TrainHomeScreen({ navigation }: any) {
     const today = new Date();
     const todayDay = (today.getDay() + 6) % 7; // 0=Mon
 
-    // Find completed workouts/runs this week from recentTraining
+    const totalWeeks = activePlan?.total_weeks ?? 16;
+    const currentWeek = activePlan?.current_week ?? 1;
+
+    // Phase boundaries — same proportions as canvas (BASE 0-37.5%, BUILD 37.5-75%, PEAK 75-93.75%, TAPER 93.75-100%)
+    const phaseFor = (week: number) => {
+      const pct = (week - 1) / totalWeeks;
+      if (pct < 0.375) return 'BASE';
+      if (pct < 0.75)  return 'BUILD';
+      if (pct < 0.9375) return 'PEAK';
+      return 'TAPER';
+    };
+    const currentPhase = phaseFor(currentWeek);
+    const nextPhaseStartWeek = (() => {
+      const want =
+        currentPhase === 'BASE'  ? 'BUILD' :
+        currentPhase === 'BUILD' ? 'PEAK'  :
+        currentPhase === 'PEAK'  ? 'TAPER' : null;
+      if (!want) return null;
+      for (let w = currentWeek + 1; w <= totalWeeks; w++) {
+        if (phaseFor(w) === want) return w;
+      }
+      return null;
+    })();
+    const phaseTransition = nextPhaseStartWeek
+      ? `${currentPhase} → ${phaseFor(nextPhaseStartWeek)}`
+      : currentPhase;
+
+    const goalLabel = (activePlan?.goal_type || 'TRAINING')
+      .replace(/_/g, ' ')
+      .toUpperCase();
+
+    // Collect this-week workouts
     const weekStart = new Date(today);
     weekStart.setDate(today.getDate() - todayDay);
     weekStart.setHours(0, 0, 0, 0);
-
-    const thisWeekItems = recentTraining.filter(t => {
-      const d = new Date(t.date + 'T12:00:00');
-      return d >= weekStart;
-    });
-
-    // Map completed items by day of week (0=Mon)
     const completedByDay: Record<number, TrainingItem[]> = {};
-    thisWeekItems.forEach(item => {
+    recentTraining.forEach(item => {
       const d = new Date(item.date + 'T12:00:00');
       const dow = (d.getDay() + 6) % 7;
-      if (!completedByDay[dow]) completedByDay[dow] = [];
-      completedByDay[dow].push(item);
+      if (d >= weekStart) {
+        if (!completedByDay[dow]) completedByDay[dow] = [];
+        completedByDay[dow].push(item);
+      }
     });
 
-    // Planned runs for the current week
     const getPlannedRun = (dayIdx: number) => {
       if (!activePlan?.planned_runs) return null;
+      // Backend day_of_week is 0=Sun .. 6=Sat; canvas/UI day index 0=Mon .. 6=Sun.
+      // Convert: backendDow = (uiDow + 1) % 7
+      const backendDow = (dayIdx + 1) % 7;
       return activePlan.planned_runs.find(
-        r => r.week_number === activePlan.current_week && r.day_of_week === dayIdx
+        r => r.week_number === currentWeek && r.day_of_week === backendDow,
       ) || null;
     };
 
-    // Week selector for run plan
-    const weeks = activePlan
-      ? Array.from({ length: activePlan.total_weeks }, (_, i) => i + 1)
-      : [];
-    const selectedWeek = activePlan?.current_week || 1;
-    const weekRuns = activePlan?.planned_runs?.filter((r: any) => r.week_number === selectedWeek) || [];
-    const completedRuns = weekRuns.filter((r: any) => r.status === 'completed').length;
-    const weekMiles = weekRuns.reduce((sum: number, r: any) => sum + (r.target_distance_miles || 0), 0);
+    const GYM_LABELS_PLAN: Record<string, { workout: string; target: string }> = {
+      push:       { workout: 'Lift · PUSH', target: '60 min' },
+      pull:       { workout: 'Lift · PULL', target: '60 min' },
+      legs:       { workout: 'Lift · LEGS', target: '60 min' },
+      cardio:     { workout: 'Cardio',      target: '45 min' },
+      basketball: { workout: 'Basketball',  target: '60 min' },
+      rest:       { workout: 'Rest',        target: 'Mobility' },
+    };
 
-    const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    // Compute actual dates for this week
-    const weekStartDate = new Date(today);
-    weekStartDate.setDate(today.getDate() - todayDay);
-    const dayDates = DAY_NAMES.map((_, i) => {
-      const d = new Date(weekStartDate);
-      d.setDate(weekStartDate.getDate() + i);
-      return d.getDate();
+    const dayRows = [0, 1, 2, 3, 4, 5, 6].map(dayIdx => {
+      const dayName = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'][dayIdx];
+      const isToday = dayIdx === todayDay;
+      const completed = completedByDay[dayIdx] || [];
+      const done = completed.length > 0;
+      const run = getPlannedRun(dayIdx);
+      const gym = WEEKLY_SCHEDULE[dayIdx];
+      const gymInfo = GYM_LABELS_PLAN[gym?.type ?? 'rest'];
+
+      // Compose workout text and target
+      let workout = gymInfo.workout;
+      let target = gymInfo.target;
+      if (run) {
+        const runLabel = run.target_distance_miles
+          ? `${run.run_type === 'easy' ? 'Easy' : run.run_type === 'tempo' ? 'Tempo' : run.run_type === 'long' ? 'Long' : run.run_type === 'recovery' ? 'Recovery' : 'Run'} ${run.target_distance_miles}mi`
+          : `${run.run_type} run`;
+        if (gym?.type === 'rest') {
+          workout = runLabel;
+          target = run.target_pace_seconds ? formatPace(run.target_pace_seconds) + '/mi' : (run.target_duration_minutes ? `${run.target_duration_minutes} min` : 'Z2');
+        } else {
+          workout = `${runLabel} + ${gym.type.toUpperCase()}`;
+          target = isToday ? 'today' : (run.target_pace_seconds ? formatPace(run.target_pace_seconds) + '/mi' : target);
+        }
+      }
+      if (isToday && !done) target = 'today';
+
+      return { dayName, workout, target, done, isToday };
     });
-    const GYM_LABELS: Record<string, string> = {
-      push: 'PUSH DAY', pull: 'PULL DAY', legs: 'LEGS + CORE',
-      cardio: 'CARDIO', basketball: 'BASKETBALL', rest: 'REST DAY',
-    };
-    const RUN_TYPE_COLORS_LOCAL: Record<string, string> = {
-      easy: '#3B82F6', tempo: '#F59E0B', intervals: '#EF4444',
-      long: '#10B981', recovery: '#6B7280', fartlek: '#EC4899', progression: '#8B5CF6',
-    };
 
     return (
-      <View style={{ paddingHorizontal: spacing.lg, flex: 1 }}>
-        {/* Plan title + week info */}
-        {activePlan && (
-          <View style={{ marginBottom: spacing.sm, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-            <Text style={{ ...typography.title3, color: colors.text }}>
-              {activePlan.goal_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} Plan
-            </Text>
-            <Text style={{ ...typography.caption, color: colors.textTertiary }}>
-              Week {activePlan.current_week}/{activePlan.total_weeks}
-            </Text>
-          </View>
-        )}
-
-        {!activePlan && (
-          <View style={{ marginBottom: spacing.sm }}>
-            <Text style={{ ...typography.title3, color: colors.text }}>Weekly Schedule</Text>
-          </View>
-        )}
-
-        {/* Week selector (if run plan exists) */}
-        {activePlan && weeks.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            style={{ marginBottom: spacing.xs, maxHeight: 44 }}>
-            {weeks.map(w => {
-              const isActive = w === selectedWeek;
-              const wRuns = activePlan.planned_runs?.filter((r: any) => r.week_number === w) || [];
-              const wDone = wRuns.filter((r: any) => r.status === 'completed').length;
-              return (
-                <TouchableOpacity key={w} style={[
-                  styles.weekChip,
-                  isActive && { backgroundColor: colors.accent + '20', borderColor: colors.accent },
-                ]} onPress={() => haptic.selection()}>
-                  <Text style={[styles.weekChipNum, isActive && { color: colors.accent }]}>W{w}</Text>
-                  {wRuns.length > 0 && (
-                    <Text style={styles.weekChipProgress}>{wDone}/{wRuns.length}</Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
-
-        {/* Week summary line */}
-        {activePlan && weekRuns.length > 0 && (
-          <Text style={{ ...typography.micro, color: colors.textTertiary, marginBottom: spacing.xs }}>
-            {completedRuns}/{weekRuns.length} runs  ·  {weekMiles.toFixed(1)} mi planned
-          </Text>
-        )}
-
-        {/* Day cards — calendar style */}
-        <View style={{ flex: 1 }}>
-        {DAY_NAMES.map((day, dayIdx) => {
-          const schedule = WEEKLY_SCHEDULE[dayIdx];
-          const gymType = schedule.type;
-          const gymColor = DAY_TYPE_COLORS[gymType] || colors.textTertiary;
-          const gymLabel = GYM_LABELS[gymType] || gymType.toUpperCase();
-          const isToday = dayIdx === todayDay;
-          const isRest = gymType === 'rest';
-          const completed = completedByDay[dayIdx] || [];
-          const hasCompletion = completed.length > 0;
-          const run = getPlannedRun(dayIdx);
-          const runColor = run ? (RUN_TYPE_COLORS_LOCAL[run.run_type] || colors.accent) : undefined;
-
-          return (
-            <View key={dayIdx} style={[
-              styles.calDayCard,
-              isRest && !run && { opacity: 0.45 },
-              isToday && { borderColor: colors.accent + '50' },
-            ]}>
-              <View style={styles.calDayLeft}>
-                <Text style={[styles.calDayName, isToday && { color: colors.accent }]}>{day}</Text>
-                <Text style={[styles.calDayDate, isToday && { color: colors.accent }]}>{dayDates[dayIdx]}</Text>
-              </View>
-
-              <View style={styles.calDayCenter}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <View style={[styles.calTypeBadge, { backgroundColor: gymColor + '15' }]}>
-                    <Text style={[styles.calTypeBadgeText, { color: gymColor }]}>{gymLabel}</Text>
-                  </View>
-                  {run && (
-                    <View style={[styles.calTypeBadge, { backgroundColor: (runColor || colors.accent) + '15' }]}>
-                      <Text style={[styles.calTypeBadgeText, { color: runColor || colors.accent }]}>
-                        {run.run_type.toUpperCase()} {run.target_distance_miles ? `${run.target_distance_miles}mi` : ''}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {hasCompletion && (
-                <Ionicons name="checkmark-circle" size={18} color={colors.success} />
-              )}
+      <>
+        {/* CoachHero with embedded 16-week phase ribbon */}
+        <View style={{ paddingHorizontal: spacing.md }}>
+          <CoachHero
+            pill={`${goalLabel} · WK ${currentWeek}`}
+            ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
+            line={
+              activePlan
+                ? <>You're <Text style={{ color: colors.accent }}>{currentWeek} weeks into a {totalWeeks}-week block</Text>. {currentPhase} phase {nextPhaseStartWeek ? `transitions to ${phaseFor(nextPhaseStartWeek)} in week ${nextPhaseStartWeek}` : 'is the closing stretch — taper is the work now'}.</>
+                : <>No active plan yet. Build one when the goal is real.</>
+            }
+            meta={`WK ${currentWeek} / ${totalWeeks} · ${phaseTransition}`}
+            onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
+          >
+            {/* 16-cell phase ribbon */}
+            <View style={styles.planRibbon}>
+              {Array.from({ length: totalWeeks }).map((_, i) => {
+                const w = i + 1;
+                const isDone = w < currentWeek;
+                const isCurrent = w === currentWeek;
+                return (
+                  <View
+                    key={i}
+                    style={[
+                      styles.planRibbonCell,
+                      isDone     && { backgroundColor: colors.accent },
+                      isCurrent  && { backgroundColor: 'rgba(224,183,117,0.4)' },
+                      !isDone && !isCurrent && { backgroundColor: colors.line },
+                    ]}
+                  />
+                );
+              })}
             </View>
-          );
-        })}
+            <View style={styles.planRibbonLabels}>
+              <Text style={styles.planRibbonLabel}>BASE</Text>
+              <Text style={styles.planRibbonLabel}>BUILD</Text>
+              <Text style={styles.planRibbonLabel}>PEAK</Text>
+              <Text style={styles.planRibbonLabel}>TAPER</Text>
+            </View>
+          </CoachHero>
         </View>
-      </View>
+
+        {/* "This week" section */}
+        <View style={styles.planSection}>
+          <Text style={styles.planSectionTitle}>This week</Text>
+          <Text style={styles.planSectionMore}>WK {currentWeek} / {totalWeeks}</Text>
+        </View>
+
+        {/* 7-day rows in a single card */}
+        <View style={styles.planDaysCard}>
+          {dayRows.map((d, i) => (
+            <View
+              key={d.dayName}
+              style={[
+                styles.planDayRow,
+                i > 0 && { borderTopWidth: 1, borderTopColor: colors.line },
+                d.isToday && { backgroundColor: 'rgba(224,183,117,0.06)' },
+              ]}
+            >
+              <Text style={[
+                styles.planDayName,
+                { color: d.isToday ? colors.accent : colors.textTertiary },
+              ]}>
+                {d.dayName}
+              </Text>
+              <Text numberOfLines={1} style={styles.planDayWorkout}>{d.workout}</Text>
+              <Text style={styles.planDayTarget}>{d.target}</Text>
+              <View style={[
+                styles.planDayDone,
+                d.done && { backgroundColor: colors.accent, borderColor: colors.accent },
+              ]}>
+                {d.done && <View style={styles.planDayDoneDot} />}
+              </View>
+            </View>
+          ))}
+        </View>
+      </>
     );
   };
+
+
 
   if (loading) {
     return (
@@ -600,37 +627,94 @@ export default function TrainHomeScreen({ navigation }: any) {
       <ScreenBackground>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40, flexGrow: 1 }}
+        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 140, flexGrow: 1 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {/* Segmented Control */}
-        <View style={styles.segmentRow}>
-          {SEGMENTS.map(s => {
-            const active = segment === s.key;
-            return (
-              <TouchableOpacity
-                key={s.key}
-                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                onPress={() => { haptic.selection(); setSegment(s.key); }}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={s.icon}
-                  size={16}
-                  color={active ? colors.accent : colors.textTertiary}
-                />
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                  {s.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        {/* Topbar with brand mark */}
+        <Topbar
+          title="Train"
+          caption={
+            activePlan
+              ? `WK ${activePlan.current_week ?? '?'} · ${(activePlan.goal_type || 'BLOCK').toUpperCase()}`
+              : undefined
+          }
+        />
+
+        {/* Segmented switch */}
+        <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}>
+          <SegmentedSwitch
+            segments={SEGMENTS.map(s => ({ key: s.key, label: s.label }))}
+            value={segment}
+            onChange={setSegment}
+          />
         </View>
 
-        {/* Segment Content */}
-        {segment === 'train' && renderLiftSegment()}
+        {/* Segment Content — each segment provides its own CoachHero */}
+        {segment === 'today' && (
+          <>
+            <View style={{ paddingHorizontal: spacing.md }}>
+              <CoachHero
+                pill={todayWorkout && todayRun?.planned_run ? 'TODAY · DOUBLE DAY' : 'TODAY'}
+                ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
+                line={
+                  todayWorkout && todayRun?.planned_run
+                    ? <>Run this morning, {(DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type).toLowerCase()} this evening. <Text style={{ color: colors.accent }}>Stack the easy work first</Text>.</>
+                    : todayWorkout
+                      ? <>{DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day. Top set is the lift that matters — <Text style={{ color: colors.accent }}>everything else is volume</Text>.</>
+                      : todayRun?.planned_run
+                        ? <>{todayRun.planned_run.run_type === 'easy' ? 'Aerobic deposit' : 'Run'} today. {todayRun.planned_run.description || 'Stay easy.'}</>
+                        : <>Mobility, walk, sleep — those are the work today.</>
+                }
+                meta={whoopData?.recovery_score != null ? `RECOVERY ${Math.round(whoopData.recovery_score)}% · WHOOP` : undefined}
+                onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
+              />
+            </View>
+            {whoopData && <WhoopHeroCard data={whoopData} />}
+            {todayRun?.planned_run && (
+              <WorkoutStartCard
+                kind="run"
+                time={(todayRun.planned_run as any).planned_time || 'TODAY'}
+                title={`${todayRun.planned_run.run_type === 'easy' ? 'Easy run' : todayRun.planned_run.run_type === 'tempo' ? 'Tempo run' : 'Run'}${todayRun.planned_run.run_type ? ` · ${todayRun.planned_run.run_type.charAt(0).toUpperCase() + todayRun.planned_run.run_type.slice(1)}` : ''}`}
+                metrics={[
+                  { v: String(todayRun.planned_run.target_distance_miles ?? '—'), u: 'mi' },
+                  { v: todayRun.planned_run.target_pace_seconds ? formatPace(todayRun.planned_run.target_pace_seconds) : '—', u: '/mi' },
+                  { v: String(todayRun.planned_run.target_duration_minutes ?? '—'), u: 'min' },
+                ]}
+                note={todayRun.planned_run.description || undefined}
+                onStart={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
+              />
+            )}
+            {todayWorkout && (
+              <WorkoutStartCard
+                kind="lift"
+                time={todayWorkout.status === 'completed' ? 'DONE' : 'TODAY'}
+                title={`${DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day`}
+                metrics={[
+                  { v: String(todayWorkout.exercises?.length ?? 0), u: 'lifts' },
+                  { v: String(todayWorkout.exercises?.reduce((acc, e) => acc + 1, 0) ?? 0), u: 'sets' },
+                  { v: '~45', u: 'min' },
+                ]}
+                note={todayWorkout.coach_notes || undefined}
+                onStart={() =>
+                  todayWorkout.status === 'completed'
+                    ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
+                    : navigation?.navigate?.('TodayWorkout')
+                }
+                ctaLabel={todayWorkout.status === 'completed' ? '▶ VIEW WORKOUT' : '▶ START LIFT'}
+              />
+            )}
+            {!todayWorkout && !todayRun?.planned_run && (
+              <View style={{ marginHorizontal: spacing.md, marginVertical: spacing.lg, alignItems: 'center' }}>
+                <Text style={{ ...typography.body, color: colors.textTertiary }}>
+                  No planned sessions today.
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+        {segment === 'lift' && renderLiftSegment()}
         {segment === 'run' && renderRunSegment()}
         {segment === 'plan' && renderPlanSegment()}
       </ScrollView>
@@ -640,6 +724,19 @@ export default function TrainHomeScreen({ navigation }: any) {
         message={undoToast.message}
         onUndo={handleUndo}
         onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
+      />
+
+      <CoachSheet
+        visible={coachOpen}
+        onClose={() => setCoachOpen(false)}
+        seed={
+          (segment === 'lift' || segment === 'today') && todayWorkout
+            ? `${DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day — what's the question?`
+            : segment === 'run' && todayRun?.planned_run
+              ? `${todayRun.planned_run.run_type} run today. What do you need?`
+              : "On the work — what's on your mind?"
+        }
+        workoutSessionId={(segment === 'lift' || segment === 'today') ? todayWorkout?.id : undefined}
       />
       </ScreenBackground>
     </GestureHandlerRootView>
@@ -774,7 +871,215 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg, marginTop: spacing.sm, marginBottom: spacing.md,
     paddingVertical: spacing.md, gap: spacing.sm,
   },
-  seeAllText: { ...typography.bodyBold, color: colors.accent },
+  seeAllText: { fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 1.8 },
+
+  // ── Lift view (canvas)
+  liftVolumeGrid: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  liftVolumeLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.8,
+    marginBottom: 6,
+  },
+  liftVolumeNum: {
+    fontFamily: fonts.mono,
+    fontSize: 28,
+    color: colors.text,
+    letterSpacing: -0.6,
+  },
+  liftVolumeUnit: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.textTertiary,
+  },
+  openWorkoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    backgroundColor: colors.accent,
+    borderRadius: radius.lg,
+  },
+  openWorkoutBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.bg,
+    letterSpacing: 2.2,
+  },
+  openWorkoutMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.4,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+
+  // ── Run view (canvas)
+  runMapBox: {
+    height: 160,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  runMapLabel: {
+    position: 'absolute',
+    bottom: 8,
+    left: 10,
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.6,
+  },
+  runStartFlex: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  runStartFlexText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.bg,
+    letterSpacing: 2,
+  },
+  runRoutesBtn: {
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  runRoutesBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.textSecondary,
+    letterSpacing: 1.6,
+  },
+  runFooter: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.6,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  audioCoachToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.md,
+  },
+
+  // ── Plan view (canvas)
+  planRibbon: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 4,
+  },
+  planRibbonCell: {
+    flex: 1,
+    height: 26,
+    borderRadius: 2,
+  },
+  planRibbonLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  planRibbonLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.4,
+  },
+  planSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  planSectionTitle: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 22,
+    color: colors.text,
+    letterSpacing: -0.5,
+  },
+  planSectionMore: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 1.6,
+  },
+  planDaysCard: {
+    marginHorizontal: spacing.md,
+    borderRadius: radius.xl,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    overflow: 'hidden',
+  },
+  planDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  planDayName: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 1.4,
+    width: 38,
+  },
+  planDayWorkout: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text,
+  },
+  planDayTarget: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 1,
+    width: 80,
+    textAlign: 'right',
+  },
+  planDayDone: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planDayDoneDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.bg,
+  },
 
   // Nav buttons
   navButtons: { marginTop: spacing.md, gap: spacing.sm },

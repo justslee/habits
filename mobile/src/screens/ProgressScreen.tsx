@@ -21,6 +21,8 @@ import UndoToast from '../components/UndoToast';
 import { colors, spacing, typography, radius, fonts, cardStyle, PILLAR_COLORS } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
+import NorthStarCard from '../components/NorthStarCard';
+import Topbar from '../components/Topbar';
 
 /** Animated counter that counts up from 0 to a target number. */
 function CountUp({ value, duration = 800, style }: { value: number | null; duration?: number; style?: any }) {
@@ -323,6 +325,18 @@ export default function ProgressScreen() {
     <ScreenBackground>
     <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
+
+      {/* Topbar with brand mark */}
+      <Topbar title="North Star" caption={stats?.hours?.all_time != null ? `${Math.round(stats.hours.all_time)} HRS LIFETIME` : undefined} />
+
+      {/* North Star — pinned vision */}
+      <View style={{ paddingHorizontal: spacing.md }}>
+        <NorthStarCard
+          line={vision?.vision_text || 'Ship the thing only I can ship — and stay the kind of person who can.'}
+          eyebrow="NORTH STAR · 2026"
+          onPress={() => { haptic.light(); setActiveSection('vision'); }}
+        />
+      </View>
 
       {/* Tab filters */}
       <ScrollView

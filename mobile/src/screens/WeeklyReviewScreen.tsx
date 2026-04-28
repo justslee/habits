@@ -175,7 +175,8 @@ export default function WeeklyReviewScreen() {
       contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.sm }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
-      <Text style={s.screenTitle}>Weekly Review</Text>
+      <Text style={s.eyebrow}>WEEKLY · REVIEW</Text>
+      <Text style={s.screenTitle}>Weekly review</Text>
 
       {latest ? (
         <View style={s.card}>
@@ -254,7 +255,8 @@ const s = StyleSheet.create({
   container: { padding: spacing.lg },
   centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  screenTitle: { fontFamily: fonts.serifItalic, fontSize: 30, color: colors.text, letterSpacing: -0.6, marginBottom: spacing.lg },
+  screenTitle: { fontFamily: fonts.serifItalic, fontSize: 32, color: colors.text, letterSpacing: -0.6, marginBottom: spacing.lg },
+  eyebrow: { fontFamily: fonts.mono, fontSize: 9, color: colors.textTertiary, letterSpacing: 2.2, marginBottom: 4 },
 
   // === Main card ===
   card: {

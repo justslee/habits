@@ -37,9 +37,8 @@ export default function WorkoutScreen() {
       const data = await getTodayWorkout();
       setSession(data);
       if (data.status === 'completed') setSessionComplete(true);
-      if (data.coach_notes && chatMessages.length === 0) {
-        setChatMessages([{ role: 'coach', text: data.coach_notes }]);
-      }
+      // Don't auto-seed coach_notes — header eyebrow + day title already convey context.
+      // Chat thread starts empty and only fills as user converses.
     } catch (err) {
       console.warn('Workout fetch error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -108,7 +107,28 @@ export default function WorkoutScreen() {
       <ScrollView ref={scrollRef} style={s.scroll} contentContainerStyle={[s.container, { paddingTop: 0 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchWorkout(); }} tintColor={colors.textTertiary} />}>
 
-        <Text style={s.screenTitle}>{DAY_LABELS[session?.day_type || ''] || session?.day_type}</Text>
+        {/* Header — eyebrow + serif day title + coach note (single source of truth) */}
+        <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.md }}>
+          <Text style={s.dayEyebrow}>
+            {(session?.day_type || '').toUpperCase()} DAY
+            {session?.whoop_recovery_score != null ? ` · RECOVERY ${Math.round(session.whoop_recovery_score)}%` : ''}
+          </Text>
+          <Text style={s.screenTitle}>{DAY_LABELS[session?.day_type || ''] || session?.day_type}</Text>
+          {session?.coach_notes && !sessionComplete && (
+            <View style={s.coachNoteRow}>
+              <View style={s.coachWaveRow}>
+                <View style={[s.coachWave, { height: 5 }]} />
+                <View style={[s.coachWave, { height: 9 }]} />
+                <View style={[s.coachWave, { height: 7 }]} />
+              </View>
+              <Text style={s.coachNoteEyebrow}>↗ COACH</Text>
+              <View style={{ flex: 1 }} />
+            </View>
+          )}
+          {session?.coach_notes && !sessionComplete && (
+            <Text style={s.coachNoteText}>{session.coach_notes}</Text>
+          )}
+        </View>
 
         {/* Whoop Recovery Card */}
         {hasWhoop && (
@@ -350,33 +370,65 @@ export default function WorkoutScreen() {
           );
         })()}
 
-        {/* Chat */}
-        <View style={s.card}>
-          <Text style={s.cardLabel}>COACH</Text>
-          {chatMessages.map((msg, i) => (
-            <View key={i} style={[s.bubble, msg.role === 'user' ? s.userBubble : s.coachBubble]}>
-              <Text style={[s.bubbleText, msg.role === 'user' ? { color: '#fff' } : { color: colors.text }]}>{msg.text}</Text>
+        {/* Chat — only render when there are messages, in Ink-themed bubbles */}
+        {chatMessages.length > 0 && (
+          <View style={s.coachThread}>
+            <View style={s.coachThreadHead}>
+              <View style={s.coachWaveRow}>
+                <View style={[s.coachWave, { height: 5 }]} />
+                <View style={[s.coachWave, { height: 9 }]} />
+                <View style={[s.coachWave, { height: 7 }]} />
+              </View>
+              <Text style={s.coachThreadEyebrow}>↗ COACH</Text>
             </View>
-          ))}
-          {sending && <Skeleton width={40} height={14} style={{ marginTop: 8, alignSelf: 'flex-start' }} />}
-        </View>
+            {chatMessages.map((msg, i) => (
+              <View key={i} style={[
+                s.bubbleNew,
+                msg.role === 'user' ? s.bubbleUser : s.bubbleCoach,
+              ]}>
+                <Text style={msg.role === 'user' ? s.bubbleUserText : s.bubbleCoachText}>
+                  {msg.text}
+                </Text>
+              </View>
+            ))}
+            {sending && (
+              <View style={[s.bubbleNew, s.bubbleCoach, { flexDirection: 'row', gap: 4, paddingVertical: 14 }]}>
+                <View style={s.thinkingDot} />
+                <View style={s.thinkingDot} />
+                <View style={s.thinkingDot} />
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Bottom spacer so chat content clears the input bar + floating tab bar */}
+        <View style={{ height: 180 }} />
       </ScrollView>
 
-      {/* Completion banner or Input */}
+      {/* Completion banner or Input — floats above the tab bar */}
       {sessionComplete ? (
-        <View style={[s.completeBanner, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        <View style={[s.completeBanner, { paddingBottom: Math.max(insets.bottom, 0) + 100 }]}>
           <Ionicons name="checkmark-circle" size={20} color={colors.success} />
           <Text style={s.completeText}>Workout Complete</Text>
         </View>
       ) : (
-        <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-          <TextInput style={s.chatInput} placeholder="bench 165 for 5..."
+        <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, 8) + 100 }]}>
+          <TextInput
+            style={s.chatInput}
+            placeholder="bench 165 for 5..."
             placeholderTextColor={colors.textTertiary}
-            value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendMessage}
-            returnKeyType="send" editable={!sending} />
-          <TouchableOpacity style={[s.sendBtn, (!chatInput.trim() || sending) && { opacity: 0.3 }]}
-            onPress={sendMessage} disabled={!chatInput.trim() || sending}>
-            <Ionicons name="arrow-up" size={18} color="#fff" />
+            value={chatInput}
+            onChangeText={setChatInput}
+            onSubmitEditing={sendMessage}
+            returnKeyType="send"
+            editable={!sending}
+          />
+          <TouchableOpacity
+            style={[s.sendBtn, (!chatInput.trim() || sending) && { opacity: 0.3 }]}
+            onPress={sendMessage}
+            disabled={!chatInput.trim() || sending}
+          >
+            <Ionicons name="arrow-forward" size={18} color={colors.bg} />
           </TouchableOpacity>
         </View>
       )}
@@ -460,23 +512,163 @@ const s = StyleSheet.create({
   coachBubble: { backgroundColor: colors.cardElevated, alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
   bubbleText: { ...typography.body, lineHeight: 22 },
 
+  // ── Day header (canvas-style eyebrow + serif title) ──
+  dayEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.textTertiary,
+    letterSpacing: 1.8,
+    marginBottom: 4,
+  },
+  coachNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: spacing.md,
+    marginBottom: 6,
+  },
+  coachNoteEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.accent,
+    letterSpacing: 2.2,
+  },
+  coachNoteText: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 16,
+    color: colors.textSecondary,
+    lineHeight: 22,
+    marginBottom: spacing.md,
+  },
+
+  // ── Coach chat thread (Ink theme) ──
+  coachThread: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+    borderRadius: radius.xl,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  coachThreadHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  coachWaveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    height: 10,
+  },
+  coachWave: {
+    width: 2,
+    backgroundColor: colors.accent,
+    borderRadius: 1,
+  },
+  coachThreadEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.accent,
+    letterSpacing: 2.2,
+  },
+  bubbleNew: {
+    maxWidth: '88%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  bubbleCoach: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 16,
+    borderBottomLeftRadius: 4,
+  },
+  bubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.accent,
+    borderRadius: 16,
+    borderBottomRightRadius: 4,
+  },
+  bubbleCoachText: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 16,
+    color: colors.text,
+    lineHeight: 22,
+  },
+  bubbleUserText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.bg,
+    lineHeight: 20,
+  },
+  thinkingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.textTertiary,
+  },
+
+  // ── Floating input bar (clears the floating tab bar) ──
   inputBar: {
-    flexDirection: 'row', padding: spacing.md,
-    backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.bg,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    gap: spacing.sm,
   },
   chatInput: {
-    flex: 1, backgroundColor: colors.input, color: colors.text,
-    borderRadius: radius.xl, paddingHorizontal: spacing.lg, paddingVertical: 12,
-    ...typography.body, borderWidth: 1, borderColor: colors.border,
+    flex: 1,
+    backgroundColor: colors.bg2,
+    color: colors.text,
+    borderRadius: 999,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
   sendBtn: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent,
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   completeBanner: {
-    flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm,
-    backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    gap: spacing.sm,
+    backgroundColor: colors.bg,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
   },
-  completeText: { ...typography.bodyBold, color: colors.success, flex: 1 },
+  completeText: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 17,
+    color: colors.success,
+    flex: 1,
+  },
 });

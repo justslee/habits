@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import MapView, { Polyline } from '../components/MapView';
 import { discoverRoutes, saveDiscoveredRoute, DiscoveredRoute } from '../api/client';
-import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
 import { haptic } from '../utils/haptics';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton } from '../components/Skeleton';
@@ -121,7 +121,11 @@ export default function RouteSuggestionsScreen({ navigation }: any) {
       style={styles.container}
       contentContainerStyle={{ paddingTop: 12, paddingBottom: 40 }}
     >
-      {/* Title is handled by stack header */}
+      {/* Title block */}
+      <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}>
+        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.textTertiary, letterSpacing: 2.2 }}>DISCOVER · ROUTES</Text>
+        <Text style={{ fontFamily: fonts.serifItalic, fontSize: 28, color: colors.text, letterSpacing: -0.6, marginTop: 4 }}>Discover routes</Text>
+      </View>
 
       {/* Distance Selector — presets + custom */}
       <ScrollView

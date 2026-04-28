@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { haptic } from '../utils/haptics';
 import { API_URL, apiHeaders } from '../api/client';
@@ -234,8 +234,8 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   backBtn: { marginRight: spacing.md },
-  title: { ...typography.title2, color: colors.text },
-  subtitle: { ...typography.caption, color: colors.textTertiary },
+  title: { fontFamily: fonts.serifItalic, fontSize: 26, color: colors.text, letterSpacing: -0.5 },
+  subtitle: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.6, marginTop: 2 },
 
   emptyTitle: { ...typography.title3, color: colors.textSecondary },
   emptySubtext: { ...typography.caption, color: colors.textTertiary },

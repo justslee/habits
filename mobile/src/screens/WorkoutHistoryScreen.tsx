@@ -11,7 +11,7 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import ActivityListCard from '../components/ActivityListCard';
 import EmptyState from '../components/EmptyState';
@@ -130,6 +130,12 @@ export default function WorkoutHistoryScreen({ navigation }: any) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
+        {/* Title block */}
+        <View style={styles.titleBlock}>
+          <Text style={styles.eyebrow}>HISTORY · LIFTS</Text>
+          <Text style={styles.titleSerif}>Recent lifts</Text>
+        </View>
+
         {/* Filter chips */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
           {filters.map(f => {
@@ -240,4 +246,8 @@ const styles = StyleSheet.create({
   },
 
   cardDetail: { ...typography.micro, color: colors.textSecondary, marginTop: 2 },
+
+  titleBlock: { paddingHorizontal: spacing.md, marginBottom: spacing.md },
+  eyebrow: { fontFamily: fonts.mono, fontSize: 9, color: colors.textTertiary, letterSpacing: 2.2 },
+  titleSerif: { fontFamily: fonts.serifItalic, fontSize: 28, color: colors.text, letterSpacing: -0.6, marginTop: 4 },
 });

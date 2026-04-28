@@ -23,6 +23,10 @@ import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
 import CheckInModal from './CheckInModal';
 import CompoundingHero from '../components/CompoundingHero';
+import DailyQuoteCard from '../components/DailyQuoteCard';
+import StreakStrip from '../components/StreakStrip';
+import DailyReviewIsland from '../components/DailyReviewIsland';
+import Topbar from '../components/Topbar';
 
 const TIME_ESTIMATES = [15, 30, 60, 90, 120, 180, 240];
 
@@ -97,6 +101,7 @@ export default function DailyScreen() {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [selectedTimeEstimate, setSelectedTimeEstimate] = useState<number | null>(null);
   const [showCheckIn, setShowCheckIn] = useState(false);
+  const [islandDismissed, setIslandDismissed] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   // Edit modal state
@@ -360,76 +365,51 @@ export default function DailyScreen() {
             }
             keyboardShouldPersistTaps="handled"
           >
-            {/* ── Hero date header ── */}
-            <View style={st.header}>
-              <Text style={st.heroDate}>{dateStr}</Text>
-              {summary && (summary.workout_preview || summary.whoop_recovery != null) && (
-                <View style={st.contextLine}>
-                  {summary.workout_preview != null && (
-                    <Text style={st.contextText}>{summary.workout_preview}</Text>
-                  )}
-                  {summary.workout_preview != null && summary.whoop_recovery != null && (
-                    <Text style={st.contextSep}> · </Text>
-                  )}
-                  {summary.whoop_recovery != null && recoveryColor && (
-                    <>
-                      <View style={[st.recoveryDot, { backgroundColor: recoveryColor }]} />
-                      <Text style={st.contextText}>
-                        {Math.round(summary.whoop_recovery)}%
-                      </Text>
-                    </>
-                  )}
-                </View>
-              )}
+            {/* ── Topbar with brand mark + serif date + avatar ── */}
+            <View style={{ marginHorizontal: -spacing.md }}>
+              <Topbar
+                title={dateStr}
+                caption={
+                  summary?.workout_preview && summary?.whoop_recovery != null
+                    ? `${summary.workout_preview.toUpperCase()} · RECOVERY ${Math.round(summary.whoop_recovery)}%`
+                    : summary?.workout_preview?.toUpperCase()
+                      ?? (summary?.whoop_recovery != null ? `RECOVERY ${Math.round(summary.whoop_recovery)}%` : undefined)
+                }
+              />
             </View>
 
-            {/* ── Quote blockquote ── */}
-            {summary && (
-              <View style={st.quoteBlock}>
-                <View style={st.quoteBorder} />
-                <View style={{ flex: 1 }}>
-                  <Text style={st.quoteText}>"{summary.quote}"</Text>
-                  <Text style={st.quoteAuthor}>— {summary.quote_author}</Text>
-                </View>
-              </View>
+            {/* ── Daily review island (shows after 9pm, before check-in) ── */}
+            {!showCheckIn && new Date().getHours() >= 21 && totalComplete > 0 && (
+              <DailyReviewIsland
+                dismissed={islandDismissed || showCheckIn}
+                onOpen={() => { setShowCheckIn(true); setIslandDismissed(true); haptic.medium(); }}
+                onDismiss={() => setIslandDismissed(true)}
+                meta={`day ${heroDay}`}
+              />
             )}
 
-            {/* ── Compounding Hero ── */}
+            {/* ── Daily quote ── */}
+            {summary && summary.quote && (
+              <DailyQuoteCard quote={{ q: summary.quote, a: (summary.quote_author || '').toUpperCase() }} />
+            )}
+
+            {/* ── Compounding hero (interactive) ── */}
             <CompoundingHero day={heroDay} />
 
-            {/* ── Progress bar ── */}
-            {totalItems > 0 && (
-              <View style={st.progressContainer}>
-                <View style={st.progressLabels}>
-                  <Text style={st.progressLeft}>{totalComplete} of {totalItems} done</Text>
-                  <Text style={[st.progressRight, allDone && { color: colors.success }]}>
-                    {totalComplete}/{totalItems}
-                  </Text>
-                </View>
-                <View style={st.progressTrack}>
-                  <LinearGradient
-                    colors={allDone
-                      ? [colors.success, '#34D399']
-                      : [colors.accent, colors.accentLight]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={[st.progressFill, { width: progressPct }]}
-                  />
-                </View>
+            {/* ── HABITS section — canvas: serif italic title + mono "N/M DONE · 🔥 STREAKING" ── */}
+            <View style={st.sectionRow}>
+              <Text style={st.sectionTitleSerif}>Habits</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={st.sectionMore}>
+                  {habitsComplete}/{habits.length} DONE{habitsComplete > 0 ? ' · 🔥 STREAKING' : ''}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => { setShowAddHabit(!showAddHabit); haptic.selection(); }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name={showAddHabit ? 'close' : 'add'} size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
               </View>
-            )}
-
-            {/* ── HABITS section ── */}
-            <View style={st.sectionDivider}>
-              <Text style={st.sectionLabel}>HABITS</Text>
-              <View style={st.sectionLine} />
-              <Text style={st.sectionCount}>{habitsComplete}/{habits.length}</Text>
-              <TouchableOpacity
-                onPress={() => { setShowAddHabit(!showAddHabit); haptic.selection(); }}
-                style={st.sectionAddBtn}
-              >
-                <Ionicons name={showAddHabit ? 'close' : 'add'} size={18} color={colors.textTertiary} />
-              </TouchableOpacity>
             </View>
 
             {habits.map(habit => (
@@ -515,11 +495,12 @@ export default function DailyScreen() {
               </>
             )}
 
-            {/* ── TASKS section ── */}
-            <View style={[st.sectionDivider, { marginTop: spacing.lg }]}>
-              <Text style={st.sectionLabel}>TASKS</Text>
-              <View style={st.sectionLine} />
-              <Text style={st.sectionCount}>{todosComplete}/{todos.length}</Text>
+            {/* ── ToDo section — canvas: serif italic title + mono swipe hint ── */}
+            <View style={st.sectionRow}>
+              <Text style={st.sectionTitleSerif}>ToDo</Text>
+              <Text style={st.sectionMore}>
+                {todos.length > 0 ? 'SWIPE TO DELETE · TAP TO EDIT' : `${todosComplete}/${todos.length}`}
+              </Text>
             </View>
 
             {todos.map(todo => (
@@ -687,47 +668,89 @@ export default function DailyScreen() {
   );
 }
 
-// ── HabitRowCard ───────────────────────────────────────────────────────────────
+// ── HabitRowCard ─── canvas card: 38px icon box · 2-line meta · 28px check · bottom bar
+// Icon = first letter of habit.name in serif italic, tinted with the habit color.
+
+const HABIT_PALETTE = [
+  '#9B8AE8', // accent violet
+  '#D89AD9', // accent-2 pink
+  '#7DD3A4', // recovery green
+  '#E0B775', // amber
+  '#7AB0E8', // info blue
+  '#F97316', // orange
+];
+
+function colorForHabit(h: Habit): string {
+  if (h.color) return h.color;
+  return HABIT_PALETTE[h.id % HABIT_PALETTE.length];
+}
 
 function HabitRowCard({ habit, onToggle, onDelete }: {
   habit: Habit; onToggle: () => void; onDelete: () => void;
 }) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const habitColor = habit.color || colors.accent;
-  const habitIcon = habit.icon || 'flame-outline';
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.985);
+  const habitColor = colorForHabit(habit);
+  const glyph = (habit.name || '?').trim().charAt(0).toUpperCase();
+  const cadence = habitCadenceLabel(habit);
+  const target = habit.total_completions > 0 ? `${habit.total_completions}× total` : 'Daily rep';
 
   return (
     <SwipeableRow onDelete={onDelete}>
-      <Animated.View style={[animStyle, habit.completed_today && st.completedRow]}>
+      <Animated.View style={animStyle}>
         <TouchableOpacity
-          style={st.habitRow}
+          activeOpacity={0.85}
+          style={[
+            st.habitCard,
+            habit.completed_today && st.habitCardDone,
+          ]}
           onPress={onToggle}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
         >
+          {/* 38px icon box — tinted with habit color, holds first-letter glyph */}
           <View style={[
-            st.habitCircle,
-            { borderColor: habitColor },
-            habit.completed_today && { backgroundColor: habitColor },
+            st.habitIconBox,
+            { backgroundColor: habitColor + '26', borderColor: habitColor + '4D' },
           ]}>
-            {habit.completed_today
-              ? <Ionicons name="checkmark" size={13} color="#fff" />
-              : <Ionicons name={habitIcon as any} size={12} color={habitColor} />
-            }
+            <Text style={[st.habitGlyphSerif, { color: habitColor }]}>{glyph}</Text>
           </View>
 
-          <Text
-            style={[st.habitName, habit.completed_today && st.itemDoneText]}
-            numberOfLines={1}
-          >
-            {habit.name}
-          </Text>
-
-          {habit.current_streak > 0 && (
-            <View style={st.streakBadge}>
-              <Text style={st.streakFire}>🔥</Text>
-              <Text style={st.streakText}>{habit.current_streak}</Text>
+          {/* Meta: serif name + mono sub-line (streak · target · cadence) */}
+          <View style={st.habitMetaCol}>
+            <Text
+              numberOfLines={1}
+              style={[st.habitNameNew, habit.completed_today && st.itemDoneText]}
+            >
+              {habit.name}
+            </Text>
+            <View style={st.habitSubRow}>
+              {habit.current_streak > 0 && (
+                <>
+                  <Text style={[st.habitSubStreak, { color: colors.accent }]}>
+                    🔥 {habit.current_streak}d
+                  </Text>
+                  <Text style={st.habitSubSep}>·</Text>
+                </>
+              )}
+              <Text style={st.habitSubText}>{target}</Text>
+              <Text style={st.habitSubSep}>·</Text>
+              <Text style={st.habitSubText}>{cadence}</Text>
             </View>
+          </View>
+
+          {/* 28px circular check button */}
+          <View style={[
+            st.habitCheckBtn,
+            habit.completed_today && { backgroundColor: habitColor, borderColor: habitColor },
+          ]}>
+            {habit.completed_today && (
+              <Ionicons name="checkmark" size={14} color={colors.bg} />
+            )}
+          </View>
+
+          {/* Bottom progress bar */}
+          {habit.completed_today && (
+            <View style={[st.habitProgressBar, { backgroundColor: habitColor }]} />
           )}
         </TouchableOpacity>
       </Animated.View>
@@ -735,65 +758,79 @@ function HabitRowCard({ habit, onToggle, onDelete }: {
   );
 }
 
-// ── TodoRowCard ────────────────────────────────────────────────────────────────
+function habitCadenceLabel(h: Habit): string {
+  if (h.longest_streak >= 7) return 'Daily';
+  return 'Daily';
+}
+
+// ── TodoRowCard ─── canvas card: dot · serif name · mono meta · 28px check
 
 function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
   todo: Todo; onToggle: () => void; onDelete: () => void; onLongPress: () => void;
 }) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
+  const { animStyle, onPressIn, onPressOut } = usePressScale(0.985);
   const pillarColor = todo.pillar_name
     ? (PILLAR_COLORS_BY_NAME[todo.pillar_name] || colors.accent)
-    : null;
+    : colors.textTertiary;
 
   return (
     <SwipeableRow onDelete={onDelete}>
-      <Animated.View style={[animStyle, todo.completed && st.completedRow]}>
+      <Animated.View style={animStyle}>
         <TouchableOpacity
-          style={st.todoRow}
+          activeOpacity={0.85}
+          style={[st.habitCard, todo.completed && st.habitCardDone]}
           onPress={onToggle}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
           onLongPress={onLongPress}
         >
-          {/* 20px rounded-square checkbox */}
+          {/* 38px dot/icon box */}
           <View style={[
-            st.todoCheck,
-            todo.completed && { backgroundColor: colors.accent, borderColor: colors.accent },
+            st.habitIconBox,
+            { backgroundColor: pillarColor + '20', borderColor: pillarColor + '40' },
           ]}>
-            {todo.completed && <Ionicons name="checkmark" size={11} color="#fff" />}
+            <Text style={[st.todoGlyph, { color: pillarColor }]}>·</Text>
           </View>
 
-          {/* Task text */}
-          <Text
-            style={[st.todoText, todo.completed && st.itemDoneText]}
-            numberOfLines={2}
-          >
-            {todo.text}
-          </Text>
-
-          {/* Right meta: pillar + time */}
-          {(pillarColor || (todo.estimated_minutes != null && todo.estimated_minutes > 0)) && (
-            <View style={st.todoMeta}>
-              {pillarColor && (
-                <View style={[st.pillarTag, {
-                  backgroundColor: pillarColor + '15',
-                  borderColor: pillarColor + '30',
-                }]}>
-                  <View style={[st.pillarDot, { backgroundColor: pillarColor }]} />
-                  <Text
-                    style={[st.pillarTagText, { color: pillarColor }]}
-                    numberOfLines={1}
-                  >
+          {/* Meta — task text + meta line */}
+          <View style={st.habitMetaCol}>
+            <Text
+              numberOfLines={2}
+              style={[st.habitNameNew, todo.completed && st.itemDoneText]}
+            >
+              {todo.text}
+            </Text>
+            <View style={st.habitSubRow}>
+              {todo.pillar_name && (
+                <>
+                  <Text style={[st.habitSubText, { color: pillarColor }]}>
                     {todo.pillar_name}
                   </Text>
-                </View>
+                  <Text style={st.habitSubSep}>·</Text>
+                </>
               )}
               {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
-                <View style={st.estBadge}>
-                  <Text style={st.estText}>{todo.estimated_minutes}m</Text>
-                </View>
+                <>
+                  <Text style={st.habitSubText}>{todo.estimated_minutes}m</Text>
+                  <Text style={st.habitSubSep}>·</Text>
+                </>
               )}
+              <Text style={st.habitSubText}>Today</Text>
             </View>
+          </View>
+
+          {/* 28px circular check */}
+          <View style={[
+            st.habitCheckBtn,
+            todo.completed && { backgroundColor: colors.accent, borderColor: colors.accent },
+          ]}>
+            {todo.completed && (
+              <Ionicons name="checkmark" size={14} color={colors.bg} />
+            )}
+          </View>
+
+          {todo.completed && (
+            <View style={[st.habitProgressBar, { backgroundColor: colors.accent }]} />
           )}
         </TouchableOpacity>
       </Animated.View>
@@ -807,8 +844,8 @@ const st = StyleSheet.create({
   container: { flex: 1 },
   scroll: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.md,
+    paddingBottom: 140,
   },
 
   // ── Header ──
@@ -883,7 +920,29 @@ const st = StyleSheet.create({
     borderRadius: 2,
   },
 
-  // ── Section dividers ──
+  // ── Canvas section header: serif italic title + mono "more" line
+  sectionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 22,
+    marginBottom: 10,
+    paddingHorizontal: 0,
+  },
+  sectionTitleSerif: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 22,
+    color: colors.text,
+    letterSpacing: -0.5,
+  },
+  sectionMore: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 1.6,
+  },
+
+  // ── Section dividers (legacy) ──
   sectionDivider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -909,6 +968,96 @@ const st = StyleSheet.create({
   itemDoneText: { textDecorationLine: 'line-through', color: colors.textTertiary },
 
   // ── Habit rows ──
+  // ── Canvas habit/todo card ──
+  habitCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: radius.xl,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    marginBottom: 10,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  habitCardDone: {
+    backgroundColor: colors.surface2,
+  },
+  habitIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todoGlyph: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 22,
+    lineHeight: 22,
+  },
+  habitGlyphSerif: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 18,
+    lineHeight: 20,
+    letterSpacing: -0.3,
+  },
+  habitMetaCol: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  habitNameNew: {
+    fontSize: 15,
+    color: colors.text,
+    fontFamily: fonts.regular,
+    letterSpacing: -0.1,
+  },
+  habitSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  habitSubText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 0.6,
+  },
+  habitSubStreak: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0,
+  },
+  habitSubSep: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    opacity: 0.4,
+  },
+  habitCheckBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  habitProgressBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 2,
+  },
+
+  // ── Legacy habit row (kept for backward refs in styles only) ──
   habitRow: {
     flexDirection: 'row',
     alignItems: 'center',

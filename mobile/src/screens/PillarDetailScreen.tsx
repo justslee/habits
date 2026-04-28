@@ -239,7 +239,8 @@ export default function PillarDetailScreen({ route, navigation }: any) {
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, marginLeft: spacing.sm }}>
-          <Text style={[st.title, { color: pillarColor }]}>{pillarName}</Text>
+          <Text style={[st.eyebrow, { color: pillarColor }]}>★ PILLAR</Text>
+          <Text style={[st.titleSerif, { color: pillarColor }]}>{pillarName}</Text>
           <Text style={st.subtitle}>Concept Tree</Text>
         </View>
         {!isEmpty && (
@@ -645,6 +646,18 @@ const st = StyleSheet.create({
     fontSize: 26,
     color: colors.text,
     letterSpacing: -0.5,
+  },
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2.2,
+    marginBottom: 2,
+  },
+  titleSerif: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 32,
+    letterSpacing: -0.6,
+    color: colors.text,
   },
   subtitle: {
     ...typography.caption,

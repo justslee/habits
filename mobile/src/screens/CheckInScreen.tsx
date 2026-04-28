@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createEntry, API_URL, apiHeaders } from '../api/client';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton } from '../components/Skeleton';
@@ -306,6 +306,12 @@ export default function CheckInScreen() {
     <ScreenBackground>
     <ScrollView style={s.scroll} contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
       <Animated.View style={{ opacity: formOpacity, transform: [{ translateY: formTranslateY }] }}>
+      {/* Title block */}
+      <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}>
+        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.textTertiary, letterSpacing: 2.2 }}>DAILY · REVIEW</Text>
+        <Text style={{ fontFamily: fonts.serifItalic, fontSize: 32, color: colors.text, letterSpacing: -0.6, marginTop: 4 }}>How did today go?</Text>
+      </View>
+
       {/* Today's Progress Summary */}
       <View style={s.summaryCard}>
         <View style={s.summaryRow}>
