@@ -28,5 +28,8 @@ alembic>=1.13.0
 # Rate limiting
 slowapi>=0.1.9
 
+# Multipart form parsing (speaking audio uploads)
+python-multipart>=0.0.26
+
 # Dev tools
 ruff>=0.2.0
