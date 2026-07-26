@@ -1,0 +1,17 @@
+[Unit]
+Description=Habits API (FastAPI/uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/habits/backend
+EnvironmentFile=/home/ubuntu/habits/backend/.env
+# uv-managed venv (created by `uv sync`), loopback-only — nginx is the sole listener.
+# Port 8001 avoids scorecard's 8000.
+ExecStart=/home/ubuntu/habits/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

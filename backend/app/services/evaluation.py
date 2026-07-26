@@ -309,8 +309,7 @@ async def evaluate_overall_day(
         entry.user_id, entry.pillar_tag_list, db
     )
 
-    raw_response = await call_clawdbot(system_prompt, user_prompt)
-    parsed = parse_llm_response(raw_response)
+    parsed = await evaluate_with_tool_use(system_prompt, user_prompt)
 
     evaluation = Evaluation(
         entry_id=entry.id,
@@ -320,7 +319,7 @@ async def evaluate_overall_day(
         one_percent_better=parsed["one_percent_better"],
         verdict_explanation=parsed["verdict_explanation"],
         commentary=parsed["commentary"],
-        raw_llm_response=json.dumps(raw_response),
+        raw_llm_response=json.dumps(parsed),
     )
 
     db.add(evaluation)

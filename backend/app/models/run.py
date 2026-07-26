@@ -1,4 +1,4 @@
-"""Run tracking models — Phase 3 GPS Run Tracking."""
+"""Run tracking models — manual run logging + AI training plans."""
 
 import datetime
 from typing import Optional
@@ -25,9 +25,6 @@ class RunSession(Base, TimestampMixin):
     elevation_gain_ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     calories: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # GPS data (JSON array of {lat, lng, alt, timestamp})
-    gps_polyline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
     # Run type: easy, tempo, interval, long, recovery, race
     run_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
@@ -45,7 +42,6 @@ class RunSession(Base, TimestampMixin):
 
     # Phase 4: link to training plan
     planned_run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # logical FK to planned_runs.id (no DB FK to avoid circular dep)
-    route_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # logical FK to saved_routes.id
     feel_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-10 post-run RPE
     is_pr: Mapped[bool] = mapped_column(default=False)
     pr_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # fastest_mile, 5k, etc.
@@ -246,32 +242,3 @@ class RunSegmentLog(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<RunSegmentLog(run={self.run_id}, seg={self.segment_index}, type={self.segment_type})>"
-
-
-class SavedRoute(Base, TimestampMixin):
-    """A saved running route for reuse and comparison."""
-
-    __tablename__ = "saved_routes"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-
-    # Route geometry
-    waypoints: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of {lat, lng}
-    polyline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # JSON array of {lat, lng, alt}
-    distance_miles: Mapped[float] = mapped_column(Float, nullable=False)
-    elevation_gain_ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-
-    # Metadata
-    route_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # loop, out_and_back, point_to_point
-    tags: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # comma-separated: flat, hilly, trail, track, neighborhood
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Stats (updated after runs on this route)
-    times_run: Mapped[int] = mapped_column(Integer, default=0)
-    best_time_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    last_run_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
-
-    def __repr__(self) -> str:
-        return f"<SavedRoute(id={self.id}, name={self.name}, dist={self.distance_miles}mi)>"

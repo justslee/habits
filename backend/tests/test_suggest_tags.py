@@ -145,8 +145,10 @@ class TestSuggestTagsEndpoint:
         assert suggestions[0]["pillar_id"] == 2
 
     @patch("app.services.suggest_tags.structured_output", new_callable=AsyncMock)
-    def test_uses_haiku_model(self, mock_structured, client, db_session):
-        """Tag suggestion should use Haiku for cost efficiency."""
+    def test_uses_fast_model(self, mock_structured, client, db_session):
+        """Tag suggestion should use the cheap/fast tier for cost efficiency."""
+        from app.services.llm import FAST
+
         mock_structured.return_value = {"suggestions": []}
 
         client.post(
@@ -155,4 +157,4 @@ class TestSuggestTagsEndpoint:
         )
 
         call_kwargs = mock_structured.call_args[1]
-        assert "haiku" in call_kwargs["model"]
+        assert call_kwargs["model"] == FAST

@@ -6,7 +6,7 @@
  * recent sessions, and navigation to deeper screens.
  */
 
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   RefreshControl, Animated, AppState,
@@ -30,7 +30,7 @@ import {
   DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
 } from '../constants/trainingSchedule';
 import ScreenBackground from '../components/ScreenBackground';
-import { formatPace } from '../services/gps';
+import { formatPace } from '../utils/format';
 import { usePressScale } from '../hooks/usePressScale';
 import SegmentedSwitch from '../components/SegmentedSwitch';
 import CoachHero from '../components/CoachHero';
@@ -39,7 +39,6 @@ import Topbar from '../components/Topbar';
 import WhoopHeroCard from '../components/WhoopHeroCard';
 import WorkoutStartCard from '../components/WorkoutStartCard';
 import SessionListCard from '../components/SessionListCard';
-import Svg, { Defs, Pattern, Path, Rect, Circle } from 'react-native-svg';
 
 type Segment = 'today' | 'run' | 'lift' | 'plan';
 
@@ -64,7 +63,6 @@ export default function TrainHomeScreen({ navigation }: any) {
   const [activePlan, setActivePlan] = useState<TrainingPlanData | null>(null);
   const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
 
-  const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
   const [coachOpen, setCoachOpen] = useState(false);
   const heroScale = usePressScale(0.97);
   const appState = useRef(AppState.currentState);
@@ -276,18 +274,6 @@ export default function TrainHomeScreen({ navigation }: any) {
     );
   };
 
-  // Stable demo polyline for the run-view embedded map
-  const runRoute = useMemo(() => {
-    const pts: [number, number][] = [];
-    for (let i = 0; i <= 50; i++) {
-      const t = i / 50;
-      const x = 20 + t * 320 + Math.sin(t * 7) * 22;
-      const y = 90 + Math.sin(t * 4.5) * 38 + Math.cos(t * 2) * 14;
-      pts.push([x, y]);
-    }
-    return pts;
-  }, []);
-
   const renderRunSegment = () => {
     const planned = todayRun?.planned_run;
     const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
@@ -305,7 +291,7 @@ export default function TrainHomeScreen({ navigation }: any) {
 
     return (
     <>
-      {/* CoachHero with embedded route map + START · ROUTES — canvas Run view */}
+      {/* CoachHero with today's plan + Log-a-run entry */}
       <View style={{ paddingHorizontal: spacing.md }}>
         <CoachHero
           pill={planned ? `${(planned.run_type || 'EASY').toUpperCase()} · Z2` : 'FREE RUN'}
@@ -315,73 +301,18 @@ export default function TrainHomeScreen({ navigation }: any) {
               ? <>Today is your aerobic deposit — <Text style={{ color: colors.accent }}>{distMi ?? '—'}{distMi != null ? ' mi' : ''}{paceFmt ? ` at ${paceFmt}/mi` : ''}{hr ? `, HR ≤ ${hr}` : ''}</Text>. Breathe through the nose. Negative split if it feels easy. The point is showing up, not the pace.</>
               : <>No planned run today. Free run if the body wants it; rest if it doesn't.</>
           }
-          meta={planned ? `${distMi ?? '—'} MI · TARGET RPE 5` : 'GPS LOCKED · WHOOP CONNECTED'}
+          meta={planned ? `${distMi ?? '—'} MI · TARGET RPE 5` : 'RUN WHEN READY'}
           onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
         >
-          {/* Route polyline preview — animated path on a grid */}
-          <View style={styles.runMapBox}>
-            <Svg viewBox="0 0 360 200" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
-              <Defs>
-                <Pattern id="run-grid" width={20} height={20} patternUnits="userSpaceOnUse">
-                  <Path d="M20 0H0v20" fill="none" stroke={colors.line} strokeWidth={0.5} />
-                </Pattern>
-              </Defs>
-              <Rect width={360} height={200} fill="url(#run-grid)" />
-              <Path
-                d={'M ' + runRoute.map(p => p.join(',')).join(' L ')}
-                fill="none"
-                stroke={colors.accent}
-                strokeWidth={2.5}
-                strokeLinecap="round"
-              />
-              <Circle cx={runRoute[0][0]} cy={runRoute[0][1]} r={4} fill={colors.text} stroke={colors.bg} strokeWidth={1.5} />
-              <Circle cx={runRoute[runRoute.length - 1][0]} cy={runRoute[runRoute.length - 1][1]} r={5} fill={colors.accent} />
-            </Svg>
-            <Text style={styles.runMapLabel}>{distMi != null ? `${distMi} MI · LOOP` : 'PICK A ROUTE'}</Text>
-          </View>
-
-          {/* START + ROUTES button row */}
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
-              style={[styles.runStartFlex, { backgroundColor: runTypeColor }]}
-            >
-              <Text style={styles.runStartFlexText}>
-                ▶ START · {distMi != null ? `${distMi}MI ${(planned?.run_type || 'EASY').toUpperCase()}` : 'FREE RUN'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => navigation?.navigate?.('RouteSuggestions')}
-              style={styles.runRoutesBtn}
-            >
-              <Text style={styles.runRoutesBtnText}>ROUTES</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.runFooter}>
-            GPS LOCKED · {whoopData ? 'WHOOP CONNECTED' : 'NO WEARABLE'} · WEATHER 12° / CLEAR
-          </Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => { haptic.medium(); navigation?.navigate?.('LogRun'); }}
+            style={[styles.runStartFlex, { backgroundColor: runTypeColor, marginTop: 14 }]}
+          >
+            <Text style={styles.runStartFlexText}>＋ LOG A RUN</Text>
+          </TouchableOpacity>
         </CoachHero>
       </View>
-
-      {/* Audio coach toggle — keep accessible */}
-      <TouchableOpacity
-        style={styles.audioCoachToggle}
-        onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
-      >
-        <Ionicons
-          name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
-          size={16}
-          color={audioCoachEnabled ? colors.accent : colors.textTertiary}
-        />
-        <Text style={[
-          { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 1.6 },
-          { color: audioCoachEnabled ? colors.accent : colors.textTertiary },
-        ]}>
-          AUDIO COACH · {audioCoachEnabled ? 'ON' : 'OFF'}
-        </Text>
-      </TouchableOpacity>
 
       {/* Last run · splits — only if we have any runs */}
       {runItems.length > 0 && (
@@ -683,7 +614,8 @@ export default function TrainHomeScreen({ navigation }: any) {
                   { v: String(todayRun.planned_run.target_duration_minutes ?? '—'), u: 'min' },
                 ]}
                 note={todayRun.planned_run.description || undefined}
-                onStart={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
+                onStart={() => { haptic.medium(); navigation?.navigate?.('LogRun'); }}
+                ctaLabel="＋ LOG RUN"
               />
             )}
             {todayWorkout && (
@@ -924,24 +856,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Run view (canvas)
-  runMapBox: {
-    height: 160,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.bg2,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  runMapLabel: {
-    position: 'absolute',
-    bottom: 8,
-    left: 10,
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.textTertiary,
-    letterSpacing: 1.6,
-  },
   runStartFlex: {
     flex: 1,
     paddingVertical: 15,
@@ -954,37 +868,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.bg,
     letterSpacing: 2,
-  },
-  runRoutesBtn: {
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  runRoutesBtnText: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.textSecondary,
-    letterSpacing: 1.6,
-  },
-  runFooter: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.textTertiary,
-    letterSpacing: 1.6,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  audioCoachToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: spacing.md,
-    marginHorizontal: spacing.md,
   },
 
   // ── Plan view (canvas)

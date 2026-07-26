@@ -6,7 +6,6 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -70,7 +69,7 @@ def _run_to_response(run: RunSession) -> RunSessionResponse:
 
 @router.post("/", response_model=RunSessionResponse)
 def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
-    """Save a completed run with GPS data and splits."""
+    """Save a manually-logged completed run with optional per-mile splits."""
     user = db.query(User).first()
     if not user:
         raise HTTPException(status_code=404, detail="No user found")
@@ -89,7 +88,6 @@ def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
         duration_seconds=payload.duration_seconds,
         avg_pace_seconds=avg_pace,
         elevation_gain_ft=payload.elevation_gain_ft,
-        gps_polyline=payload.gps_polyline,
         run_type=payload.run_type,
         weather=payload.weather,
         rpe=payload.rpe,
@@ -337,7 +335,7 @@ async def get_today_plan(db: Session = Depends(get_db)):
     recovery_score = None  # type: Optional[float]
     try:
         from app.services.whoop import fetch_whoop_data
-        whoop_data = await fetch_whoop_data()
+        whoop_data = await fetch_whoop_data(user.id, db)
         recovery_score = whoop_data.get("recovery_score")
 
         if recovery_score is not None and recovery_score < 33:

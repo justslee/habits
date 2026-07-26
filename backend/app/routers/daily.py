@@ -337,10 +337,10 @@ async def get_daily_summary(db: Session = Depends(get_db)):
 
     try:
         from app.services.whoop import fetch_whoop_data
-        whoop_data = await fetch_whoop_data()
+        whoop_data = await fetch_whoop_data(user.id, db)
         whoop_recovery = whoop_data.get("recovery_score")
     except Exception:
-        pass
+        pass  # Whoop not connected / unavailable — summary works without it
 
     return DailySummaryResponse(
         quote=quote_text,

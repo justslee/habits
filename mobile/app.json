@@ -17,8 +17,7 @@
       "appleTeamId": "X3F694PQ8B",
       "infoPlist": {
         "UIBackgroundModes": [
-          "remote-notification",
-          "location"
+          "remote-notification"
         ],
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -36,13 +35,6 @@
         {
           "icon": "./assets/icon.png",
           "color": "#2563eb"
-        }
-      ],
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Allow Mastery Tracker to track your runs in the background.",
-          "isIosBackgroundLocationEnabled": true
         }
       ]
     ],

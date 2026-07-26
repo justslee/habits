@@ -38,10 +38,6 @@ export interface PillarSuggestion {
   sub_topics: string[];
 }
 
-export interface SuggestTagsResponse {
-  suggestions: PillarSuggestion[];
-}
-
 export interface EntryResponse {
   id: number;
   user_id: number;
@@ -112,13 +108,6 @@ export function createEntry(payload: EntryCreatePayload): Promise<EntryResponse>
     method: 'POST',
     body: JSON.stringify(payload),
     timeoutMs: 120_000,
-  });
-}
-
-export function suggestTags(description: string): Promise<SuggestTagsResponse> {
-  return request('/api/v1/entries/suggest-tags', {
-    method: 'POST',
-    body: JSON.stringify({ description }),
   });
 }
 
@@ -236,20 +225,6 @@ export function getWorkoutSession(sessionId: number): Promise<WorkoutSession> {
   return request(`/api/v1/workouts/${sessionId}`);
 }
 
-export function getWorkoutSessions(limit: number = 20): Promise<WorkoutSession[]> {
-  return request(`/api/v1/workouts/?limit=${limit}`);
-}
-
-export function createWorkoutSession(data: {
-  day_type: string;
-  exercises?: ExerciseLogData[];
-}): Promise<WorkoutSession> {
-  return request('/api/v1/workouts/', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
 export function addExerciseLog(
   sessionId: number,
   data: ExerciseLogData,
@@ -315,6 +290,23 @@ export interface PRData {
   time_seconds: number;
   time_formatted: string;
   record_date: string;
+}
+
+export interface CreateRunInput {
+  run_date?: string; // YYYY-MM-DD
+  distance_miles: number;
+  duration_seconds: number;
+  elevation_gain_ft?: number | null;
+  run_type?: string | null;
+  rpe?: number | null;
+  notes?: string | null;
+}
+
+export function createRun(input: CreateRunInput): Promise<RunSessionData> {
+  return request('/api/v1/runs/', {
+    method: 'POST',
+    body: JSON.stringify({ splits: [], ...input }),
+  });
 }
 
 export function getRuns(limit: number = 20): Promise<RunSessionData[]> {
@@ -470,87 +462,6 @@ export function getWeekSummary(): Promise<WeekSummary> {
   return request('/api/v1/workouts/training/week-summary');
 }
 
-// --- Route Discovery (GraphHopper) ---
-
-export interface DiscoveredRoute {
-  name: string;
-  description: string;
-  polyline: { lat: number; lng: number; alt?: number }[];
-  distance_miles: number;
-  elevation_gain_ft: number;
-  difficulty: string;
-  street_names: string[];
-  estimated_time_minutes: number;
-}
-
-export interface RouteDiscoverResponse {
-  routes: DiscoveredRoute[];
-  cached: boolean;
-}
-
-export function discoverRoutes(
-  latitude: number,
-  longitude: number,
-  distanceMiles: number = 3.0,
-): Promise<RouteDiscoverResponse> {
-  return request('/api/v1/routes/discover', {
-    method: 'POST',
-    body: JSON.stringify({ latitude, longitude, distance_miles: distanceMiles }),
-    timeoutMs: 60_000,
-  });
-}
-
-export function routeThroughWaypoints(
-  waypoints: { lat: number; lng: number }[],
-): Promise<{
-  polyline: { lat: number; lng: number }[];
-  distance_miles: number;
-  elevation_gain_ft: number;
-  estimated_time_minutes: number;
-  street_names: string[];
-  difficulty: string;
-}> {
-  return request('/api/v1/routes/waypoint-route', {
-    method: 'POST',
-    body: JSON.stringify({ waypoints }),
-    timeoutMs: 30_000,
-  });
-}
-
-// --- Saved Routes ---
-
-export interface SavedRouteData {
-  id: number;
-  name: string;
-  distance_miles: number;
-  elevation_gain_ft: number | null;
-  route_type: string | null;
-  tags: string | null;
-  description: string | null;
-  times_run: number;
-  best_time_seconds: number | null;
-  last_run_date: string | null;
-}
-
-export function getSavedRoutes(): Promise<SavedRouteData[]> {
-  return request('/api/v1/routes/');
-}
-
-export function saveDiscoveredRoute(route: DiscoveredRoute): Promise<SavedRouteData> {
-  return request('/api/v1/routes/discover/save', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: route.name,
-      polyline: JSON.stringify(route.polyline),
-      distance_miles: route.distance_miles,
-      elevation_gain_ft: route.elevation_gain_ft,
-      route_type: 'loop',
-      tags: route.difficulty,
-      description: route.description,
-    }),
-  });
-}
-
 // --- Vision Statement ---
 
 export interface VisionData {
@@ -673,10 +584,6 @@ export function getConceptLinks(conceptId: number): Promise<ConceptLinkData[]> {
   return request(`/api/v1/concepts/${conceptId}/links`);
 }
 
-export function deleteConceptLink(linkId: number): Promise<{ detail: string }> {
-  return request(`/api/v1/concepts/links/${linkId}`, { method: 'DELETE' });
-}
-
 export function getCrossPillarLinks(): Promise<ConceptLinkData[]> {
   return request('/api/v1/concepts/cross-pillar');
 }
@@ -741,4 +648,23 @@ export function getWhoopData(): Promise<WhoopData> {
 
 export function getWhoopSnapshot(date: string): Promise<WhoopData> {
   return request(`/api/v1/whoop/snapshot/${date}`);
+}
+
+// --- Integrations (opt-in OAuth: Whoop today) ---
+
+export interface IntegrationStatus {
+  whoop: boolean;
+}
+
+export function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return request('/api/v1/integrations/status');
+}
+
+/** The URL to open in a browser to start a provider's OAuth consent flow. */
+export function integrationAuthorizeUrl(provider: 'whoop'): string {
+  return `${API_URL}/api/v1/integrations/${provider}/authorize`;
+}
+
+export function disconnectIntegration(provider: 'whoop'): Promise<{ disconnected: boolean; provider: string }> {
+  return request(`/api/v1/integrations/${provider}`, { method: 'DELETE' });
 }

@@ -15,13 +15,10 @@ import DailyScreen from './src/screens/DailyScreen';
 import TrainHomeScreen from './src/screens/TrainHomeScreen';
 import WorkoutScreen from './src/screens/WorkoutScreen';
 import WorkoutHistoryScreen from './src/screens/WorkoutHistoryScreen';
-import RunScreen from './src/screens/RunScreen';
+import LogRunScreen from './src/screens/LogRunScreen';
 import RunHistoryScreen from './src/screens/RunHistoryScreen';
 import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
-import RouteLibraryScreen from './src/screens/RouteLibraryScreen';
 import WorkoutDetailScreen from './src/screens/WorkoutDetailScreen';
-import RouteMapScreen from './src/screens/RouteMapScreen';
-import RouteSuggestionsScreen from './src/screens/RouteSuggestionsScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import NorthStarScreen from './src/screens/NorthStarScreen';
 import PillarDetailScreen from './src/screens/PillarDetailScreen';
@@ -67,12 +64,9 @@ function TrainStackScreen() {
         <TrainStack.Screen name="TodayWorkout" component={WorkoutScreen} options={{ title: '' }} />
         <TrainStack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} options={{ title: 'History' }} />
         <TrainStack.Screen name="WorkoutDetail" component={WorkoutDetailScreen} options={{ title: 'Workout Summary' }} />
-        <TrainStack.Screen name="RunGPS" component={RunScreen} options={{ title: 'Run' }} />
+        <TrainStack.Screen name="LogRun" component={LogRunScreen} options={{ title: 'Log a Run' }} />
         <TrainStack.Screen name="RunHistory" component={RunHistoryScreen} options={{ title: 'Run History' }} />
         <TrainStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} options={{ title: 'Calendar' }} />
-        <TrainStack.Screen name="RouteLibrary" component={RouteLibraryScreen} options={{ title: 'Routes' }} />
-        <TrainStack.Screen name="RouteSuggestions" component={RouteSuggestionsScreen} options={{ title: 'Discover Routes' }} />
-        <TrainStack.Screen name="RouteMap" component={RouteMapScreen} options={{ title: '', headerTransparent: true }} />
       </TrainStack.Navigator>
     </ErrorBoundary>
   );

@@ -11,7 +11,7 @@ from app.models.milestone import Milestone
 from app.models.weekly_review import WeeklyReview
 from app.models.run import (
     PersonalRecord, PlannedRun, RunningProfile, RunSegmentLog, RunSession, RunSplit,
-    SavedRoute, TrainingPlan,
+    TrainingPlan,
 )
 from app.models.workout import ExerciseLog, ExerciseProfile, WhoopSnapshot, WorkoutSession
 from app.models.daily_todo import DailyHabit, DailyHabitLog, DailyTodo
@@ -20,6 +20,7 @@ from app.models.concept import PillarConcept
 from app.models.concept_touch import ConceptTouch
 from app.models.speaking import SpeakingSession, SpeakingEvaluation
 from app.models.coaching import CoachingObservation
+from app.models.integration import OAuthConnection
 
 __all__ = [
     "Base",
@@ -42,7 +43,6 @@ __all__ = [
     "TrainingPlan",
     "PlannedRun",
     "RunSegmentLog",
-    "SavedRoute",
     "DailyTodo",
     "DailyHabit",
     "DailyHabitLog",
@@ -52,4 +52,5 @@ __all__ = [
     "SpeakingSession",
     "SpeakingEvaluation",
     "CoachingObservation",
+    "OAuthConnection",
 ]
