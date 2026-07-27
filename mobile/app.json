@@ -19,14 +19,7 @@
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSAppTransportSecurity": {
-          "NSExceptionDomains": {
-            "100.106.81.115": {
-              "NSExceptionAllowsInsecureHTTPLoads": true
-            }
-          }
-        }
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
