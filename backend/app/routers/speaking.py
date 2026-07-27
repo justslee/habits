@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 from datetime import date, timedelta
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -25,90 +24,93 @@ router = APIRouter(prefix="/api/v1/speaking", tags=["speaking"])
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "speaking")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ==================== WHISPERX TRANSCRIPTION ====================
+# ==================== DEEPGRAM TRANSCRIPTION ====================
+#
+# Replaces self-hosted WhisperX (large-v3 on CPU): multi-GB torch download and
+# several GB of RAM per request — a non-starter on the t4g.micro that hosts this.
+# Deepgram nova-3 matches large-v3 for clean single-speaker English and returns
+# native per-word timestamps, so the downstream pause analysis is unchanged.
+# The LLM evaluation stage is untouched.
 
-# Lazy-loaded models (heavy — load once, reuse across requests)
-_whisperx_model = None
-_align_model = None
-_align_metadata = None
+DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
+PAUSE_THRESHOLD_SECONDS = 0.8
 
 
-def _get_whisperx_models():
-    """Lazy-load WhisperX transcription and alignment models."""
-    global _whisperx_model, _align_model, _align_metadata
+def _extract_words(payload: dict) -> list[dict]:
+    """Pull the flat word list (with start/end times) out of a Deepgram response."""
+    try:
+        alt = payload["results"]["channels"][0]["alternatives"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+    return alt.get("words") or []
 
-    if _whisperx_model is None:
-        import torch
-        import functools
 
-        # Patch torch.load for PyTorch 2.6+ compat with pyannote checkpoints
-        _orig_load = torch.load
+def _extract_transcript(payload: dict) -> str:
+    try:
+        alt = payload["results"]["channels"][0]["alternatives"][0]
+    except (KeyError, IndexError, TypeError):
+        return ""
+    return (alt.get("transcript") or "").strip()
 
-        @functools.wraps(_orig_load)
-        def _safe_load(*a, **kw):
-            kw['weights_only'] = False
-            return _orig_load(*a, **kw)
 
-        torch.load = _safe_load
+def _detect_pauses(words: list[dict]) -> list[dict]:
+    """Gaps >= PAUSE_THRESHOLD_SECONDS between consecutive words.
 
-        import whisperx
-
-        logger.info("Loading WhisperX model (large-v3) on CPU...")
-        _whisperx_model = whisperx.load_model(
-            'large-v3', device='cpu', compute_type='float32'
-        )
-        logger.info("Loading WhisperX alignment model (en)...")
-        _align_model, _align_metadata = whisperx.load_align_model(
-            language_code='en', device='cpu'
-        )
-        logger.info("WhisperX models loaded.")
-
-    return _whisperx_model, _align_model, _align_metadata
+    Same logic (and output shape) as the previous WhisperX implementation —
+    Deepgram returns per-word start/end times natively, so no forced alignment
+    step is needed. `punctuated_word` keeps the quoted text readable.
+    """
+    pauses = []
+    for i in range(1, len(words)):
+        prev_end = words[i - 1].get("end")
+        curr_start = words[i].get("start")
+        if prev_end is None or curr_start is None:
+            continue
+        gap = curr_start - prev_end
+        if gap >= PAUSE_THRESHOLD_SECONDS:
+            pauses.append({
+                "after_text": words[i - 1].get("punctuated_word") or words[i - 1].get("word", ""),
+                "before_text": words[i].get("punctuated_word") or words[i].get("word", ""),
+                "duration": round(gap, 1),
+                "timestamp": round(prev_end, 1),
+            })
+    return pauses
 
 
 async def transcribe_audio(audio_path: str) -> dict:
-    """Transcribe audio using WhisperX with word-level timestamps and pause detection."""
-    import asyncio
-    import whisperx as _wx
+    """Transcribe audio via Deepgram nova-3 with word-level timestamps + pause detection."""
+    api_key = os.getenv("DEEPGRAM_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing DEEPGRAM_API_KEY env var")
 
-    def _run():
-        model, align_model, align_metadata = _get_whisperx_models()
+    model = os.getenv("DEEPGRAM_MODEL", "nova-3")
+    params = {
+        "model": model,
+        "language": "en",
+        "punctuate": "true",
+        "smart_format": "true",
+    }
 
-        audio = _wx.load_audio(audio_path)
-        result = model.transcribe(audio, batch_size=4)
-        segments = result.get("segments", [])
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
 
-        # Word-level alignment via wav2vec2 forced alignment
-        aligned = _wx.align(
-            segments, align_model, align_metadata, audio, device='cpu'
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        resp = await client.post(
+            DEEPGRAM_URL,
+            params=params,
+            headers={
+                "Authorization": f"Token {api_key}",
+                "Content-Type": "application/octet-stream",
+            },
+            content=audio_bytes,
         )
-        word_segments = aligned.get("word_segments", [])
+    if resp.status_code != 200:
+        raise RuntimeError(f"Deepgram {resp.status_code}: {resp.text[:300]}")
 
-        # Build transcript from segments
-        transcript = " ".join(
-            s.get("text", "").strip() for s in segments
-        ).strip()
-
-        # Detect pauses from word-level timestamps (much more precise than segment-level)
-        pauses = []
-        for i in range(1, len(word_segments)):
-            prev_end = word_segments[i - 1].get("end")
-            curr_start = word_segments[i].get("start")
-            if prev_end is not None and curr_start is not None:
-                gap = curr_start - prev_end
-                if gap >= 0.8:  # 0.8s+ between words = notable pause
-                    pauses.append({
-                        "after_text": word_segments[i - 1].get("word", ""),
-                        "before_text": word_segments[i].get("word", ""),
-                        "duration": round(gap, 1),
-                        "timestamp": round(prev_end, 1),
-                    })
-
-        return transcript, pauses, len(word_segments)
-
-    # Run in thread pool to avoid blocking the event loop
-    loop = asyncio.get_event_loop()
-    transcript, pauses, word_count = await loop.run_in_executor(None, _run)
+    payload = resp.json()
+    words = _extract_words(payload)
+    transcript = _extract_transcript(payload)
+    pauses = _detect_pauses(words)
 
     return {
         "transcript": transcript,
