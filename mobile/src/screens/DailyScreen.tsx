@@ -23,6 +23,7 @@ import UndoToast from '../components/UndoToast';
 import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
 import CheckInModal from './CheckInModal';
+import BottomSheet from '../components/BottomSheet';
 import CompoundingHero from '../components/CompoundingHero';
 import DailyQuoteCard from '../components/DailyQuoteCard';
 import DailyReviewIsland from '../components/DailyReviewIsland';
@@ -639,107 +640,92 @@ export default function DailyScreen() {
             <View style={{ height: 48 }} />
           </ScrollView>
 
-          {/* ── Edit todo modal ── */}
-          <Modal
-            visible={editingTodo !== null}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setEditingTodo(null)}
-          >
-            <KeyboardAvoidingView
-              style={st.modalOverlay}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          {/* ── Edit todo sheet ── */}
+          <BottomSheet visible={editingTodo !== null} onClose={() => setEditingTodo(null)} maxHeightPct={0.82}>
+            <Text style={st.editEyebrow}>EDIT · TASK</Text>
+            <Text style={st.editTitle}>Refine the task</Text>
+
+            <TextInput
+              style={st.editInput}
+              value={editText}
+              onChangeText={setEditText}
+              placeholder="What needs doing?"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+            />
+
+            <View style={st.editSectionHead}>
+              <Ionicons name="time-outline" size={13} color={colors.textTertiary} />
+              <Text style={st.editLabel}>TIME ESTIMATE</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={st.chipRow}
             >
-              <TouchableOpacity
-                style={st.modalOverlay}
-                activeOpacity={1}
-                onPress={() => setEditingTodo(null)}
-              >
-                <TouchableOpacity activeOpacity={1} style={st.modalCard}>
-                  <Text style={st.modalTitle}>Edit Task</Text>
-
-                  <TextInput
-                    style={st.modalInput}
-                    value={editText}
-                    onChangeText={setEditText}
-                    placeholder="Task text..."
-                    placeholderTextColor={colors.textTertiary}
-                    autoFocus
-                    multiline
-                  />
-
-                  <Text style={st.modalLabel}>TIME ESTIMATE</Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    style={st.timeEstScroll}
-                    contentContainerStyle={st.timeEstRow}
+              {TIME_ESTIMATES.map(min => {
+                const active = editMinutes === min;
+                return (
+                  <TouchableOpacity
+                    key={min}
+                    style={[st.chip, active && st.chipActiveAccent]}
+                    onPress={() => { setEditMinutes(active ? null : min); haptic.selection(); }}
                   >
-                    <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
-                    {TIME_ESTIMATES.map(min => (
-                      <TouchableOpacity
-                        key={min}
-                        style={[st.timePill, editMinutes === min && st.timePillActive]}
-                        onPress={() => { setEditMinutes(editMinutes === min ? null : min); haptic.selection(); }}
-                      >
-                        <Text style={[st.timePillText, editMinutes === min && st.timePillTextActive]}>
-                          {formatTimePill(min)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
+                    <Text style={[st.chipText, active && st.chipTextOnAccent]}>{formatTimePill(min)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-                  {/* Pillar picker — auto-classification is a suggestion, not a verdict,
-                      so the pillar is always overridable here. */}
-                  <Text style={st.modalLabel}>PILLAR</Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    style={st.timeEstScroll}
-                    contentContainerStyle={st.timeEstRow}
+            {/* Pillar picker — auto-classification is a suggestion, always overridable. */}
+            <View style={st.editSectionHead}>
+              <Ionicons name="layers-outline" size={13} color={colors.textTertiary} />
+              <Text style={st.editLabel}>PILLAR</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={st.chipRow}
+            >
+              {(() => {
+                const active = editPillarId == null;
+                return (
+                  <TouchableOpacity
+                    style={[st.chip, active && { backgroundColor: colors.textTertiary + '22', borderColor: colors.textSecondary }]}
+                    onPress={() => { setEditPillarId(null); haptic.selection(); }}
                   >
-                    <TouchableOpacity
-                      style={[st.timePill, editPillarId == null && st.timePillActive]}
-                      onPress={() => { setEditPillarId(null); haptic.selection(); }}
-                    >
-                      <Text style={[st.timePillText, editPillarId == null && st.timePillTextActive]}>
-                        Life
-                      </Text>
-                    </TouchableOpacity>
-                    {pillars.map(p => {
-                      const pColor = PILLAR_COLORS_BY_NAME[p.name] || colors.accent;
-                      const active = editPillarId === p.id;
-                      return (
-                        <TouchableOpacity
-                          key={p.id}
-                          style={[
-                            st.timePill,
-                            active && { backgroundColor: pColor + '20', borderColor: pColor },
-                          ]}
-                          onPress={() => { setEditPillarId(p.id); haptic.selection(); }}
-                        >
-                          <Text style={[st.timePillText, active && { color: pColor }]}>
-                            {p.name}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
+                    <View style={[st.chipDot, { backgroundColor: colors.textSecondary }]} />
+                    <Text style={[st.chipText, active && { color: colors.text }]}>Life</Text>
+                  </TouchableOpacity>
+                );
+              })()}
+              {pillars.map(p => {
+                const pColor = PILLAR_COLORS_BY_NAME[p.name] || colors.accent;
+                const active = editPillarId === p.id;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[st.chip, active && { backgroundColor: pColor + '22', borderColor: pColor }]}
+                    onPress={() => { setEditPillarId(p.id); haptic.selection(); }}
+                  >
+                    <View style={[st.chipDot, { backgroundColor: pColor }]} />
+                    <Text style={[st.chipText, active && { color: pColor }]} numberOfLines={1}>{p.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-                  <View style={st.modalActions}>
-                    <TouchableOpacity style={st.modalCancelBtn} onPress={() => setEditingTodo(null)}>
-                      <Text style={st.modalCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={st.modalSaveBtn} onPress={saveEditTodo}>
-                      <Text style={st.modalSaveText}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
+            <View style={st.editActions}>
+              <TouchableOpacity style={st.editCancelBtn} onPress={() => { haptic.light(); setEditingTodo(null); }} activeOpacity={0.85}>
+                <Text style={st.editCancelText}>Cancel</Text>
               </TouchableOpacity>
-            </KeyboardAvoidingView>
-          </Modal>
+              <TouchableOpacity style={st.editSaveBtn} onPress={saveEditTodo} activeOpacity={0.85}>
+                <Text style={st.editSaveText}>Save changes</Text>
+              </TouchableOpacity>
+            </View>
+          </BottomSheet>
 
           <UndoToast
             visible={undoToast.visible}
@@ -1378,64 +1364,118 @@ const st = StyleSheet.create({
   wrapUpSub: { ...typography.caption, color: colors.textSecondary },
 
   // ── Edit todo modal ──
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  // ── Edit-task sheet ──────────────────────────────────────────────────────
+  editEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 2.2,
   },
-  modalCard: {
-    backgroundColor: colors.cardElevated,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    width: '88%',
-    maxWidth: 400,
-  },
-  modalTitle: {
-    ...typography.bodyBold,
+  editTitle: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 26,
     color: colors.text,
-    fontSize: 18,
-    marginBottom: spacing.md,
+    letterSpacing: -0.6,
+    marginTop: 4,
+    marginBottom: spacing.lg,
   },
-  modalInput: {
+  editInput: {
     backgroundColor: colors.input,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    fontSize: 15,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    lineHeight: 22,
     color: colors.text,
-    minHeight: 48,
-    maxHeight: 120,
-    marginBottom: spacing.md,
+    minHeight: 64,
+    maxHeight: 140,
     textAlignVertical: 'top',
   },
-  modalLabel: {
-    ...typography.micro,
-    color: colors.textTertiary,
-    marginBottom: spacing.sm,
-    letterSpacing: 1,
-  },
-  modalActions: {
+  editSectionHead: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
+    alignItems: 'center',
+    gap: 6,
     marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
-  modalCancelBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
+  editLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 1.8,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: spacing.lg,
+    paddingVertical: 2,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
   },
-  modalCancelText: { ...typography.bodyBold, color: colors.textSecondary, fontSize: 14 },
-  modalSaveBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.lg,
+  chipActiveAccent: {
     backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
-  modalSaveText: { ...typography.bodyBold, color: '#fff', fontSize: 14 },
+  chipText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 0.6,
+    color: colors.textSecondary,
+  },
+  chipTextOnAccent: {
+    color: colors.bg,
+    fontWeight: '700',
+  },
+  chipDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+  },
+  editCancelBtn: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+  },
+  editCancelText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    color: colors.textSecondary,
+  },
+  editSaveBtn: {
+    flex: 1.6,
+    paddingVertical: 15,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+  },
+  editSaveText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    fontWeight: '700',
+    color: colors.bg,
+  },
 });
