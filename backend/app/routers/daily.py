@@ -168,6 +168,23 @@ def list_todos(todo_date: Optional[str] = None, db: Session = Depends(get_db)):
     return [_todo_to_response(t) for t in todos]
 
 
+@router.put("/todos/reorder")
+def reorder_todos(payload: dict, db: Session = Depends(get_db)):
+    """Reorder todos by providing an ordered list of IDs.
+
+    MUST be declared before /todos/{todo_id} — otherwise the literal path
+    "reorder" is captured as todo_id="reorder" and fails int validation (422),
+    which is exactly why drag-reorder silently reverted.
+    """
+    ids = payload.get("ids", [])
+    for i, todo_id in enumerate(ids):
+        todo = db.query(DailyTodo).filter(DailyTodo.id == todo_id).first()
+        if todo:
+            todo.sort_order = i
+    db.commit()
+    return {"ok": True}
+
+
 @router.put("/todos/{todo_id}", response_model=TodoResponse)
 def update_todo(todo_id: int, payload: TodoUpdate, db: Session = Depends(get_db)):
     """Update a todo (text, pillar override, etc.)."""
@@ -223,18 +240,6 @@ def complete_todo(todo_id: int, db: Session = Depends(get_db)):
     return _todo_to_response(todo)
 
 
-@router.put("/todos/reorder")
-def reorder_todos(payload: dict, db: Session = Depends(get_db)):
-    """Reorder todos by providing an ordered list of IDs."""
-    ids = payload.get("ids", [])
-    for i, todo_id in enumerate(ids):
-        todo = db.query(DailyTodo).filter(DailyTodo.id == todo_id).first()
-        if todo:
-            todo.sort_order = i
-    db.commit()
-    return {"ok": True}
-
-
 @router.delete("/todos/{todo_id}")
 def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     todo = db.query(DailyTodo).filter(DailyTodo.id == todo_id).first()
@@ -284,6 +289,21 @@ def list_habits(db: Session = Depends(get_db)):
     return [_habit_to_response(h, today, db) for h in habits]
 
 
+@router.put("/habits/reorder")
+def reorder_habits(payload: dict, db: Session = Depends(get_db)):
+    """Reorder habits by providing an ordered list of IDs.
+
+    Declared before /habits/{habit_id} for the same reason as reorder_todos.
+    """
+    ids = payload.get("ids", [])
+    for i, habit_id in enumerate(ids):
+        habit = db.query(DailyHabit).filter(DailyHabit.id == habit_id).first()
+        if habit:
+            habit.sort_order = i
+    db.commit()
+    return {"ok": True}
+
+
 @router.put("/habits/{habit_id}", response_model=HabitResponse)
 def update_habit(habit_id: int, payload: HabitUpdate, db: Session = Depends(get_db)):
     habit = db.query(DailyHabit).filter(DailyHabit.id == habit_id).first()
@@ -328,18 +348,6 @@ def toggle_habit(habit_id: int, db: Session = Depends(get_db)):
 
     db.commit()
     return _habit_to_response(habit, today, db)
-
-
-@router.put("/habits/reorder")
-def reorder_habits(payload: dict, db: Session = Depends(get_db)):
-    """Reorder habits by providing an ordered list of IDs."""
-    ids = payload.get("ids", [])
-    for i, habit_id in enumerate(ids):
-        habit = db.query(DailyHabit).filter(DailyHabit.id == habit_id).first()
-        if habit:
-            habit.sort_order = i
-    db.commit()
-    return {"ok": True}
 
 
 @router.delete("/habits/{habit_id}")
