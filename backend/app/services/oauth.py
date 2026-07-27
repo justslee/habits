@@ -7,9 +7,13 @@ refresh tokens are persisted in the OAuthConnection table.
 
 from __future__ import annotations
 
+import base64
 import datetime
+import hashlib
+import hmac
 import logging
 import os
+import secrets
 from typing import Any, Optional
 from urllib.parse import urlencode
 
@@ -23,6 +27,44 @@ logger = logging.getLogger(__name__)
 
 class OAuthError(Exception):
     pass
+
+
+# --- CSRF-safe OAuth state -------------------------------------------------
+# The `state` round-trips through the provider and must be unforgeable: it binds
+# the callback to the user who started the flow. We sign `user_id.nonce` with an
+# HMAC over SECRET_KEY so an attacker can't mint a state for someone else's id
+# (defeats the OAuth login/connect-CSRF pattern). Stateless — no store needed.
+
+def _state_key() -> bytes:
+    key = os.getenv("SECRET_KEY")
+    if not key:
+        raise OAuthError("SECRET_KEY not configured; cannot issue OAuth state")
+    return key.encode()
+
+
+def _sign(payload: str) -> str:
+    sig = hmac.new(_state_key(), payload.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(sig).rstrip(b"=").decode()
+
+
+def make_state(user_id: int) -> str:
+    """Signed, unforgeable state token binding the flow to `user_id`."""
+    payload = f"{user_id}.{secrets.token_hex(16)}"
+    return f"{payload}.{_sign(payload)}"
+
+
+def verify_state(state: Optional[str]) -> Optional[int]:
+    """Return the user_id if `state` is a valid, untampered token, else None."""
+    if not state:
+        return None
+    parts = state.rsplit(".", 1)
+    if len(parts) != 2:
+        return None
+    payload, sig = parts
+    if not hmac.compare_digest(sig, _sign(payload)):
+        return None
+    uid = payload.split(".", 1)[0]
+    return int(uid) if uid.isdigit() else None
 
 
 # Per-provider config. `scopes` is space-delimited per the OAuth spec.

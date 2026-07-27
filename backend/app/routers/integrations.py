@@ -9,6 +9,7 @@ Opt-in per-user connect flow:
 
 from __future__ import annotations
 
+import html
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -47,7 +48,7 @@ def authorize(provider: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
     user = _current_user(db)
     try:
-        url = oauth.authorize_url(provider, state=str(user.id))
+        url = oauth.authorize_url(provider, state=oauth.make_state(user.id))
     except oauth.OAuthError as e:
         raise HTTPException(status_code=503, detail=str(e))
     return RedirectResponse(url)
@@ -69,12 +70,14 @@ async def callback(
     if not code:
         return HTMLResponse(_result_page(provider, ok=False, detail="Missing authorization code"), status_code=400)
 
-    # state carries the user id (single-user today; multi-user ready).
-    user = None
-    if state and state.isdigit():
-        user = db.query(User).filter(User.id == int(state)).first()
+    # Verify the signed state (CSRF protection): it must be an unforgeable token
+    # this server issued at /authorize. No fallback — reject unsigned/tampered state.
+    user_id = oauth.verify_state(state)
+    if user_id is None:
+        return HTMLResponse(_result_page(provider, ok=False, detail="Invalid or expired state"), status_code=400)
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None:
-        user = _current_user(db)
+        return HTMLResponse(_result_page(provider, ok=False, detail="Unknown user"), status_code=400)
 
     try:
         token = await oauth.exchange_code(provider, code)
@@ -97,11 +100,14 @@ def disconnect(provider: str, db: Session = Depends(get_db)):
 
 
 def _result_page(provider: str, *, ok: bool, detail: str = "") -> str:
-    title = f"{provider.title()} connected" if ok else f"{provider.title()} connection failed"
+    # Escape all interpolated values — `provider` and `detail` can originate from
+    # request input, and this is returned as HTML.
+    safe_provider = html.escape(provider.title())
+    title = f"{safe_provider} connected" if ok else f"{safe_provider} connection failed"
     body = (
         "You're all set. You can close this window and return to the app."
         if ok
-        else f"Something went wrong: {detail}. You can close this window and try again."
+        else f"Something went wrong: {html.escape(detail)}. You can close this window and try again."
     )
     color = "#10B981" if ok else "#E27A6E"
     return f"""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
