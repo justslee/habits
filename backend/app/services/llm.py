@@ -136,10 +136,13 @@ async def structured_output(
         "fences. It must conform to this JSON schema:\n"
         f"{schema_hint}"
     )
+    # The Responses API rejects `text.format: json_object` unless the word "json"
+    # appears in `input` itself — having it only in `instructions` returns a 400
+    # ("Response input messages must contain the word 'json' in some form").
     payload = {
         "model": model,
         "instructions": instructions,
-        "input": user_prompt,
+        "input": f"{user_prompt}\n\nRespond with a single valid JSON object.",
         "max_output_tokens": max_tokens,
         "reasoning": {"effort": _reasoning_effort(model)},
         "text": {"format": {"type": "json_object"}},

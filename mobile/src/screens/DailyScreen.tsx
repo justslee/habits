@@ -110,6 +110,10 @@ export default function DailyScreen() {
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
   const [editText, setEditText] = useState('');
   const [editMinutes, setEditMinutes] = useState<number | null>(null);
+  const [editPillarId, setEditPillarId] = useState<number | null>(null);
+  // Pillar options for the edit picker — sourced from dashboard stats (which already
+  // returns pillar_id + pillar_name), so no extra endpoint is needed.
+  const [pillars, setPillars] = useState<{ id: number; name: string }[]>([]);
 
   // Undo toast state
   const [undoToast, setUndoToast] = useState<{
@@ -173,6 +177,23 @@ export default function DailyScreen() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Pillar options for the edit picker.
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await fetch(`${API_URL}/api/v1/dashboard/stats`, { headers: apiHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const list = (data?.pillar_breakdown ?? [])
+          .filter((p: any) => p?.pillar_id != null && p?.pillar_name)
+          .map((p: any) => ({ id: p.pillar_id, name: p.pillar_name }));
+        setPillars(list);
+      } catch (err) {
+        console.warn('Failed to load pillars:', err);
+      }
+    })();
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -304,7 +325,7 @@ export default function DailyScreen() {
         body: JSON.stringify({
           text,
           estimated_minutes: editMinutes,
-          pillar_id: editingTodo.pillar_id,
+          pillar_id: editPillarId,
           sort_order: editingTodo.sort_order,
         }),
       });
@@ -517,6 +538,7 @@ export default function DailyScreen() {
                   setEditingTodo(todo);
                   setEditText(todo.text);
                   setEditMinutes(todo.estimated_minutes);
+                  setEditPillarId(todo.pillar_id ?? null);
                   haptic.medium();
                 }}
               />
@@ -612,7 +634,13 @@ export default function DailyScreen() {
                   />
 
                   <Text style={st.modalLabel}>TIME ESTIMATE</Text>
-                  <View style={st.timeEstRow}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    style={st.timeEstScroll}
+                    contentContainerStyle={st.timeEstRow}
+                  >
                     <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
                     {TIME_ESTIMATES.map(min => (
                       <TouchableOpacity
@@ -625,24 +653,45 @@ export default function DailyScreen() {
                         </Text>
                       </TouchableOpacity>
                     ))}
-                  </View>
+                  </ScrollView>
 
-                  {editingTodo?.pillar_name && (() => {
-                    const pColor = PILLAR_COLORS_BY_NAME[editingTodo.pillar_name!] || colors.accent;
-                    return (
-                      <View style={[st.pillarTag, {
-                        backgroundColor: pColor + '15',
-                        borderColor: pColor + '30',
-                        marginTop: spacing.sm,
-                        marginBottom: spacing.sm,
-                      }]}>
-                        <View style={[st.pillarDot, { backgroundColor: pColor }]} />
-                        <Text style={[st.pillarTagText, { color: pColor }]}>
-                          {editingTodo.pillar_name}
-                        </Text>
-                      </View>
-                    );
-                  })()}
+                  {/* Pillar picker — auto-classification is a suggestion, not a verdict,
+                      so the pillar is always overridable here. */}
+                  <Text style={st.modalLabel}>PILLAR</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    style={st.timeEstScroll}
+                    contentContainerStyle={st.timeEstRow}
+                  >
+                    <TouchableOpacity
+                      style={[st.timePill, editPillarId == null && st.timePillActive]}
+                      onPress={() => { setEditPillarId(null); haptic.selection(); }}
+                    >
+                      <Text style={[st.timePillText, editPillarId == null && st.timePillTextActive]}>
+                        None
+                      </Text>
+                    </TouchableOpacity>
+                    {pillars.map(p => {
+                      const pColor = PILLAR_COLORS_BY_NAME[p.name] || colors.accent;
+                      const active = editPillarId === p.id;
+                      return (
+                        <TouchableOpacity
+                          key={p.id}
+                          style={[
+                            st.timePill,
+                            active && { backgroundColor: pColor + '20', borderColor: pColor },
+                          ]}
+                          onPress={() => { setEditPillarId(p.id); haptic.selection(); }}
+                        >
+                          <Text style={[st.timePillText, active && { color: pColor }]}>
+                            {p.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
 
                   <View style={st.modalActions}>
                     <TouchableOpacity style={st.modalCancelBtn} onPress={() => setEditingTodo(null)}>
@@ -1179,13 +1228,16 @@ const st = StyleSheet.create({
   addBtn: { marginLeft: spacing.sm },
 
   // ── Time estimate pills ──
+  timeEstScroll: {
+    marginBottom: spacing.md,
+    marginTop: -spacing.xs,
+  },
   timeEstRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.md,
-    marginTop: -spacing.xs,
     paddingHorizontal: spacing.xs,
+    paddingRight: spacing.lg,
   },
   timePill: {
     paddingHorizontal: spacing.md,
