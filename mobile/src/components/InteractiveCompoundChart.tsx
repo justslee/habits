@@ -16,7 +16,8 @@
  */
 
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, PanResponder, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, {
   Path,
   Line,
@@ -46,6 +47,11 @@ interface Props {
   height?: number;
   /** Calendar date of the final day (defaults to today). Used for axis labels. */
   endDate?: Date;
+  /**
+   * Fired when a scrub drag starts/ends. Parents that live inside a ScrollView
+   * can use this to hard-lock scrolling for the duration of the drag.
+   */
+  onScrubbingChange?: (active: boolean) => void;
 }
 
 const RANGES: Array<{ k: '7d' | '30d' | '90d' | 'all'; l: string; n: number | 'all' }> = [
@@ -65,6 +71,7 @@ export default function InteractiveCompoundChart({
   width: propWidth,
   height: H = 176,
   endDate,
+  onScrubbingChange,
 }: Props) {
   const screenW = Dimensions.get('window').width;
   // 16px page margin × 2 + 22px hero padding × 2 = 76px taken by the parent
@@ -152,22 +159,35 @@ export default function InteractiveCompoundChart({
     setScrubIdx(next);
   }, []);
 
-  const pan = useRef(
-    PanResponder.create({
-      // Claim a tap immediately…
-      onStartShouldSetPanResponder: () => true,
-      // …but only steal an ongoing gesture from the ScrollView when it's
-      // clearly horizontal, so vertical scrolling still works over the chart.
-      onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
-      // Once we own it, don't let the ScrollView take it back mid-drag.
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: e => moveTo(e.nativeEvent.locationX),
-      onPanResponderMove: e => moveTo(e.nativeEvent.locationX),
-      onPanResponderRelease: () => { lastTicked.current = -1; },
-      onPanResponderTerminate: () => { lastTicked.current = -1; },
-    }),
-  ).current;
+  // Gesture handling uses react-native-gesture-handler rather than PanResponder.
+  // PanResponder is a JS-level responder, but the parent ScrollView's pan is a
+  // *native* recognizer (UIScrollView on iOS) — JS can't reliably block it, which
+  // is why the page still scrolled vertically while scrubbing. RNGH negotiates
+  // natively: `activeOffsetX` means "only take over after 6px horizontal" and
+  // `failOffsetY` means "hand the gesture back to the ScrollView if it goes
+  // vertical first", so the two never fight.
+  const setScrubbingRef = useRef(onScrubbingChange);
+  setScrubbingRef.current = onScrubbingChange;
+
+  const gesture = useMemo(() => {
+    const drag = Gesture.Pan()
+      .runOnJS(true)
+      .activeOffsetX([-6, 6])
+      .failOffsetY([-12, 12])
+      .onStart(e => { setScrubbingRef.current?.(true); moveTo(e.x); })
+      .onUpdate(e => moveTo(e.x))
+      .onFinalize(() => {
+        lastTicked.current = -1;
+        setScrubbingRef.current?.(false);
+      });
+
+    // Tap-to-inspect a point without dragging.
+    const tap = Gesture.Tap()
+      .runOnJS(true)
+      .onEnd(e => moveTo(e.x));
+
+    return Gesture.Race(drag, tap);
+  }, [moveTo]);
 
   const sIdeal = data.ideal[activeIdx];
   const sActual = data.actual[activeIdx];
@@ -238,7 +258,8 @@ export default function InteractiveCompoundChart({
       </View>
 
       {/* SVG */}
-      <View {...pan.panHandlers}>
+      <GestureDetector gesture={gesture}>
+        <View collapsable={false}>
         <Svg width={W} height={H}>
           <Defs>
             <SvgLinearGradient id="ic-fill" x1="0" y1="0" x2="0" y2="1">
@@ -317,7 +338,8 @@ export default function InteractiveCompoundChart({
             );
           })}
         </Svg>
-      </View>
+        </View>
+      </GestureDetector>
 
       {/* Range selector + legend */}
       {!compact && (

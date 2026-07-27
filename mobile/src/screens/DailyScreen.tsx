@@ -91,6 +91,9 @@ export default function DailyScreen() {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // True while the 1% chart is being scrubbed — freezes vertical scrolling so the
+  // horizontal drag can't drag the page with it.
+  const [chartScrubbing, setChartScrubbing] = useState(false);
   const [newTodoText, setNewTodoText] = useState('');
   const [addingTodo, setAddingTodo] = useState(false);
   const [showAddHabit, setShowAddHabit] = useState(false);
@@ -363,6 +366,8 @@ export default function DailyScreen() {
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
             }
             keyboardShouldPersistTaps="handled"
+            // Hard-lock vertical scrolling while the 1% chart is being scrubbed.
+            scrollEnabled={!chartScrubbing}
           >
             {/* ── Topbar with brand mark + serif date + avatar ── */}
             <View style={{ marginHorizontal: -spacing.md }}>
@@ -393,7 +398,7 @@ export default function DailyScreen() {
             )}
 
             {/* ── Compounding hero (interactive) ── */}
-            <CompoundingHero day={heroDay} />
+            <CompoundingHero day={heroDay} onScrubbingChange={setChartScrubbing} />
 
             {/* ── HABITS section — canvas: serif italic title + mono "N/M DONE · 🔥 STREAKING" ── */}
             <View style={st.sectionRow}>
