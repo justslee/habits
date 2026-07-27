@@ -5,7 +5,7 @@
  *
  * Vision panel    — NSHero (mantra + GROWTH/STREAK/DEEP grid) → Pillar quartet
  *                   → Pillar targets → Anti-goals
- * Discipline      — defers to existing ProgressScreen Discipline section (live data)
+ * Discipline      — live discipline/consistency data
  * Compound        — InteractiveCompoundChart + activity tiles + recent
  *
  * Backend wiring: getVision (mantra + targets + anti-goals), getDashboardStats

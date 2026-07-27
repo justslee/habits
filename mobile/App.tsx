@@ -17,7 +17,6 @@ import LogRunScreen from './src/screens/LogRunScreen';
 import RunHistoryScreen from './src/screens/RunHistoryScreen';
 import TrainingCalendarScreen from './src/screens/TrainingCalendarScreen';
 import WorkoutDetailScreen from './src/screens/WorkoutDetailScreen';
-import ProgressScreen from './src/screens/ProgressScreen';
 import NorthStarScreen from './src/screens/NorthStarScreen';
 import PillarDetailScreen from './src/screens/PillarDetailScreen';
 import WeeklyReviewScreen from './src/screens/WeeklyReviewScreen';
@@ -82,7 +81,6 @@ function NorthStarStackScreen() {
         }}
       >
         <NorthStarStack.Screen name="NorthStarMain" component={NorthStarScreen} options={{ headerShown: false }} />
-        <NorthStarStack.Screen name="NorthStarLegacy" component={ProgressScreen} options={{ title: 'Mastery (legacy)' }} />
         <NorthStarStack.Screen name="PillarDetail" component={PillarDetailScreen} options={{ title: '' }} />
         <NorthStarStack.Screen name="WeeklyReview" component={WeeklyReviewScreen} options={{ title: '' }} />
       </NorthStarStack.Navigator>
