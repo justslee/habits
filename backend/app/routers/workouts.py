@@ -160,7 +160,22 @@ async def get_today_plan(db: Session = Depends(get_db)):
             for dupe in existing[1:]:
                 db.delete(dupe)
             db.commit()
-        return _session_to_response(existing[0])
+        session = existing[0]
+        # Self-heal: if today's plan was the "LLM unavailable" fallback (e.g. the
+        # model was briefly down when the day rolled over) and the user hasn't
+        # started it yet, discard it and regenerate now that the LLM is back.
+        # Without this, a transient outage cached a broken plan for the whole day.
+        stale_fallback = (
+            session.status != "completed"
+            and not session.exercises
+            and session.coach_notes
+            and "LLM unavailable" in session.coach_notes
+        )
+        if stale_fallback:
+            session.deleted_at = datetime.utcnow()
+            db.commit()
+        else:
+            return _session_to_response(session)
 
     # Fetch Whoop data
     whoop_data = {}
