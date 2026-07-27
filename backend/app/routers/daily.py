@@ -735,7 +735,10 @@ async def _classify_pillar(text: str, db: Session) -> tuple:
 
 Task: "{text}"
 
-If the task is general/lifestyle (workout, errands, etc.), return pillar_id=0 with confidence=0.0"""
+If the task is a general "Life" task — errands, chores, admin, appointments,
+workouts, anything that doesn't ladder up to a learning pillar — return
+pillar_id=0 with confidence=0.0. Don't force a weak pillar match; "Life" is a
+first-class, valid answer."""
 
     try:
         parsed = await structured_output(

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { haptic } from '../utils/haptics';
@@ -94,6 +95,9 @@ export default function DailyScreen() {
   // True while the 1% chart is being scrubbed — freezes vertical scrolling so the
   // horizontal drag can't drag the page with it.
   const [chartScrubbing, setChartScrubbing] = useState(false);
+  // True while a todo is being drag-reordered — freezes the page scroll so the
+  // vertical drag doesn't scroll the whole screen.
+  const [reordering, setReordering] = useState(false);
   const [newTodoText, setNewTodoText] = useState('');
   const [addingTodo, setAddingTodo] = useState(false);
   const [showAddHabit, setShowAddHabit] = useState(false);
@@ -202,6 +206,24 @@ export default function DailyScreen() {
   }, [fetchData]);
 
   // ── Todo actions ─────────────────────────────────────────────────────────────
+
+  const persistTodoOrder = useCallback(async (ordered: Todo[]) => {
+    // Optimistic: the list already shows the new order; persist it. Reverts on failure.
+    const prev = todos;
+    setTodos(ordered);
+    try {
+      const resp = await fetch(`${API_URL}/api/v1/daily/todos/reorder`, {
+        method: 'PUT',
+        headers: apiHeaders(),
+        body: JSON.stringify({ ids: ordered.map(t => t.id) }),
+      });
+      if (!resp.ok) throw new Error(`reorder ${resp.status}`);
+    } catch (err) {
+      console.warn('Failed to reorder todos:', err);
+      setTodos(prev);
+    }
+  }, [todos]);
+
 
   const addTodo = async () => {
     const text = newTodoText.trim();
@@ -387,8 +409,9 @@ export default function DailyScreen() {
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
             }
             keyboardShouldPersistTaps="handled"
-            // Hard-lock vertical scrolling while the 1% chart is being scrubbed.
-            scrollEnabled={!chartScrubbing}
+            // Hard-lock vertical scrolling while the 1% chart is being scrubbed
+            // or a todo is being dragged, so neither drag moves the page.
+            scrollEnabled={!chartScrubbing && !reordering}
           >
             {/* ── Topbar with brand mark + serif date + avatar ── */}
             <View style={{ marginHorizontal: -spacing.md }}>
@@ -524,25 +547,37 @@ export default function DailyScreen() {
             <View style={st.sectionRow}>
               <Text style={st.sectionTitleSerif}>ToDo</Text>
               <Text style={st.sectionMore}>
-                {todos.length > 0 ? 'SWIPE TO DELETE · TAP TO EDIT' : `${todosComplete}/${todos.length}`}
+                {todos.length > 0 ? 'HOLD ⠿ TO REORDER · SWIPE TO DELETE' : `${todosComplete}/${todos.length}`}
               </Text>
             </View>
 
-            {todos.map(todo => (
-              <TodoRowCard
-                key={todo.id}
-                todo={todo}
-                onToggle={() => toggleTodo(todo.id)}
-                onDelete={() => deleteTodo(todo.id, todo.text)}
-                onLongPress={() => {
-                  setEditingTodo(todo);
-                  setEditText(todo.text);
-                  setEditMinutes(todo.estimated_minutes);
-                  setEditPillarId(todo.pillar_id ?? null);
-                  haptic.medium();
-                }}
-              />
-            ))}
+            <DraggableFlatList
+              data={todos}
+              keyExtractor={(t) => String(t.id)}
+              scrollEnabled={false}
+              activationDistance={12}
+              containerStyle={{ overflow: 'visible' }}
+              onDragBegin={() => { setReordering(true); haptic.medium(); }}
+              onDragEnd={({ data }) => { setReordering(false); persistTodoOrder(data); }}
+              renderItem={({ item, drag, isActive }) => (
+                <ScaleDecorator activeScale={1.03}>
+                  <TodoRowCard
+                    todo={item}
+                    drag={drag}
+                    isActive={isActive}
+                    onToggle={() => toggleTodo(item.id)}
+                    onDelete={() => deleteTodo(item.id, item.text)}
+                    onLongPress={() => {
+                      setEditingTodo(item);
+                      setEditText(item.text);
+                      setEditMinutes(item.estimated_minutes);
+                      setEditPillarId(item.pillar_id ?? null);
+                      haptic.medium();
+                    }}
+                  />
+                </ScaleDecorator>
+              )}
+            />
 
             {/* Quick add task */}
             <View style={st.addRow}>
@@ -670,7 +705,7 @@ export default function DailyScreen() {
                       onPress={() => { setEditPillarId(null); haptic.selection(); }}
                     >
                       <Text style={[st.timePillText, editPillarId == null && st.timePillTextActive]}>
-                        None
+                        Life
                       </Text>
                     </TouchableOpacity>
                     {pillars.map(p => {
@@ -818,8 +853,9 @@ function habitCadenceLabel(h: Habit): string {
 
 // ── TodoRowCard ─── canvas card: dot · serif name · mono meta · 28px check
 
-function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
+function TodoRowCard({ todo, onToggle, onDelete, onLongPress, drag, isActive }: {
   todo: Todo; onToggle: () => void; onDelete: () => void; onLongPress: () => void;
+  drag?: () => void; isActive?: boolean;
 }) {
   const { animStyle, onPressIn, onPressOut } = usePressScale(0.985);
   const pillarColor = todo.pillar_name
@@ -831,12 +867,24 @@ function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
       <Animated.View style={animStyle}>
         <TouchableOpacity
           activeOpacity={0.85}
-          style={[st.habitCard, todo.completed && st.habitCardDone]}
+          style={[st.habitCard, todo.completed && st.habitCardDone, isActive && st.habitCardDragging]}
           onPress={onToggle}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
           onLongPress={onLongPress}
         >
+          {/* Drag handle — press & hold to reorder (keeps tap=complete, long-press=edit) */}
+          {drag && (
+            <TouchableOpacity
+              onLongPress={drag}
+              delayLongPress={140}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              style={st.dragHandle}
+            >
+              <Ionicons name="reorder-three-outline" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+          )}
+
           {/* 38px dot/icon box */}
           <View style={[
             st.habitIconBox,
@@ -854,14 +902,12 @@ function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
               {todo.text}
             </Text>
             <View style={st.habitSubRow}>
-              {todo.pillar_name && (
-                <>
-                  <Text style={[st.habitSubText, { color: pillarColor }]}>
-                    {todo.pillar_name}
-                  </Text>
-                  <Text style={st.habitSubSep}>·</Text>
-                </>
-              )}
+              {/* Untagged todos are "Life" — errands and general tasks that don't
+                  ladder up to a learning pillar. */}
+              <Text style={[st.habitSubText, { color: pillarColor }]}>
+                {todo.pillar_name || 'Life'}
+              </Text>
+              <Text style={st.habitSubSep}>·</Text>
               {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
                 <>
                   <Text style={st.habitSubText}>{todo.estimated_minutes}m</Text>
@@ -1035,6 +1081,16 @@ const st = StyleSheet.create({
     marginBottom: 10,
     position: 'relative',
     overflow: 'hidden',
+  },
+  habitCardDragging: {
+    borderColor: colors.accent,
+    backgroundColor: colors.cardElevated,
+  },
+  dragHandle: {
+    paddingRight: 2,
+    marginLeft: -4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   habitCardDone: {
     backgroundColor: colors.surface2,
