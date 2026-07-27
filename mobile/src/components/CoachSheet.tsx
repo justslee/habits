@@ -91,7 +91,7 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose}>
+    <BottomSheet visible={visible} onClose={onClose} stickToBottom>
       {/* Header */}
       <View style={styles.headerRow}>
         <View style={styles.avatar}><Text style={styles.avatarText}>C</Text></View>

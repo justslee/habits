@@ -18,6 +18,7 @@ import { API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
 import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
+import KeyboardAvoider from '../components/KeyboardAvoider';
 import { Skeleton } from '../components/Skeleton';
 import { usePressScale } from '../hooks/usePressScale';
 import Topbar from '../components/Topbar';
@@ -243,6 +244,7 @@ export default function SpeakingScreen() {
     const targetLabel = targetSeconds < 60 ? `${targetSeconds}s` : `${Math.round(targetSeconds / 60)} MIN`;
     return (
       <ScreenBackground>
+      <KeyboardAvoider>
       <ScrollView style={st.scroll} contentContainerStyle={[st.container, { paddingTop: insets.top + spacing.sm }]} keyboardShouldPersistTaps="handled">
         {/* Topbar with brand mark */}
         <Topbar
@@ -361,6 +363,7 @@ export default function SpeakingScreen() {
         </View>
         <View style={{ height: 40 }} />
       </ScrollView>
+      </KeyboardAvoider>
       </ScreenBackground>
     );
   }

@@ -20,6 +20,7 @@ import { ProgressSkeleton, Skeleton } from '../components/Skeleton';
 import UndoToast from '../components/UndoToast';
 import { colors, spacing, typography, radius, fonts, cardStyle, PILLAR_COLORS } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
+import KeyboardAvoider from '../components/KeyboardAvoider';
 import { usePressScale } from '../hooks/usePressScale';
 import NorthStarCard from '../components/NorthStarCard';
 import Topbar from '../components/Topbar';
@@ -300,6 +301,7 @@ export default function ProgressScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <ScreenBackground>
+    <KeyboardAvoider offset={90}>
     <ScrollView style={s.scroll} contentContainerStyle={[s.container, { paddingTop: insets.top + spacing.md }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.textTertiary} />}>
 
@@ -770,6 +772,7 @@ export default function ProgressScreen() {
         onDismiss={() => setUndoToast(prev => ({ ...prev, visible: false }))}
       />
     </ScrollView>
+    </KeyboardAvoider>
     </ScreenBackground>
     </GestureHandlerRootView>
   );

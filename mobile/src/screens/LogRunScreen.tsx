@@ -14,6 +14,7 @@ import { colors, spacing, radius, fonts, typography } from '../theme';
 import { haptic } from '../utils/haptics';
 import { createRun } from '../api/client';
 import ScreenBackground from '../components/ScreenBackground';
+import KeyboardAvoider from '../components/KeyboardAvoider';
 
 const RUN_TYPES = ['easy', 'tempo', 'intervals', 'long', 'recovery', 'fartlek', 'progression'];
 const RUN_TYPE_COLORS: Record<string, string> = {
@@ -72,6 +73,7 @@ export default function LogRunScreen({ navigation }: any) {
 
   return (
     <ScreenBackground>
+      <KeyboardAvoider offset={90}>
       <ScrollView
         style={styles.container}
         contentContainerStyle={{ paddingTop: 12, paddingBottom: insets.bottom + 120 }}
@@ -212,6 +214,7 @@ export default function LogRunScreen({ navigation }: any) {
           <Text style={styles.saveBtnText}>{saving ? 'SAVING…' : 'SAVE RUN'}</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoider>
     </ScreenBackground>
   );
 }
