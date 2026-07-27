@@ -322,7 +322,10 @@ export default function TrainHomeScreen({ navigation }: any) {
             const dayShort = dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
             const monthDay = dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const dist = item.distance_miles != null ? `${item.distance_miles.toFixed(1)} mi` : '—';
-            const pace = item.avg_pace_seconds != null ? formatPace(item.avg_pace_seconds) : '—';
+            // The training feed sends a preformatted pace string (workouts.py
+            // `pace_formatted`); there is no avg_pace_seconds on TrainingItem, so
+            // reading that always yielded '—'.
+            const pace = item.pace_formatted || '—';
             return {
               id: `r-${item.id}`,
               day: dayShort,
