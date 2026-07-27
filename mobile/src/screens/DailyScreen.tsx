@@ -24,7 +24,6 @@ import { usePressScale } from '../hooks/usePressScale';
 import CheckInModal from './CheckInModal';
 import CompoundingHero from '../components/CompoundingHero';
 import DailyQuoteCard from '../components/DailyQuoteCard';
-import StreakStrip from '../components/StreakStrip';
 import DailyReviewIsland from '../components/DailyReviewIsland';
 import Topbar from '../components/Topbar';
 

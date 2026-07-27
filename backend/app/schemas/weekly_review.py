@@ -1,6 +1,5 @@
 """Pydantic schemas for weekly review endpoints."""
 
-from typing import Optional
 
 from pydantic import BaseModel
 

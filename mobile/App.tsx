@@ -2,10 +2,8 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Ionicons } from '@expo/vector-icons';
-import { View, Animated } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useRef, useCallback, useEffect } from 'react';
+import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { registerForPushNotifications, scheduleDailyReview } from './src/services/notifications';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
@@ -28,7 +26,6 @@ import MeScreen from './src/screens/MeScreen';
 import CustomTabBar from './src/components/CustomTabBar';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
-import { haptic } from './src/utils/haptics';
 
 const Tab = createBottomTabNavigator();
 const TrainStack = createStackNavigator();
@@ -93,47 +90,6 @@ function NorthStarStackScreen() {
   );
 }
 
-const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
-  Daily: { active: 'today', inactive: 'today-outline' },
-  Train: { active: 'fitness', inactive: 'fitness-outline' },
-  Speak: { active: 'mic', inactive: 'mic-outline' },
-  NorthStar: { active: 'star', inactive: 'star-outline' },
-  Me: { active: 'person', inactive: 'person-outline' },
-};
-
-/** Animated tab icon with spring scale on focus change. */
-function AnimatedTabIcon({ focused, color, iconName }: { focused: boolean; color: string; iconName: keyof typeof Ionicons.glyphMap }) {
-  const scale = useRef(new Animated.Value(1)).current;
-
-  const onLayout = useCallback(() => {
-    if (focused) {
-      Animated.sequence([
-        Animated.spring(scale, { toValue: 1.15, useNativeDriver: true, damping: 15, stiffness: 150, mass: 0.5 }),
-        Animated.spring(scale, { toValue: 1, useNativeDriver: true, damping: 15, stiffness: 150, mass: 0.5 }),
-      ]).start();
-      haptic.light();
-    }
-  }, [focused, scale]);
-
-  return (
-    <Animated.View
-      onLayout={onLayout}
-      style={[
-        { transform: [{ scale }] },
-        focused ? {
-          backgroundColor: 'rgba(155,138,232,0.18)',
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: 'rgba(155,138,232,0.22)',
-          paddingHorizontal: 14,
-          paddingVertical: 4,
-        } : undefined,
-      ]}
-    >
-      <Ionicons name={iconName} size={22} color={color} />
-    </Animated.View>
-  );
-}
 
 export default function App() {
   const [fontsLoaded] = useFonts({

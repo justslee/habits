@@ -24,11 +24,6 @@ class WhoopUnavailableError(Exception):
     pass
 
 
-def is_whoop_connected(user_id: int, db: Session) -> bool:
-    """Whether this user has an active Whoop connection."""
-    return oauth.is_connected(db, user_id, PROVIDER)
-
-
 async def _api_get(path: str, user_id: int, db: Session, access_token: str) -> tuple[dict[str, Any], str]:
     """GET a Whoop endpoint; on 401 refresh the user's token once and retry.
 

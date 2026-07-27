@@ -10,9 +10,9 @@ import React from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
 } from 'react-native';
-import Svg, { Path, Circle, G, Rect } from 'react-native-svg';
+import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { colors, fonts } from '../theme';
+import { colors } from '../theme';
 import { haptic } from '../utils/haptics';
 
 interface IconProps {

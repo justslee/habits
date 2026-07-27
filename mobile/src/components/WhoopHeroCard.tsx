@@ -15,7 +15,7 @@ import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Defs, LinearGradient as SvgLG, Stop } from 'react-native-svg';
 import { WhoopData } from '../api/client';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, radius } from '../theme';
 
 interface Props {
   data: WhoopData;

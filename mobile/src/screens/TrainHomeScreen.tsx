@@ -15,7 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 import {
   getRecentTraining, getWeekSummary, getTodayWorkout, getTodayRun,
@@ -675,52 +675,6 @@ export default function TrainHomeScreen({ navigation }: any) {
   );
 }
 
-function LiftSessionCard({ item, onDelete, onPress }: {
-  item: TrainingItem; onDelete: () => void; onPress: () => void;
-}) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const typeColor = DAY_TYPE_COLORS[item.day_type || 'push'] || colors.accent;
-  const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
-  });
-  return (
-    <SwipeableRow onDelete={onDelete}>
-      <Animated.View style={animStyle}>
-        <TouchableOpacity
-          style={styles.sessionCard}
-          activeOpacity={0.7}
-          onPress={() => { haptic.light(); onPress(); }}
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-        >
-          <View style={styles.sessionLeft}>
-            <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
-              <Ionicons name="barbell-outline" size={18} color={typeColor} />
-            </View>
-          </View>
-          <View style={styles.sessionCenter}>
-            <View style={styles.sessionTop}>
-              <Text style={styles.sessionLabel}>{item.label}</Text>
-              <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
-                <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-                  {(item.day_type || '').toUpperCase()}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.sessionDate}>{dateStr}</Text>
-          </View>
-          <View style={styles.sessionRight}>
-            <Text style={styles.sessionDetail}>{item.detail}</Text>
-            {item.rpe != null && (
-              <Text style={styles.sessionRpe}>RPE {item.rpe}</Text>
-            )}
-            <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    </SwipeableRow>
-  );
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

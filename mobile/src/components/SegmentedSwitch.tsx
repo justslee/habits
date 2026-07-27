@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors, fonts, radius } from '../theme';
+import { colors, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 
 export interface Segment<T extends string> {

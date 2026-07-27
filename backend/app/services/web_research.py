@@ -16,7 +16,6 @@ The research pipeline:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -63,7 +62,7 @@ class ResearchBrief:
         parts.append(f"Sources analyzed: {len(self.raw_results)}")
 
         if self.synthesis:
-            parts.append(f"\n### Research Synthesis")
+            parts.append("\n### Research Synthesis")
             parts.append(self.synthesis)
 
         if self.key_topics:
@@ -72,17 +71,17 @@ class ResearchBrief:
                 parts.append(f"  • {topic}")
 
         if self.key_resources:
-            parts.append(f"\n### Recommended Resources:")
+            parts.append("\n### Recommended Resources:")
             for resource in self.key_resources:
                 parts.append(f"  📚 {resource}")
 
         if self.frontier_developments:
-            parts.append(f"\n### Frontier / Cutting-Edge Developments:")
+            parts.append("\n### Frontier / Cutting-Edge Developments:")
             for dev in self.frontier_developments:
                 parts.append(f"  🔬 {dev}")
 
         if self.raw_results:
-            parts.append(f"\n### Source URLs:")
+            parts.append("\n### Source URLs:")
             for r in self.raw_results[:15]:
                 parts.append(f"  - [{r.title}]({r.url})")
 

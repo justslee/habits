@@ -6,13 +6,13 @@
  * Uses react-native-svg for rendering and react-native-gesture-handler for gestures.
  */
 
-import React, { useMemo, useRef, useCallback } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, ScrollView,
 } from 'react-native';
-import Svg, { Circle, Line, Text as SvgText, G, Defs, Path } from 'react-native-svg';
+import Svg, { Circle, Line, Text as SvgText, G, Path } from 'react-native-svg';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
 import type { ConceptData, ConceptLinkData } from '../api/client';
 import { colors, spacing, typography } from '../theme';
 

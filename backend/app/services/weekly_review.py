@@ -6,17 +6,14 @@ Generates honest weekly reviews via tool_use structured outputs (D-012).
 import json
 import logging
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.daily_entry import DailyEntry
 from app.models.daily_todo import DailyTodo
-from app.models.evaluation import Evaluation
 from app.models.pillar import Pillar
 from app.models.streak import Streak
-from app.models.user import User
 from app.models.weekly_review import WeeklyReview
 from app.services.llm import SONNET, structured_output
 

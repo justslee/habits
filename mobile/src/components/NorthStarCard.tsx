@@ -6,7 +6,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
 import Svg, { Defs, RadialGradient, Stop, Circle, Path } from 'react-native-svg';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, radius } from '../theme';
 
 interface Props {
   /** The vision/mantra line. */

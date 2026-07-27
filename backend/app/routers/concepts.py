@@ -425,7 +425,6 @@ def concept_progress_overview(db: Session = Depends(get_db)):
 def concept_detail_progress(concept_id: int, db: Session = Depends(get_db)):
     """Get detailed progress for a single concept: touch history and stats."""
     from app.models.concept_touch import ConceptTouch
-    from sqlalchemy import func
 
     concept = db.query(PillarConcept).filter(PillarConcept.id == concept_id).first()
     if not concept:

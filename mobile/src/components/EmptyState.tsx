@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius } from '../theme';
+import { colors, spacing, typography } from '../theme';
 
 interface Props {
   icon: keyof typeof Ionicons.glyphMap;

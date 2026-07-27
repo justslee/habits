@@ -14,7 +14,7 @@ import {
   View,
   Dimensions,
 } from 'react-native';
-import { colors, radius, spacing } from '../theme';
+import { colors, spacing } from '../theme';
 
 interface Props {
   visible: boolean;

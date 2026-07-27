@@ -24,29 +24,6 @@ import { usePressScale } from '../hooks/usePressScale';
 import NorthStarCard from '../components/NorthStarCard';
 import Topbar from '../components/Topbar';
 
-/** Animated counter that counts up from 0 to a target number. */
-function CountUp({ value, duration = 800, style }: { value: number | null; duration?: number; style?: any }) {
-  const animValue = useRef(new Animated.Value(0)).current;
-  const [displayValue, setDisplayValue] = useState(0);
-
-  useEffect(() => {
-    if (value == null) return;
-    animValue.setValue(0);
-    Animated.timing(animValue, {
-      toValue: value,
-      duration,
-      useNativeDriver: false,
-    }).start();
-
-    const listener = animValue.addListener(({ value: v }) => {
-      setDisplayValue(Math.round(v));
-    });
-    return () => animValue.removeListener(listener);
-  }, [value]);
-
-  if (value == null) return <Text style={style}>—</Text>;
-  return <Text style={style}>{displayValue}</Text>;
-}
 
 const MUSCLE_GROUPS = [
   { key: 'push', label: 'Push', icon: 'fitness-outline' as const },

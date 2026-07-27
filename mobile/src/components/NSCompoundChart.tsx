@@ -20,7 +20,7 @@ import Svg, {
   Path, Line, Circle, Defs, LinearGradient as SvgLG, Stop, Pattern,
   Text as SvgText, G,
 } from 'react-native-svg';
-import { colors, fonts, radius } from '../theme';
+import { colors, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 import { PILLAR_COLORS } from '../theme';
 

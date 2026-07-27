@@ -30,7 +30,7 @@ const PADDING = { top: 10, right: 10, bottom: 30, left: 28 };
 
 export default function CompoundingChart({
   stats,
-  firstEntryDate,
+  
   width: propWidth,
   height = 240,
   compact = false,

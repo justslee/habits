@@ -11,7 +11,7 @@ Two model tiers:
 
 The public surface (`structured_output`, `generate_text`, and the model-name
 constants) is unchanged so existing call sites keep working: the Anthropic-era
-names `SONNET`/`OPUS`/`HAIKU` are retained as aliases onto the two tiers.
+names `SONNET`/`HAIKU` are retained as aliases onto the two tiers.
 
 The API key comes from `OPENAI_API_KEY` (delivered via AWS Secrets Manager in
 prod, plain env locally).
@@ -34,10 +34,9 @@ REASONING = os.getenv("HABITS_REASONING_MODEL", "gpt-5.6-sol")
 FAST = os.getenv("HABITS_FAST_MODEL", "gpt-5.5")
 
 # Back-compat aliases for existing call sites (were Anthropic model ids).
-# HAIKU was the cheap/fast tier; SONNET/OPUS were the quality tier.
+# HAIKU was the cheap/fast tier; SONNET was the quality tier.
 HAIKU = FAST
 SONNET = REASONING
-OPUS = REASONING
 
 _DEFAULT_TIMEOUT = 120.0
 
@@ -171,7 +170,11 @@ async def generate_text(
     max_tokens: int = 4096,
     max_retries: int = 2,
 ) -> str:
-    """Call the model and get a free-text response (e.g. coaching feedback)."""
+    """Call the model and get a free-text response (e.g. coaching feedback).
+
+    `temperature` is accepted for signature compatibility but not sent —
+    GPT-5-family reasoning models on the Responses API don't take it.
+    """
     payload = {
         "model": model,
         "instructions": system,

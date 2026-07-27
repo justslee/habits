@@ -178,11 +178,3 @@ export const cardStyle = {
   ...shadows.card,
 };
 
-export const cardElevatedStyle = {
-  backgroundColor: colors.cardElevated,
-  borderRadius: radius.xl,
-  borderWidth: 1,
-  borderColor: 'rgba(165,160,200,0.1)',
-  padding: spacing.lg,
-  ...shadows.cardElevated,
-};

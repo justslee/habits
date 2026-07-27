@@ -19,7 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import { chatWithCoach } from '../api/client';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts } from '../theme';
 
 interface Message {
   from: 'coach' | 'me';

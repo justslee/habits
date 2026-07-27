@@ -10,7 +10,6 @@ from app.db.database import get_db
 from app.models.daily_entry import DailyEntry
 from app.models.streak import Streak
 from app.models.user import User
-from app.models.evaluation import Evaluation
 from app.schemas.entry import EntryCreate, EntryResponse, EntryUpdate
 from app.schemas.suggest_tags import SuggestTagsRequest, SuggestTagsResponse
 from app.services.evaluation import evaluate_entry
@@ -152,7 +151,8 @@ async def evaluate_entry_endpoint(entry_id: int, db: Session = Depends(get_db)):
     if entry.evaluation:
         raise HTTPException(status_code=409, detail="Entry already evaluated")
 
-    evaluation = await evaluate_entry(entry, db)
+    # Side-effecting: persists the Evaluation row, which is then read back via `entry`.
+    await evaluate_entry(entry, db)
 
     # Refresh to load relationship
     db.refresh(entry)

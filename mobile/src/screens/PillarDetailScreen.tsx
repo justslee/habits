@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getPillarConcepts, seedPillarConcepts, updateConcept, addConcept, deleteConcept,
-  getConceptLinks, getCrossPillarLinks, createConceptLink,
+  getCrossPillarLinks,
   ConceptTreeData, ConceptData, TierGroup, ConceptLinkData,
 } from '../api/client';
 import { haptic } from '../utils/haptics';

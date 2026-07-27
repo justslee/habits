@@ -4,7 +4,7 @@
  * Flow: Pick topic → Record → Transcribe + Evaluate → View results
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
   Alert, Animated, Platform,
@@ -18,7 +18,7 @@ import { API_URL, apiHeaders } from '../api/client';
 import { haptic } from '../utils/haptics';
 import { colors, spacing, typography, radius, fonts } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
-import { Skeleton, SkeletonRow } from '../components/Skeleton';
+import { Skeleton } from '../components/Skeleton';
 import { usePressScale } from '../hooks/usePressScale';
 import Topbar from '../components/Topbar';
 
@@ -802,62 +802,6 @@ export default function SpeakingScreen() {
   return null;
 }
 
-function PastSessionCard({ session: s, isExpanded, onToggle, scoreColor, formatTime }: {
-  session: SessionResult; isExpanded: boolean; onToggle: () => void;
-  scoreColor: (n: number) => string; formatTime: (s: number) => string;
-}) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const ev = s.evaluation;
-  return (
-    <Animated.View style={animStyle}>
-      <TouchableOpacity style={st.pastCard} onPress={onToggle} activeOpacity={0.7}
-        onPressIn={onPressIn} onPressOut={onPressOut}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={st.pastTopic} numberOfLines={1}>{s.topic}</Text>
-            <Text style={st.pastMeta}>{s.session_date} {'\u00B7'} {formatTime(s.actual_seconds || 0)}</Text>
-          </View>
-          {ev && (
-            <View style={[st.pastScoreBadge, { borderColor: scoreColor(ev.overall_score) }]}>
-              <Text style={[st.pastScoreText, { color: scoreColor(ev.overall_score) }]}>
-                {ev.overall_score}
-              </Text>
-            </View>
-          )}
-        </View>
-        {isExpanded && ev && (
-          <View style={{ marginTop: spacing.md }}>
-            <View style={{ marginBottom: spacing.md }}>
-              {SCORE_DIMENSIONS.map(d => {
-                const score = ev[d.key as keyof EvalResult] as number;
-                return score != null ? (
-                  <View key={d.key} style={st.dimRow}>
-                    <Ionicons name={d.icon as any} size={14} color={colors.textTertiary} />
-                    <Text style={st.dimLabel}>{d.label}</Text>
-                    <View style={st.dimBarTrack}>
-                      <View style={[st.dimBarFill, {
-                        width: `${score}%` as any,
-                        backgroundColor: scoreColor(score),
-                      }]} />
-                    </View>
-                    <Text style={[st.dimValue, { color: scoreColor(score) }]}>{score}</Text>
-                  </View>
-                ) : null;
-              })}
-            </View>
-            <Text style={st.commentaryText}>{ev.commentary}</Text>
-            {ev.specific_feedback.slice(0, 3).map((fb: any, i: number) => (
-              <View key={i} style={st.feedbackItem}>
-                <Text style={st.feedbackQuote}>"{fb.quote}"</Text>
-                <Text style={st.feedbackText}>{fb.feedback}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
 
 const st = StyleSheet.create({
   scroll: { flex: 1 },

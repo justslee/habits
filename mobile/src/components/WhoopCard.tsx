@@ -8,7 +8,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WhoopData } from '../api/client';
-import { colors, spacing, typography, radius, cardStyle } from '../theme';
+import { colors, spacing, typography, cardStyle } from '../theme';
 
 interface Props {
   data: WhoopData;

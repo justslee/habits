@@ -5,11 +5,8 @@ Double progression, stall detection, deload programming.
 """
 
 import logging
-import math
 from datetime import date, timedelta
-from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
@@ -99,13 +96,6 @@ def estimate_1rm(weight: float, reps: int) -> float:
     if reps <= 0 or weight <= 0:
         return 0
     return round(weight * (1 + reps / 30), 1)
-
-
-def estimate_1rm_brzycki(weight: float, reps: int) -> float:
-    """Estimate 1RM using Brzycki formula: weight × 36 / (37 - reps)."""
-    if reps <= 0 or weight <= 0 or reps >= 37:
-        return 0
-    return round(weight * 36 / (37 - reps), 1)
 
 
 def calculate_warmup_sets(working_weight: float) -> list[dict]:

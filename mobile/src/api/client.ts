@@ -31,13 +31,6 @@ export interface EntryCreatePayload {
   entry_date?: string; // YYYY-MM-DD
 }
 
-export interface PillarSuggestion {
-  pillar_id: number;
-  pillar_name: string;
-  confidence: number;
-  sub_topics: string[];
-}
-
 export interface EntryResponse {
   id: number;
   user_id: number;
@@ -274,24 +267,6 @@ export interface RunSessionData {
   splits: RunSplitData[];
 }
 
-export interface RunStatsData {
-  total_runs: number;
-  total_miles: number;
-  total_time_seconds: number;
-  avg_pace_seconds: number | null;
-  this_week_miles: number;
-  this_month_miles: number;
-  longest_run_miles: number;
-  fastest_pace_seconds: number | null;
-}
-
-export interface PRData {
-  distance_label: string;
-  time_seconds: number;
-  time_formatted: string;
-  record_date: string;
-}
-
 export interface CreateRunInput {
   run_date?: string; // YYYY-MM-DD
   distance_miles: number;
@@ -301,27 +276,6 @@ export interface CreateRunInput {
   rpe?: number | null;
   notes?: string | null;
 }
-
-export function createRun(input: CreateRunInput): Promise<RunSessionData> {
-  return request('/api/v1/runs/', {
-    method: 'POST',
-    body: JSON.stringify({ splits: [], ...input }),
-  });
-}
-
-export function getRuns(limit: number = 20): Promise<RunSessionData[]> {
-  return request(`/api/v1/runs/?limit=${limit}`);
-}
-
-export function getRunStats(): Promise<RunStatsData> {
-  return request('/api/v1/runs/stats');
-}
-
-export function getRunPRs(): Promise<PRData[]> {
-  return request('/api/v1/runs/prs');
-}
-
-// --- Training Plans (Phase 4) ---
 
 export interface PlannedRunData {
   id: number;
@@ -358,28 +312,19 @@ export interface TrainingPlanData {
   planned_runs: PlannedRunData[];
 }
 
+export function createRun(input: CreateRunInput): Promise<RunSessionData> {
+  return request('/api/v1/runs/', {
+    method: 'POST',
+    body: JSON.stringify({ splits: [], ...input }),
+  });
+}
+
 export function getTodayRun(): Promise<TodayRunData> {
   return request('/api/v1/runs/today-plan');
 }
 
 export function getActivePlan(): Promise<TrainingPlanData | null> {
   return request('/api/v1/runs/plans/active');
-}
-
-export function createTrainingPlan(data: {
-  goal_type: string;
-  fitness_level?: string;
-  available_days?: string;
-  target_race_date?: string;
-}): Promise<TrainingPlanData> {
-  return request('/api/v1/runs/plans', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export function getPostRunFeedback(runId: number): Promise<{ feedback: string; is_pr: boolean; pr_type: string | null }> {
-  return request(`/api/v1/runs/${runId}/feedback`, { method: 'POST' });
 }
 
 export function getDepthProgression(

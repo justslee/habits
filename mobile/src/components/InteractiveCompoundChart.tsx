@@ -22,7 +22,7 @@ import Svg, {
   Stop,
   G,
 } from 'react-native-svg';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 
 interface Props {
