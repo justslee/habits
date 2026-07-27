@@ -1,15 +1,21 @@
 /**
  * InteractiveCompoundChart — ideal-target (dotted) vs actual-path (solid) compound
- * curve with horizontal scrubber, range selector (7D/30D/90D/ALL), and ahead/behind
- * pill. Mirrors `app.jsx` `InteractiveCompound` from the design canvas.
+ * curve with a horizontal scrubber, range selector (7D/30D/90D/ALL), and an
+ * ahead/behind pill.
  *
  * The "ideal" series is a fixed 1.01^n target. The "actual" series is computed
- * from a per-day delta you provide (or a deterministic pseudo-random walk
- * around the 1% target if no series is provided — useful for the design hero
- * before live data is wired up).
+ * from a per-day delta you provide (or a deterministic pseudo-random walk around
+ * the 1% target if no series is provided).
+ *
+ * Interaction notes:
+ *  • Pan geometry is read from a ref that is refreshed every render, so changing
+ *    range never leaves the scrubber mapping to a stale window.
+ *  • The responder only claims *horizontal* drags, so the parent ScrollView keeps
+ *    vertical scrolling and the two gestures don't fight.
+ *  • X-axis shows sparse calendar checkpoints (dates/months), not day indices.
  */
 
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, PanResponder, Dimensions } from 'react-native';
 import Svg, {
   Path,
@@ -34,10 +40,12 @@ interface Props {
   initialRange?: '7d' | '30d' | '90d' | 'all';
   /** Hide range selector and legend (used in compact heroes). */
   compact?: boolean;
-  /** Override width (otherwise window width minus 32px page margin minus 36px hero padding). */
+  /** Override width (otherwise window width minus 32px page margin minus 44px hero padding). */
   width?: number;
   /** SVG height (default 168). */
   height?: number;
+  /** Calendar date of the final day (defaults to today). Used for axis labels. */
+  endDate?: Date;
 }
 
 const RANGES: Array<{ k: '7d' | '30d' | '90d' | 'all'; l: string; n: number | 'all' }> = [
@@ -47,18 +55,21 @@ const RANGES: Array<{ k: '7d' | '30d' | '90d' | 'all'; l: string; n: number | 'a
   { k: 'all', l: 'ALL', n: 'all' },
 ];
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export default function InteractiveCompoundChart({
   day,
   actualSeries,
   initialRange = 'all',
   compact = false,
   width: propWidth,
-  height: H = 168,
+  height: H = 176,
+  endDate,
 }: Props) {
   const screenW = Dimensions.get('window').width;
   // 16px page margin × 2 + 22px hero padding × 2 = 76px taken by the parent
   const W = propWidth ?? Math.max(280, screenW - 76);
-  const padL = 8, padR = 8, padT = 12, padB = 22;
+  const padL = 10, padR = 10, padT = 22, padB = 24;
   const cw = W - padL - padR;
   const ch = H - padT - padB;
 
@@ -70,7 +81,7 @@ export default function InteractiveCompoundChart({
   })();
   const startDay = Math.max(0, safeDay - span);
   const endDay = safeDay;
-  const visibleN = endDay - startDay;
+  const visibleN = Math.max(1, endDay - startDay);
 
   // Generate ideal + actual series.
   const data = useMemo(() => {
@@ -100,7 +111,7 @@ export default function InteractiveCompoundChart({
   const minV = Math.min(...visIdeal, ...visActual) * 0.98;
   const maxV = Math.max(...visIdeal, ...visActual) * 1.02;
 
-  const xAt = (i: number) => padL + ((i - startDay) / Math.max(1, visibleN)) * cw;
+  const xAt = (i: number) => padL + ((i - startDay) / visibleN) * cw;
   const yAt = (v: number) =>
     padT + ch - ((v - minV) / Math.max(0.0001, maxV - minV)) * ch;
 
@@ -112,48 +123,96 @@ export default function InteractiveCompoundChart({
     .join(' ');
   const actualFill = `${actualPath} L ${xAt(endDay).toFixed(2)} ${(padT + ch).toFixed(2)} L ${xAt(startDay).toFixed(2)} ${(padT + ch).toFixed(2)} Z`;
 
-  const [scrubIdx, setScrubIdx] = useState<number>(safeDay);
-  useEffect(() => {
-    if (scrubIdx < startDay) setScrubIdx(startDay);
-    if (scrubIdx > endDay) setScrubIdx(endDay);
-  }, [startDay, endDay]); // eslint-disable-line react-hooks/exhaustive-deps
+  // --- Scrubbing -------------------------------------------------------------
+  // `scrubIdx === null` means "live" (pinned to today). Any drag sets an index.
+  const [scrubIdx, setScrubIdx] = useState<number | null>(null);
+  const activeIdx = scrubIdx == null ? endDay : Math.min(endDay, Math.max(startDay, scrubIdx));
+  const isLive = scrubIdx == null;
 
-  const lastTickedDay = useRef<number>(-1);
+  // Snap back to live whenever the window changes — a held index from another
+  // range is meaningless in the new one.
+  useEffect(() => { setScrubIdx(null); }, [range, safeDay]);
 
-  const moveTo = (locationX: number) => {
-    const ratio = Math.max(0, Math.min(1, (locationX - padL) / cw));
-    const next = startDay + Math.round(ratio * visibleN);
-    if (next !== lastTickedDay.current) {
-      lastTickedDay.current = next;
+  // Geometry the pan handlers need, refreshed every render so the responder
+  // (created once) never reads a stale window. This is the fix for the scrubber
+  // drifting after a range change.
+  const geo = useRef({ padL, cw, startDay, visibleN });
+  geo.current = { padL, cw, startDay, visibleN };
+
+  const lastTicked = useRef<number>(-1);
+
+  const moveTo = useCallback((locationX: number) => {
+    const g = geo.current;
+    const ratio = Math.max(0, Math.min(1, (locationX - g.padL) / g.cw));
+    const next = g.startDay + Math.round(ratio * g.visibleN);
+    if (next !== lastTicked.current) {
+      lastTicked.current = next;
       haptic.selection();
     }
     setScrubIdx(next);
-  };
+  }, []);
 
   const pan = useRef(
     PanResponder.create({
+      // Claim a tap immediately…
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      // …but only steal an ongoing gesture from the ScrollView when it's
+      // clearly horizontal, so vertical scrolling still works over the chart.
+      onMoveShouldSetPanResponder: (_e, g) =>
+        Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
+      // Once we own it, don't let the ScrollView take it back mid-drag.
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: e => moveTo(e.nativeEvent.locationX),
       onPanResponderMove: e => moveTo(e.nativeEvent.locationX),
-      onPanResponderRelease: () => { lastTickedDay.current = -1; },
+      onPanResponderRelease: () => { lastTicked.current = -1; },
+      onPanResponderTerminate: () => { lastTicked.current = -1; },
     }),
   ).current;
 
-  const sIdeal = data.ideal[scrubIdx];
-  const sActual = data.actual[scrubIdx];
+  const sIdeal = data.ideal[activeIdx];
+  const sActual = data.actual[activeIdx];
   const ahead = sActual >= sIdeal;
   const diff = (sActual / sIdeal - 1) * 100;
 
+  // --- Calendar labels -------------------------------------------------------
+  const end = endDate ?? new Date();
+  const dateForDay = useCallback((idx: number) => {
+    const d = new Date(end);
+    d.setDate(d.getDate() - (safeDay - idx));
+    return d;
+  }, [end, safeDay]);
+
+  const fmtTick = useCallback((idx: number) => {
+    const d = dateForDay(idx);
+    // Long windows read better as months; short ones as "Jul 8".
+    if (visibleN > 120) return MONTHS[d.getMonth()];
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  }, [dateForDay, visibleN]);
+
+  // Sparse checkpoints: 3 for narrow/short windows, 4 when there's room.
+  const tickIdxs = useMemo(() => {
+    const count = cw > 300 && visibleN >= 12 ? 4 : 3;
+    const out: number[] = [];
+    for (let i = 0; i < count; i++) {
+      out.push(Math.round(startDay + (visibleN * i) / (count - 1)));
+    }
+    return Array.from(new Set(out));
+  }, [startDay, visibleN, cw]);
+
   // Y baselines worth showing
   const yTicks = [1.5, 2, 3, 4, 5].filter(v => v < maxV && v > minV);
+
+  // Scrub chip, clamped so it never overflows the SVG edges.
+  const chipW = 62;
+  const chipX = Math.max(padL, Math.min(padL + cw - chipW, xAt(activeIdx) - chipW / 2));
+  const scrubDate = dateForDay(activeIdx);
 
   return (
     <View style={{ marginTop: 6 }}>
       {/* Stat row */}
       <View style={styles.statRow}>
         <View style={styles.statCell}>
-          <Text style={styles.statLabel}>YOU</Text>
+          <Text style={styles.statLabel}>{isLive ? 'YOU · TODAY' : 'YOU'}</Text>
           <Text style={[styles.statVal, { color: colors.accent }]}>
             {sActual.toFixed(2)}
             <Text style={styles.statTimes}>×</Text>
@@ -202,6 +261,12 @@ export default function InteractiveCompoundChart({
             </G>
           ))}
 
+          {/* Sparse calendar checkpoints — faint vertical guides */}
+          {tickIdxs.map(i => (
+            <Line key={`g${i}`} x1={xAt(i)} x2={xAt(i)} y1={padT} y2={padT + ch}
+              stroke={colors.line} strokeWidth={0.5} opacity={0.35} />
+          ))}
+
           {/* Ideal target — dashed */}
           <Path d={idealPath} fill="none" stroke={colors.textTertiary}
             strokeWidth={1.4} strokeDasharray="3 4" strokeLinecap="round" />
@@ -213,33 +278,44 @@ export default function InteractiveCompoundChart({
           <Path d={actualPath} fill="none" stroke="url(#ic-line)" strokeWidth={2}
             strokeLinecap="round" strokeLinejoin="round" />
 
-          {/* Scrubber line */}
-          <Line x1={xAt(scrubIdx)} x2={xAt(scrubIdx)} y1={padT - 2} y2={padT + ch + 2}
-            stroke={colors.text} strokeWidth={1} strokeDasharray="2 2" opacity={0.4} />
+          {/* Scrubber line — only while actively scrubbing */}
+          {!isLive && (
+            <Line x1={xAt(activeIdx)} x2={xAt(activeIdx)} y1={padT} y2={padT + ch}
+              stroke={colors.text} strokeWidth={1} strokeDasharray="2 2" opacity={0.45} />
+          )}
 
-          {/* Scrubber day label */}
-          <Rect x={xAt(scrubIdx) - 22} y={padT - 16} width={44} height={14} rx={7}
-            fill={colors.bg} stroke={colors.line} strokeWidth={0.8} />
-          <SvgText x={xAt(scrubIdx)} y={padT - 6} textAnchor="middle"
-            fontSize={9} fontFamily={fonts.mono} fill={colors.textSecondary}>
-            D{String(scrubIdx).padStart(3, '0')}
-          </SvgText>
+          {/* Scrub chip — date + day, clamped inside the plot */}
+          {!isLive && (
+            <G>
+              <Rect x={chipX} y={2} width={chipW} height={16} rx={8}
+                fill={colors.bg} stroke={colors.line} strokeWidth={0.8} />
+              <SvgText x={chipX + chipW / 2} y={13} textAnchor="middle"
+                fontSize={9} fontFamily={fonts.mono} fill={colors.textSecondary}>
+                {MONTHS[scrubDate.getMonth()]} {scrubDate.getDate()} · D{activeIdx}
+              </SvgText>
+            </G>
+          )}
 
-          {/* Dots at scrubber */}
-          <Circle cx={xAt(scrubIdx)} cy={yAt(sIdeal)} r={3}
+          {/* Dots at the active index (defaults to today) */}
+          <Circle cx={xAt(activeIdx)} cy={yAt(sIdeal)} r={3}
             fill={colors.bg} stroke={colors.textTertiary} strokeWidth={1.4} />
-          <Circle cx={xAt(scrubIdx)} cy={yAt(sActual)} r={5}
+          {/* Soft halo so the live dot reads at a glance */}
+          <Circle cx={xAt(activeIdx)} cy={yAt(sActual)} r={9}
+            fill={colors.accent} opacity={0.16} />
+          <Circle cx={xAt(activeIdx)} cy={yAt(sActual)} r={5}
             fill={colors.accent} stroke={colors.bg} strokeWidth={2} />
 
-          {/* X axis labels — anchored to visible window */}
-          <SvgText x={padL} y={H - 6} fontSize={9} fontFamily={fonts.mono}
-            fill={colors.textTertiary}>D{startDay || 1}</SvgText>
-          <SvgText x={padL + cw / 2} y={H - 6} textAnchor="middle"
-            fontSize={9} fontFamily={fonts.mono} fill={colors.textTertiary}>
-            D{Math.round((startDay + endDay) / 2)}
-          </SvgText>
-          <SvgText x={padL + cw} y={H - 6} textAnchor="end"
-            fontSize={9} fontFamily={fonts.mono} fill={colors.textTertiary}>D{endDay}</SvgText>
+          {/* X axis — sparse calendar checkpoints */}
+          {tickIdxs.map((i, k) => {
+            const anchor = k === 0 ? 'start' : k === tickIdxs.length - 1 ? 'end' : 'middle';
+            const x = k === 0 ? padL : k === tickIdxs.length - 1 ? padL + cw : xAt(i);
+            return (
+              <SvgText key={`t${i}`} x={x} y={H - 7} textAnchor={anchor}
+                fontSize={9} fontFamily={fonts.mono} fill={colors.textTertiary}>
+                {fmtTick(i)}
+              </SvgText>
+            );
+          })}
         </Svg>
       </View>
 
@@ -251,7 +327,7 @@ export default function InteractiveCompoundChart({
               {RANGES.map(r => (
                 <TouchableOpacity
                   key={r.k}
-                  onPress={() => setRange(r.k)}
+                  onPress={() => { haptic.selection(); setRange(r.k); }}
                   activeOpacity={0.85}
                   style={[styles.rangeBtn, range === r.k && { backgroundColor: colors.accent }]}
                 >
@@ -276,6 +352,11 @@ export default function InteractiveCompoundChart({
               <View style={[styles.legendSwatchDashed]} />
               <Text style={styles.legendText}>1% / DAY TARGET</Text>
             </View>
+            {!isLive && (
+              <TouchableOpacity onPress={() => { haptic.light(); setScrubIdx(null); }} activeOpacity={0.8}>
+                <Text style={[styles.legendText, { color: colors.accent }]}>↺ TODAY</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </>
       )}
@@ -347,6 +428,7 @@ const styles = StyleSheet.create({
     gap: 14,
     marginTop: 6,
     paddingHorizontal: 2,
+    alignItems: 'center',
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendSwatch: { width: 14, height: 2, borderRadius: 1 },

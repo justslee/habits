@@ -24,38 +24,99 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/daily", tags=["daily"])
 
-# Elite athlete quotes — rotated daily
+# Daily rotating quotes — deliberately spread across the domains this app tracks
+# (markets, mathematics, ML, engineering, communication, strategy) plus craft,
+# philosophy, and a handful of athletes. Attributions are kept conservative:
+# widely-misattributed lines (e.g. the Aristotle "excellence is a habit" paraphrase,
+# which is Will Durant's) are credited to their actual source.
 QUOTES = [
-    ("I can accept failure. Everyone fails at something. But I can't accept not trying.", "Michael Jordan"),
-    ("Hard work beats talent when talent doesn't work hard.", "Tim Notke / Kevin Durant"),
-    ("The only way to prove you're a good sport is to lose.", "Ernie Banks"),
-    ("I'm not the next Usain Bolt or Michael Phelps. I'm the first Simone Biles.", "Simone Biles"),
-    ("Rest at the end, not in the middle.", "Kobe Bryant"),
-    ("Suffer the pain of discipline or suffer the pain of regret.", "Jim Rohn"),
-    ("Don't count the days, make the days count.", "Muhammad Ali"),
-    ("You miss 100% of the shots you don't take.", "Wayne Gretzky"),
-    ("The more difficult the victory, the greater the happiness in winning.", "Pelé"),
-    ("I hated every minute of training, but I said, don't quit.", "Muhammad Ali"),
-    ("It's not about the size of the dog in the fight, but the size of the fight in the dog.", "Archie Griffin"),
-    ("Pain is temporary. Quitting lasts forever.", "Lance Armstrong"),
-    ("Who's gonna carry the boats?", "David Goggins"),
-    ("Mamba mentality is about 4 a.m. workouts, trying to be better.", "Kobe Bryant"),
-    ("The successful warrior is the average man, with laser-like focus.", "Bruce Lee"),
-    ("I fear not the man who has practiced 10,000 kicks once, but the man who has practiced one kick 10,000 times.", "Bruce Lee"),
-    ("Excellence is not a singular act, but a habit.", "Shaquille O'Neal"),
-    ("Some people want it to happen, some wish it would happen, others make it happen.", "Michael Jordan"),
-    ("Gold medals aren't really made of gold. They're made of sweat, determination, and hard-to-find alloy called guts.", "Dan Gable"),
-    ("The fight is won or lost far away from witnesses — behind the lines, in the gym, and out there on the road.", "Muhammad Ali"),
-    ("I became a better investor because I am a businessman and a better businessman because I am an investor.", "Warren Buffett"),
-    ("In investing, what is comfortable is rarely profitable.", "Robert Arnott"),
+    # --- Mathematics & science ---
+    ("What I cannot create, I do not understand.", "Richard Feynman"),
+    ("The first principle is that you must not fool yourself — and you are the easiest person to fool.", "Richard Feynman"),
+    ("Study hard what interests you the most, in the most undisciplined, irreverent and original manner possible.", "Richard Feynman"),
+    ("In mathematics you don't understand things. You just get used to them.", "John von Neumann"),
+    ("There's no sense in being precise when you don't even know what you're talking about.", "John von Neumann"),
+    ("All models are wrong, but some are useful.", "George E. P. Box"),
+    ("Far better an approximate answer to the right question than an exact answer to the wrong question.", "John Tukey"),
+    ("The purpose of computing is insight, not numbers.", "Richard Hamming"),
+    ("If you don't work on important problems, it's not likely that you'll do important work.", "Richard Hamming"),
+    ("If you can't solve a problem, then there is an easier problem you can solve: find it.", "George Pólya"),
+    ("Information is the resolution of uncertainty.", "Claude Shannon"),
+    ("It is not knowledge, but the act of learning, that grants the greatest enjoyment.", "Carl Friedrich Gauss"),
+    ("Progress is obtained naturally and cumulatively as a consequence of hard work.", "Terence Tao"),
+    ("An equation for me has no meaning unless it expresses a thought of God.", "Srinivasa Ramanujan"),
+    ("Invert, always invert.", "Carl Jacobi"),
+
+    # --- Engineering & systems ---
+    ("Premature optimization is the root of all evil.", "Donald Knuth"),
+    ("Science is what we understand well enough to explain to a computer. Art is everything else we do.", "Donald Knuth"),
+    ("Simplicity is prerequisite for reliability.", "Edsger Dijkstra"),
+    ("Testing shows the presence, not the absence, of bugs.", "Edsger Dijkstra"),
+    ("The competent programmer is fully aware of the limited size of his own skull.", "Edsger Dijkstra"),
+    ("The most dangerous phrase in the language is: we've always done it this way.", "Grace Hopper"),
+    ("Talk is cheap. Show me the code.", "Linus Torvalds"),
+    ("The best way to predict the future is to invent it.", "Alan Kay"),
+    ("Real artists ship.", "Steve Jobs"),
+    ("Focus means saying no to the hundred other good ideas.", "Steve Jobs"),
+
+    # --- Markets & decision-making ---
     ("Risk comes from not knowing what you're doing.", "Warren Buffett"),
     ("Be fearful when others are greedy and greedy when others are fearful.", "Warren Buffett"),
+    ("In investing, what is comfortable is rarely profitable.", "Robert Arnott"),
+    ("Spend each day trying to be a little wiser than you were when you woke up.", "Charlie Munger"),
+    ("The big money is not in the buying and selling, but in the waiting.", "Charlie Munger"),
+    ("It's not whether you're right or wrong that's important, but how much money you make when you're right.", "George Soros"),
+    ("Pain plus reflection equals progress.", "Ray Dalio"),
+    ("You can't predict. You can prepare.", "Howard Marks"),
+    ("Know what you own, and know why you own it.", "Peter Lynch"),
+    ("Be guided by beauty.", "Jim Simons"),
+    ("The power to hurt is bargaining power. To exploit it is diplomacy.", "Thomas Schelling"),
+    ("Play long-term games with long-term people.", "Naval Ravikant"),
+
+    # --- Communication & performance ---
+    ("It usually takes me more than three weeks to prepare a good impromptu speech.", "Mark Twain"),
+    ("People will forget what you said and what you did, but never how you made them feel.", "Maya Angelou"),
+    ("If you can't explain it simply, you don't understand it well enough.", "Attributed to Albert Einstein"),
+    ("The first draft of anything is garbage.", "Ernest Hemingway"),
+    ("Your taste is why your work disappoints you. Close the gap by doing a huge volume of work.", "Ira Glass"),
+
+    # --- Craft & art ---
+    ("Inspiration exists, but it has to find you working.", "Pablo Picasso"),
+    ("Do not fear mistakes. There are none.", "Miles Davis"),
+    ("You can play a shoestring if you're sincere.", "John Coltrane"),
+    ("The best art divides the audience.", "Rick Rubin"),
+
+    # --- Philosophy & discipline ---
+    ("We suffer more often in imagination than in reality.", "Seneca"),
+    ("It is not that we have a short time to live, but that we waste a lot of it.", "Seneca"),
+    ("You have power over your mind — not outside events. Realize this, and you will find strength.", "Marcus Aurelius"),
+    ("The impediment to action advances action. What stands in the way becomes the way.", "Marcus Aurelius"),
+    ("Waste no more time arguing what a good man should be. Be one.", "Marcus Aurelius"),
+    ("It is impossible for a man to learn what he thinks he already knows.", "Epictetus"),
+    ("We are what we repeatedly do. Excellence, then, is not an act, but a habit.", "Will Durant, on Aristotle"),
+    ("It is not enough to be busy. The question is: what are we busy about?", "Henry David Thoreau"),
+    ("Suffer the pain of discipline or suffer the pain of regret.", "Jim Rohn"),
+
+    # --- Athletes ---
+    ("I can accept failure. Everyone fails at something. But I can't accept not trying.", "Michael Jordan"),
+    ("Rest at the end, not in the middle.", "Kobe Bryant"),
+    ("I fear not the man who has practiced 10,000 kicks once, but the man who has practiced one kick 10,000 times.", "Bruce Lee"),
+    ("The fight is won or lost far away from witnesses — behind the lines, in the gym, and out there on the road.", "Muhammad Ali"),
+    ("Who's gonna carry the boats?", "David Goggins"),
+    ("I'm not the next Usain Bolt or Michael Phelps. I'm the first Simone Biles.", "Simone Biles"),
 ]
 
 
 def _get_daily_quote() -> tuple:
-    """Get a deterministic daily quote based on the date."""
-    day_index = date.today().toordinal() % len(QUOTES)
+    """Get a deterministic daily quote based on the date.
+
+    QUOTES is grouped by domain, so walking it one-per-day would serve a fortnight
+    of mathematicians followed by a week of engineers. Stepping by a stride that is
+    coprime with the list length scatters consecutive days across domains while
+    still visiting every quote exactly once per cycle.
+    """
+    stride = 23  # coprime with len(QUOTES); any coprime stride gives a full cycle
+    day_index = (date.today().toordinal() * stride) % len(QUOTES)
     return QUOTES[day_index]
 
 
