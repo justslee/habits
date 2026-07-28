@@ -9,6 +9,7 @@ import {
   Easing,
   Keyboard,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -40,11 +41,13 @@ export default function BottomSheet({
 }: Props) {
   const slide = useRef(new Animated.Value(1)).current;
   const fade = useRef(new Animated.Value(0)).current;
+  const drag = useRef(new Animated.Value(0)).current; // extra offset from the swipe-down gesture
   const screenH = Dimensions.get('window').height;
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (visible) {
+      drag.setValue(0);
       Animated.parallel([
         Animated.timing(slide, { toValue: 0, duration: 320, easing: Easing.bezier(0.2, 0.7, 0.2, 1), useNativeDriver: true }),
         Animated.timing(fade, { toValue: 1, duration: 200, useNativeDriver: true }),
@@ -52,8 +55,26 @@ export default function BottomSheet({
     } else {
       slide.setValue(1);
       fade.setValue(0);
+      drag.setValue(0);
     }
-  }, [visible, slide, fade]);
+  }, [visible, slide, fade, drag]);
+
+  // Swipe-down-to-dismiss, driven from the grab handle so it never fights the
+  // inner ScrollView. Drag past ~110px or flick down and the sheet closes.
+  const dragDismiss = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_e, g) => g.dy > 2,
+      onPanResponderMove: (_e, g) => { if (g.dy > 0) drag.setValue(g.dy); },
+      onPanResponderRelease: (_e, g) => {
+        if (g.dy > 110 || g.vy > 0.6) {
+          Animated.timing(drag, { toValue: screenH, duration: 200, useNativeDriver: true }).start(() => onClose());
+        } else {
+          Animated.spring(drag, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 200 }).start();
+        }
+      },
+    }),
+  ).current;
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
@@ -78,11 +99,18 @@ export default function BottomSheet({
               styles.sheet,
               {
                 maxHeight: screenH * maxHeightPct,
-                transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [0, screenH] }) }],
+                transform: [{
+                  translateY: Animated.add(
+                    slide.interpolate({ inputRange: [0, 1], outputRange: [0, screenH] }),
+                    drag,
+                  ),
+                }],
               },
             ]}
           >
-            <View style={styles.handle} />
+            <View style={styles.handleZone} {...dragDismiss.panHandlers}>
+              <View style={styles.handle} />
+            </View>
             <ScrollView
               ref={scrollRef}
               contentContainerStyle={styles.content}
@@ -118,13 +146,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
+  handleZone: {
+    // Wide, tall grab area so the swipe-down is easy to catch.
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    paddingTop: 6,
+    paddingBottom: spacing.md,
+    marginTop: -spacing.sm,
+  },
   handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
+    width: 40,
+    height: 5,
+    borderRadius: 3,
     backgroundColor: colors.line,
-    alignSelf: 'center',
-    marginBottom: spacing.md,
   },
   content: {
     paddingBottom: 100,

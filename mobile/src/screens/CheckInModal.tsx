@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, Animated, Dimensions, Platform, KeyboardAvoidingView, Alert,
+  Modal, Animated, Dimensions, Platform, KeyboardAvoidingView, Alert, PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createEntry, API_URL, apiHeaders } from '../api/client';
@@ -155,6 +155,21 @@ export default function CheckInModal({ visible, onClose }: Props) {
       setTimeout(resetState, 50);
     });
   };
+
+  // Swipe-down-to-dismiss from the grab handle (slideAnim is the sheet's translateY).
+  const dragResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => g.dy > 2 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderMove: (_e, g) => { if (g.dy > 0) slideAnim.setValue(g.dy); },
+      onPanResponderRelease: (_e, g) => {
+        if (g.dy > 110 || g.vy > 0.6) {
+          handleClose();
+        } else {
+          Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
+        }
+      },
+    }),
+  ).current;
 
   const handleSubmit = async () => {
     if (!takeaway.trim()) {
@@ -445,8 +460,8 @@ export default function CheckInModal({ visible, onClose }: Props) {
 
       {/* Bottom sheet */}
       <Animated.View style={[m.sheet, { transform: [{ translateY: slideAnim }] }]}>
-        {/* Drag handle */}
-        <View style={m.dragHandleRow}>
+        {/* Drag handle — swipe down to dismiss */}
+        <View style={m.dragHandleRow} {...dragResponder.panHandlers}>
           <View style={m.dragHandle} />
         </View>
 

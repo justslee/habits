@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
-import { chatWithCoach } from '../api/client';
+import { chatWithCoach, coachChat } from '../api/client';
 import { colors, fonts } from '../theme';
 
 interface Message {
@@ -67,6 +67,8 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    // Conversation so far (before this turn) — passed to the general coach for context.
+    const history = messages.map(m => ({ role: (m.from === 'me' ? 'user' : 'coach') as 'user' | 'coach', text: m.text }));
     setMessages(m => [...m, { from: 'me', text: trimmed }]);
     setDraft('');
     setThinking(true);
@@ -74,13 +76,15 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
     try {
       let reply: string;
       if (workoutSessionId != null) {
+        // Live workout context → the workout-scoped chat.
         const res = await chatWithCoach(workoutSessionId, trimmed);
         reply = (res as { reply?: string; message?: string }).reply
              ?? (res as { message?: string }).message
              ?? fallbackFor(trimmed);
       } else {
-        await new Promise(r => setTimeout(r, 700));
-        reply = fallbackFor(trimmed);
+        // General Train-tab coach → real LLM endpoint (was canned before).
+        const res = await coachChat(trimmed, history);
+        reply = res.reply || fallbackFor(trimmed);
       }
       setMessages(m => [...m, { from: 'coach', text: reply }]);
     } catch {

@@ -323,6 +323,19 @@ export function getTodayRun(): Promise<TodayRunData> {
   return request('/api/v1/runs/today-plan');
 }
 
+// --- General coach chat (Train tab) ---
+
+export function coachChat(
+  message: string,
+  history: { role: 'user' | 'coach'; text: string }[] = [],
+): Promise<{ reply: string }> {
+  return request('/api/v1/coach/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, history }),
+    timeoutMs: 60_000,
+  });
+}
+
 export function getActivePlan(): Promise<TrainingPlanData | null> {
   return request('/api/v1/runs/plans/active');
 }
