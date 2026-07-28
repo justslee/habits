@@ -703,16 +703,26 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
         except Exception as e:
             logger.error(f"Sunday weekly review generation failed: {e}")
 
+    # The client renders `results` as a list of cards and maps over it. The
+    # end-of-day evaluation is a single holistic verdict, so return it as a
+    # one-element array in the EvalResult shape the client expects. (This shape
+    # mismatch — `result` object vs `results` array — was masked while
+    # evaluate_overall_day always failed into the [] fallback; once it started
+    # succeeding it crashed the app on `results.map`.)
     return {
         "evaluated": 1,
-        "result": {
-            "depth_score": evaluation.depth_score,
-            "one_percent_better": evaluation.one_percent_better,
-            "verdict_explanation": evaluation.verdict_explanation,
-            "commentary": evaluation.commentary,
-            "pillars_touched": pillars_touched,
-            "total_time_minutes": total_minutes,
-        },
+        "results": [
+            {
+                "pillar_id": 0,
+                "pillar_name": ", ".join(str(p) for p in pillars_touched) if pillars_touched else "Today",
+                "depth_score": evaluation.depth_score,
+                "relevance_score": evaluation.relevance_score,
+                "one_percent_better": evaluation.one_percent_better,
+                "verdict_explanation": evaluation.verdict_explanation,
+                "commentary": evaluation.commentary,
+                "time_invested_minutes": total_minutes,
+            }
+        ],
         "reflection_applied": reflection is not None,
         "weekly_review": weekly_review,
     }
