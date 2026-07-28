@@ -7,10 +7,9 @@ ConceptLink model — cross-pillar concept linking (Phase 2, Part 4).
 Links concepts across different pillars to show shared skills.
 """
 
-from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin

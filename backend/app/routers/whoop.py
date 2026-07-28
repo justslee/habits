@@ -22,11 +22,11 @@ def _get_user(db: Session) -> User:
 async def get_whoop_data(db: Session = Depends(get_db)):
     """Get comprehensive Whoop data: recovery, sleep, strain, workout, HR zones."""
     from app.services.whoop import fetch_whoop_data, cache_whoop_snapshot, WhoopUnavailableError
+    user = _get_user(db)
     try:
-        data = await fetch_whoop_data()
+        data = await fetch_whoop_data(user.id, db)
         # Cache snapshot for today
         try:
-            user = _get_user(db)
             cache_whoop_snapshot(user.id, data, db)
         except Exception:
             pass  # Don't fail the response if caching fails

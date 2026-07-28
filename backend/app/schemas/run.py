@@ -28,7 +28,6 @@ class RunSessionCreate(BaseModel):
     distance_miles: float
     duration_seconds: int
     elevation_gain_ft: Optional[float] = None
-    gps_polyline: Optional[str] = None
     run_type: Optional[str] = None
     weather: Optional[str] = None
     rpe: Optional[int] = None

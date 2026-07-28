@@ -6,7 +6,6 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -70,7 +69,7 @@ def _run_to_response(run: RunSession) -> RunSessionResponse:
 
 @router.post("/", response_model=RunSessionResponse)
 def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
-    """Save a completed run with GPS data and splits."""
+    """Save a manually-logged completed run with optional per-mile splits."""
     user = db.query(User).first()
     if not user:
         raise HTTPException(status_code=404, detail="No user found")
@@ -89,13 +88,24 @@ def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
         duration_seconds=payload.duration_seconds,
         avg_pace_seconds=avg_pace,
         elevation_gain_ft=payload.elevation_gain_ft,
-        gps_polyline=payload.gps_polyline,
         run_type=payload.run_type,
         weather=payload.weather,
         rpe=payload.rpe,
         notes=payload.notes,
         status="completed",
     )
+    # Attach Whoop context from the day's cached snapshot, mirroring what workout
+    # sessions store. Read-only and cache-based, so a logged run never depends on a
+    # live Whoop call (or on Whoop being connected at all).
+    try:
+        from app.services.whoop import get_whoop_snapshot_by_date
+        snap = get_whoop_snapshot_by_date(user.id, run_date, db)
+        if snap:
+            run.whoop_recovery_score = snap.get("recovery_score")
+            run.whoop_strain = snap.get("strain_score")
+    except Exception:
+        pass  # No Whoop data — runs log fine without it
+
     db.add(run)
     db.flush()
 
@@ -126,6 +136,13 @@ def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
             PlannedRun.planned_date == run_date,
             PlannedRun.status == "upcoming",
         ).first()
+
+        # Back-link the run to the plan it fulfilled. Without this, run.planned_run_id
+        # stays NULL forever, which silently disables the plan-vs-actual comparison in
+        # generate_feedback() and the pace-trend join in run_plan_adapter.
+        if planned:
+            run.planned_run_id = planned.id
+            db.commit()
 
         from app.services.run_plan_adapter import adapt_plan_after_run
         adapt_plan_after_run(user.id, run, planned, db)
@@ -337,7 +354,7 @@ async def get_today_plan(db: Session = Depends(get_db)):
     recovery_score = None  # type: Optional[float]
     try:
         from app.services.whoop import fetch_whoop_data
-        whoop_data = await fetch_whoop_data()
+        whoop_data = await fetch_whoop_data(user.id, db)
         recovery_score = whoop_data.get("recovery_score")
 
         if recovery_score is not None and recovery_score < 33:

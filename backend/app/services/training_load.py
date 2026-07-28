@@ -113,15 +113,6 @@ def get_training_loads(
     }
 
 
-def should_insert_recovery_week(user_id: int, db: Session) -> bool:
-    """True if A:C ratio is above caution threshold (> 1.3)."""
-    return get_training_loads(user_id, db)["ac_ratio"] > 1.3
-
-
-# ---------------------------------------------------------------------------
-# Internals
-# ---------------------------------------------------------------------------
-
 def _zone_for_ratio(ratio: float) -> str:
     for name, lo, hi in LOAD_ZONES:
         if lo <= ratio < hi:

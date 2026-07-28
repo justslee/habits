@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.models.coaching import CoachingObservation
 from app.models.run import PlannedRun, RunSession, TrainingPlan
-from app.services.training_load import calculate_run_load, get_training_loads
+from app.services.training_load import get_training_loads
 
 logger = logging.getLogger(__name__)
 

@@ -15,13 +15,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getPillarConcepts, seedPillarConcepts, updateConcept, addConcept, deleteConcept,
-  getConceptLinks, getCrossPillarLinks, createConceptLink,
+  getCrossPillarLinks,
   ConceptTreeData, ConceptData, TierGroup, ConceptLinkData,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
 import ConceptGraph from '../components/ConceptGraph';
 import { colors, spacing, typography, radius, fonts, cardStyle, PILLAR_COLORS } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
+import KeyboardAvoider from '../components/KeyboardAvoider';
 import { Skeleton, SkeletonRow } from '../components/Skeleton';
 
 const STATUS_CYCLE: ConceptData['status'][] = ['not_started', 'in_progress', 'mastered'];
@@ -226,6 +227,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
 
   return (
     <ScreenBackground>
+    <KeyboardAvoider offset={90}>
     <ScrollView
       style={st.scroll}
       contentContainerStyle={[st.container, { paddingTop: spacing.sm }]}
@@ -401,6 +403,7 @@ export default function PillarDetailScreen({ route, navigation }: any) {
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    </KeyboardAvoider>
     </ScreenBackground>
   );
 }

@@ -10,7 +10,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  
 } from 'react-native';
 import { colors, spacing, typography, radius } from '../theme';
 

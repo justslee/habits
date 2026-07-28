@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, radius } from '../theme';
 
 interface Props {
   /** Per-day intensity values (0–4). The last cell is "today" and gets an outline. */

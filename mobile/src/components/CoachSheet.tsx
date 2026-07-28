@@ -19,7 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import { chatWithCoach } from '../api/client';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts } from '../theme';
 
 interface Message {
   from: 'coach' | 'me';
@@ -91,7 +91,7 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose}>
+    <BottomSheet visible={visible} onClose={onClose} stickToBottom>
       {/* Header */}
       <View style={styles.headerRow}>
         <View style={styles.avatar}><Text style={styles.avatarText}>C</Text></View>

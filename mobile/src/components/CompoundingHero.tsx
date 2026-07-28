@@ -24,6 +24,8 @@ interface Props {
   titleLead?: string;
   titleAccent?: string;
   titleTail?: string;
+  /** Fired while the chart is being scrubbed — lets a parent ScrollView lock. */
+  onScrubbingChange?: (active: boolean) => void;
 }
 
 export default function CompoundingHero({
@@ -33,6 +35,7 @@ export default function CompoundingHero({
   titleLead = 'Get ',
   titleAccent = '1% better',
   titleTail = '\nevery single day.',
+  onScrubbingChange,
 }: Props) {
   const safeDay = Math.max(1, Math.round(day));
   const dayLabel = `DAY · ${String(safeDay).padStart(3, '0')}`;
@@ -73,7 +76,11 @@ export default function CompoundingHero({
       </Text>
 
       {/* Interactive compound chart */}
-      <InteractiveCompoundChart day={safeDay} actualSeries={actualSeries} />
+      <InteractiveCompoundChart
+        day={safeDay}
+        actualSeries={actualSeries}
+        onScrubbingChange={onScrubbingChange}
+      />
     </View>
   );
 }

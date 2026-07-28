@@ -15,10 +15,8 @@ from app.models.workout import ExerciseProfile
 from app.services.llm import SONNET, structured_output
 from app.services.progressive_overload import (
     MACRO_BLOCKS,
-    calculate_warmup_sets,
     get_next_session_targets,
 )
-from app.services.whoop import get_recovery_adjustment
 
 logger = logging.getLogger(__name__)
 

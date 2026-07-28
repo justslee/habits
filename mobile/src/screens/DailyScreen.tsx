@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { haptic } from '../utils/haptics';
@@ -22,9 +23,9 @@ import UndoToast from '../components/UndoToast';
 import ScreenBackground from '../components/ScreenBackground';
 import { usePressScale } from '../hooks/usePressScale';
 import CheckInModal from './CheckInModal';
+import BottomSheet from '../components/BottomSheet';
 import CompoundingHero from '../components/CompoundingHero';
 import DailyQuoteCard from '../components/DailyQuoteCard';
-import StreakStrip from '../components/StreakStrip';
 import DailyReviewIsland from '../components/DailyReviewIsland';
 import Topbar from '../components/Topbar';
 
@@ -92,6 +93,12 @@ export default function DailyScreen() {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // True while the 1% chart is being scrubbed — freezes vertical scrolling so the
+  // horizontal drag can't drag the page with it.
+  const [chartScrubbing, setChartScrubbing] = useState(false);
+  // True while a todo is being drag-reordered — freezes the page scroll so the
+  // vertical drag doesn't scroll the whole screen.
+  const [reordering, setReordering] = useState(false);
   const [newTodoText, setNewTodoText] = useState('');
   const [addingTodo, setAddingTodo] = useState(false);
   const [showAddHabit, setShowAddHabit] = useState(false);
@@ -108,6 +115,10 @@ export default function DailyScreen() {
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
   const [editText, setEditText] = useState('');
   const [editMinutes, setEditMinutes] = useState<number | null>(null);
+  const [editPillarId, setEditPillarId] = useState<number | null>(null);
+  // Pillar options for the edit picker — sourced from dashboard stats (which already
+  // returns pillar_id + pillar_name), so no extra endpoint is needed.
+  const [pillars, setPillars] = useState<{ id: number; name: string }[]>([]);
 
   // Undo toast state
   const [undoToast, setUndoToast] = useState<{
@@ -172,6 +183,23 @@ export default function DailyScreen() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Pillar options for the edit picker.
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await fetch(`${API_URL}/api/v1/dashboard/stats`, { headers: apiHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const list = (data?.pillar_breakdown ?? [])
+          .filter((p: any) => p?.pillar_id != null && p?.pillar_name)
+          .map((p: any) => ({ id: p.pillar_id, name: p.pillar_name }));
+        setPillars(list);
+      } catch (err) {
+        console.warn('Failed to load pillars:', err);
+      }
+    })();
+  }, []);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchData();
@@ -179,6 +207,24 @@ export default function DailyScreen() {
   }, [fetchData]);
 
   // ── Todo actions ─────────────────────────────────────────────────────────────
+
+  const persistTodoOrder = useCallback(async (ordered: Todo[]) => {
+    // Optimistic: the list already shows the new order; persist it. Reverts on failure.
+    const prev = todos;
+    setTodos(ordered);
+    try {
+      const resp = await fetch(`${API_URL}/api/v1/daily/todos/reorder`, {
+        method: 'PUT',
+        headers: apiHeaders(),
+        body: JSON.stringify({ ids: ordered.map(t => t.id) }),
+      });
+      if (!resp.ok) throw new Error(`reorder ${resp.status}`);
+    } catch (err) {
+      console.warn('Failed to reorder todos:', err);
+      setTodos(prev);
+    }
+  }, [todos]);
+
 
   const addTodo = async () => {
     const text = newTodoText.trim();
@@ -302,7 +348,7 @@ export default function DailyScreen() {
         body: JSON.stringify({
           text,
           estimated_minutes: editMinutes,
-          pillar_id: editingTodo.pillar_id,
+          pillar_id: editPillarId,
           sort_order: editingTodo.sort_order,
         }),
       });
@@ -364,6 +410,9 @@ export default function DailyScreen() {
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
             }
             keyboardShouldPersistTaps="handled"
+            // Hard-lock vertical scrolling while the 1% chart is being scrubbed
+            // or a todo is being dragged, so neither drag moves the page.
+            scrollEnabled={!chartScrubbing && !reordering}
           >
             {/* ── Topbar with brand mark + serif date + avatar ── */}
             <View style={{ marginHorizontal: -spacing.md }}>
@@ -394,7 +443,7 @@ export default function DailyScreen() {
             )}
 
             {/* ── Compounding hero (interactive) ── */}
-            <CompoundingHero day={heroDay} />
+            <CompoundingHero day={heroDay} onScrubbingChange={setChartScrubbing} />
 
             {/* ── HABITS section — canvas: serif italic title + mono "N/M DONE · 🔥 STREAKING" ── */}
             <View style={st.sectionRow}>
@@ -499,24 +548,37 @@ export default function DailyScreen() {
             <View style={st.sectionRow}>
               <Text style={st.sectionTitleSerif}>ToDo</Text>
               <Text style={st.sectionMore}>
-                {todos.length > 0 ? 'SWIPE TO DELETE · TAP TO EDIT' : `${todosComplete}/${todos.length}`}
+                {todos.length > 0 ? 'HOLD ⠿ TO REORDER · SWIPE TO DELETE' : `${todosComplete}/${todos.length}`}
               </Text>
             </View>
 
-            {todos.map(todo => (
-              <TodoRowCard
-                key={todo.id}
-                todo={todo}
-                onToggle={() => toggleTodo(todo.id)}
-                onDelete={() => deleteTodo(todo.id, todo.text)}
-                onLongPress={() => {
-                  setEditingTodo(todo);
-                  setEditText(todo.text);
-                  setEditMinutes(todo.estimated_minutes);
-                  haptic.medium();
-                }}
-              />
-            ))}
+            <DraggableFlatList
+              data={todos}
+              keyExtractor={(t) => String(t.id)}
+              scrollEnabled={false}
+              activationDistance={12}
+              containerStyle={{ overflow: 'visible' }}
+              onDragBegin={() => { setReordering(true); haptic.medium(); }}
+              onDragEnd={({ data }) => { setReordering(false); persistTodoOrder(data); }}
+              renderItem={({ item, drag, isActive }) => (
+                <ScaleDecorator activeScale={1.03}>
+                  <TodoRowCard
+                    todo={item}
+                    drag={drag}
+                    isActive={isActive}
+                    onToggle={() => toggleTodo(item.id)}
+                    onDelete={() => deleteTodo(item.id, item.text)}
+                    onLongPress={() => {
+                      setEditingTodo(item);
+                      setEditText(item.text);
+                      setEditMinutes(item.estimated_minutes);
+                      setEditPillarId(item.pillar_id ?? null);
+                      haptic.medium();
+                    }}
+                  />
+                </ScaleDecorator>
+              )}
+            />
 
             {/* Quick add task */}
             <View style={st.addRow}>
@@ -578,80 +640,92 @@ export default function DailyScreen() {
             <View style={{ height: 48 }} />
           </ScrollView>
 
-          {/* ── Edit todo modal ── */}
-          <Modal
-            visible={editingTodo !== null}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setEditingTodo(null)}
-          >
-            <KeyboardAvoidingView
-              style={st.modalOverlay}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          {/* ── Edit todo sheet ── */}
+          <BottomSheet visible={editingTodo !== null} onClose={() => setEditingTodo(null)} maxHeightPct={0.82}>
+            <Text style={st.editEyebrow}>EDIT · TASK</Text>
+            <Text style={st.editTitle}>Refine the task</Text>
+
+            <TextInput
+              style={st.editInput}
+              value={editText}
+              onChangeText={setEditText}
+              placeholder="What needs doing?"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+            />
+
+            <View style={st.editSectionHead}>
+              <Ionicons name="time-outline" size={13} color={colors.textTertiary} />
+              <Text style={st.editLabel}>TIME ESTIMATE</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={st.chipRow}
             >
-              <TouchableOpacity
-                style={st.modalOverlay}
-                activeOpacity={1}
-                onPress={() => setEditingTodo(null)}
-              >
-                <TouchableOpacity activeOpacity={1} style={st.modalCard}>
-                  <Text style={st.modalTitle}>Edit Task</Text>
+              {TIME_ESTIMATES.map(min => {
+                const active = editMinutes === min;
+                return (
+                  <TouchableOpacity
+                    key={min}
+                    style={[st.chip, active && st.chipActiveAccent]}
+                    onPress={() => { setEditMinutes(active ? null : min); haptic.selection(); }}
+                  >
+                    <Text style={[st.chipText, active && st.chipTextOnAccent]}>{formatTimePill(min)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-                  <TextInput
-                    style={st.modalInput}
-                    value={editText}
-                    onChangeText={setEditText}
-                    placeholder="Task text..."
-                    placeholderTextColor={colors.textTertiary}
-                    autoFocus
-                    multiline
-                  />
+            {/* Pillar picker — auto-classification is a suggestion, always overridable. */}
+            <View style={st.editSectionHead}>
+              <Ionicons name="layers-outline" size={13} color={colors.textTertiary} />
+              <Text style={st.editLabel}>PILLAR</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={st.chipRow}
+            >
+              {(() => {
+                const active = editPillarId == null;
+                return (
+                  <TouchableOpacity
+                    style={[st.chip, active && { backgroundColor: colors.textTertiary + '22', borderColor: colors.textSecondary }]}
+                    onPress={() => { setEditPillarId(null); haptic.selection(); }}
+                  >
+                    <View style={[st.chipDot, { backgroundColor: colors.textSecondary }]} />
+                    <Text style={[st.chipText, active && { color: colors.text }]}>Life</Text>
+                  </TouchableOpacity>
+                );
+              })()}
+              {pillars.map(p => {
+                const pColor = PILLAR_COLORS_BY_NAME[p.name] || colors.accent;
+                const active = editPillarId === p.id;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[st.chip, active && { backgroundColor: pColor + '22', borderColor: pColor }]}
+                    onPress={() => { setEditPillarId(p.id); haptic.selection(); }}
+                  >
+                    <View style={[st.chipDot, { backgroundColor: pColor }]} />
+                    <Text style={[st.chipText, active && { color: pColor }]} numberOfLines={1}>{p.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-                  <Text style={st.modalLabel}>TIME ESTIMATE</Text>
-                  <View style={st.timeEstRow}>
-                    <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
-                    {TIME_ESTIMATES.map(min => (
-                      <TouchableOpacity
-                        key={min}
-                        style={[st.timePill, editMinutes === min && st.timePillActive]}
-                        onPress={() => { setEditMinutes(editMinutes === min ? null : min); haptic.selection(); }}
-                      >
-                        <Text style={[st.timePillText, editMinutes === min && st.timePillTextActive]}>
-                          {formatTimePill(min)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  {editingTodo?.pillar_name && (() => {
-                    const pColor = PILLAR_COLORS_BY_NAME[editingTodo.pillar_name!] || colors.accent;
-                    return (
-                      <View style={[st.pillarTag, {
-                        backgroundColor: pColor + '15',
-                        borderColor: pColor + '30',
-                        marginTop: spacing.sm,
-                        marginBottom: spacing.sm,
-                      }]}>
-                        <View style={[st.pillarDot, { backgroundColor: pColor }]} />
-                        <Text style={[st.pillarTagText, { color: pColor }]}>
-                          {editingTodo.pillar_name}
-                        </Text>
-                      </View>
-                    );
-                  })()}
-
-                  <View style={st.modalActions}>
-                    <TouchableOpacity style={st.modalCancelBtn} onPress={() => setEditingTodo(null)}>
-                      <Text style={st.modalCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={st.modalSaveBtn} onPress={saveEditTodo}>
-                      <Text style={st.modalSaveText}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
+            <View style={st.editActions}>
+              <TouchableOpacity style={st.editCancelBtn} onPress={() => { haptic.light(); setEditingTodo(null); }} activeOpacity={0.85}>
+                <Text style={st.editCancelText}>Cancel</Text>
               </TouchableOpacity>
-            </KeyboardAvoidingView>
-          </Modal>
+              <TouchableOpacity style={st.editSaveBtn} onPress={saveEditTodo} activeOpacity={0.85}>
+                <Text style={st.editSaveText}>Save changes</Text>
+              </TouchableOpacity>
+            </View>
+          </BottomSheet>
 
           <UndoToast
             visible={undoToast.visible}
@@ -765,8 +839,9 @@ function habitCadenceLabel(h: Habit): string {
 
 // ── TodoRowCard ─── canvas card: dot · serif name · mono meta · 28px check
 
-function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
+function TodoRowCard({ todo, onToggle, onDelete, onLongPress, drag, isActive }: {
   todo: Todo; onToggle: () => void; onDelete: () => void; onLongPress: () => void;
+  drag?: () => void; isActive?: boolean;
 }) {
   const { animStyle, onPressIn, onPressOut } = usePressScale(0.985);
   const pillarColor = todo.pillar_name
@@ -778,12 +853,24 @@ function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
       <Animated.View style={animStyle}>
         <TouchableOpacity
           activeOpacity={0.85}
-          style={[st.habitCard, todo.completed && st.habitCardDone]}
+          style={[st.habitCard, todo.completed && st.habitCardDone, isActive && st.habitCardDragging]}
           onPress={onToggle}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
           onLongPress={onLongPress}
         >
+          {/* Drag handle — press & hold to reorder (keeps tap=complete, long-press=edit) */}
+          {drag && (
+            <TouchableOpacity
+              onLongPress={drag}
+              delayLongPress={140}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              style={st.dragHandle}
+            >
+              <Ionicons name="reorder-three-outline" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+          )}
+
           {/* 38px dot/icon box */}
           <View style={[
             st.habitIconBox,
@@ -801,14 +888,12 @@ function TodoRowCard({ todo, onToggle, onDelete, onLongPress }: {
               {todo.text}
             </Text>
             <View style={st.habitSubRow}>
-              {todo.pillar_name && (
-                <>
-                  <Text style={[st.habitSubText, { color: pillarColor }]}>
-                    {todo.pillar_name}
-                  </Text>
-                  <Text style={st.habitSubSep}>·</Text>
-                </>
-              )}
+              {/* Untagged todos are "Life" — errands and general tasks that don't
+                  ladder up to a learning pillar. */}
+              <Text style={[st.habitSubText, { color: pillarColor }]}>
+                {todo.pillar_name || 'Life'}
+              </Text>
+              <Text style={st.habitSubSep}>·</Text>
               {todo.estimated_minutes != null && todo.estimated_minutes > 0 && (
                 <>
                   <Text style={st.habitSubText}>{todo.estimated_minutes}m</Text>
@@ -982,6 +1067,16 @@ const st = StyleSheet.create({
     marginBottom: 10,
     position: 'relative',
     overflow: 'hidden',
+  },
+  habitCardDragging: {
+    borderColor: colors.accent,
+    backgroundColor: colors.cardElevated,
+  },
+  dragHandle: {
+    paddingRight: 2,
+    marginLeft: -4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   habitCardDone: {
     backgroundColor: colors.surface2,
@@ -1175,13 +1270,16 @@ const st = StyleSheet.create({
   addBtn: { marginLeft: spacing.sm },
 
   // ── Time estimate pills ──
+  timeEstScroll: {
+    marginBottom: spacing.md,
+    marginTop: -spacing.xs,
+  },
   timeEstRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.md,
-    marginTop: -spacing.xs,
     paddingHorizontal: spacing.xs,
+    paddingRight: spacing.lg,
   },
   timePill: {
     paddingHorizontal: spacing.md,
@@ -1266,64 +1364,118 @@ const st = StyleSheet.create({
   wrapUpSub: { ...typography.caption, color: colors.textSecondary },
 
   // ── Edit todo modal ──
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  // ── Edit-task sheet ──────────────────────────────────────────────────────
+  editEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 2.2,
   },
-  modalCard: {
-    backgroundColor: colors.cardElevated,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    width: '88%',
-    maxWidth: 400,
-  },
-  modalTitle: {
-    ...typography.bodyBold,
+  editTitle: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 26,
     color: colors.text,
-    fontSize: 18,
-    marginBottom: spacing.md,
+    letterSpacing: -0.6,
+    marginTop: 4,
+    marginBottom: spacing.lg,
   },
-  modalInput: {
+  editInput: {
     backgroundColor: colors.input,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    fontSize: 15,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    lineHeight: 22,
     color: colors.text,
-    minHeight: 48,
-    maxHeight: 120,
-    marginBottom: spacing.md,
+    minHeight: 64,
+    maxHeight: 140,
     textAlignVertical: 'top',
   },
-  modalLabel: {
-    ...typography.micro,
-    color: colors.textTertiary,
-    marginBottom: spacing.sm,
-    letterSpacing: 1,
-  },
-  modalActions: {
+  editSectionHead: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
+    alignItems: 'center',
+    gap: 6,
     marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
-  modalCancelBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
+  editLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 1.8,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: spacing.lg,
+    paddingVertical: 2,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
   },
-  modalCancelText: { ...typography.bodyBold, color: colors.textSecondary, fontSize: 14 },
-  modalSaveBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.lg,
+  chipActiveAccent: {
     backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
-  modalSaveText: { ...typography.bodyBold, color: '#fff', fontSize: 14 },
+  chipText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 0.6,
+    color: colors.textSecondary,
+  },
+  chipTextOnAccent: {
+    color: colors.bg,
+    fontWeight: '700',
+  },
+  chipDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+  },
+  editCancelBtn: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+  },
+  editCancelText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    color: colors.textSecondary,
+  },
+  editSaveBtn: {
+    flex: 1.6,
+    paddingVertical: 15,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+  },
+  editSaveText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    fontWeight: '700',
+    color: colors.bg,
+  },
 });

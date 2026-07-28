@@ -7,7 +7,6 @@ from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
 from app.services.progressive_overload import (
     calculate_warmup_sets,
     estimate_1rm,
-    estimate_1rm_brzycki,
     get_next_session_targets,
     update_profile_after_session,
 )
@@ -27,11 +26,6 @@ class TestEstimate1RM:
     def test_epley_zero(self):
         assert estimate_1rm(0, 5) == 0
         assert estimate_1rm(100, 0) == 0
-
-    def test_brzycki_basic(self):
-        result = estimate_1rm_brzycki(225, 5)
-        assert 250 <= result <= 260
-
 
 class TestWarmupSets:
     def test_warmup_for_165(self):

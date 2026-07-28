@@ -6,7 +6,7 @@
  * recent sessions, and navigation to deeper screens.
  */
 
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   RefreshControl, Animated, AppState,
@@ -15,7 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
+import { colors, spacing, typography, radius, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 import {
   getRecentTraining, getWeekSummary, getTodayWorkout, getTodayRun,
@@ -30,7 +30,7 @@ import {
   DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
 } from '../constants/trainingSchedule';
 import ScreenBackground from '../components/ScreenBackground';
-import { formatPace } from '../services/gps';
+import { formatPace } from '../utils/format';
 import { usePressScale } from '../hooks/usePressScale';
 import SegmentedSwitch from '../components/SegmentedSwitch';
 import CoachHero from '../components/CoachHero';
@@ -39,7 +39,6 @@ import Topbar from '../components/Topbar';
 import WhoopHeroCard from '../components/WhoopHeroCard';
 import WorkoutStartCard from '../components/WorkoutStartCard';
 import SessionListCard from '../components/SessionListCard';
-import Svg, { Defs, Pattern, Path, Rect, Circle } from 'react-native-svg';
 
 type Segment = 'today' | 'run' | 'lift' | 'plan';
 
@@ -64,7 +63,6 @@ export default function TrainHomeScreen({ navigation }: any) {
   const [activePlan, setActivePlan] = useState<TrainingPlanData | null>(null);
   const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
 
-  const [audioCoachEnabled, setAudioCoachEnabled] = useState(true);
   const [coachOpen, setCoachOpen] = useState(false);
   const heroScale = usePressScale(0.97);
   const appState = useRef(AppState.currentState);
@@ -276,18 +274,6 @@ export default function TrainHomeScreen({ navigation }: any) {
     );
   };
 
-  // Stable demo polyline for the run-view embedded map
-  const runRoute = useMemo(() => {
-    const pts: [number, number][] = [];
-    for (let i = 0; i <= 50; i++) {
-      const t = i / 50;
-      const x = 20 + t * 320 + Math.sin(t * 7) * 22;
-      const y = 90 + Math.sin(t * 4.5) * 38 + Math.cos(t * 2) * 14;
-      pts.push([x, y]);
-    }
-    return pts;
-  }, []);
-
   const renderRunSegment = () => {
     const planned = todayRun?.planned_run;
     const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
@@ -305,7 +291,7 @@ export default function TrainHomeScreen({ navigation }: any) {
 
     return (
     <>
-      {/* CoachHero with embedded route map + START · ROUTES — canvas Run view */}
+      {/* CoachHero with today's plan + Log-a-run entry */}
       <View style={{ paddingHorizontal: spacing.md }}>
         <CoachHero
           pill={planned ? `${(planned.run_type || 'EASY').toUpperCase()} · Z2` : 'FREE RUN'}
@@ -315,73 +301,18 @@ export default function TrainHomeScreen({ navigation }: any) {
               ? <>Today is your aerobic deposit — <Text style={{ color: colors.accent }}>{distMi ?? '—'}{distMi != null ? ' mi' : ''}{paceFmt ? ` at ${paceFmt}/mi` : ''}{hr ? `, HR ≤ ${hr}` : ''}</Text>. Breathe through the nose. Negative split if it feels easy. The point is showing up, not the pace.</>
               : <>No planned run today. Free run if the body wants it; rest if it doesn't.</>
           }
-          meta={planned ? `${distMi ?? '—'} MI · TARGET RPE 5` : 'GPS LOCKED · WHOOP CONNECTED'}
+          meta={planned ? `${distMi ?? '—'} MI · TARGET RPE 5` : 'RUN WHEN READY'}
           onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
         >
-          {/* Route polyline preview — animated path on a grid */}
-          <View style={styles.runMapBox}>
-            <Svg viewBox="0 0 360 200" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
-              <Defs>
-                <Pattern id="run-grid" width={20} height={20} patternUnits="userSpaceOnUse">
-                  <Path d="M20 0H0v20" fill="none" stroke={colors.line} strokeWidth={0.5} />
-                </Pattern>
-              </Defs>
-              <Rect width={360} height={200} fill="url(#run-grid)" />
-              <Path
-                d={'M ' + runRoute.map(p => p.join(',')).join(' L ')}
-                fill="none"
-                stroke={colors.accent}
-                strokeWidth={2.5}
-                strokeLinecap="round"
-              />
-              <Circle cx={runRoute[0][0]} cy={runRoute[0][1]} r={4} fill={colors.text} stroke={colors.bg} strokeWidth={1.5} />
-              <Circle cx={runRoute[runRoute.length - 1][0]} cy={runRoute[runRoute.length - 1][1]} r={5} fill={colors.accent} />
-            </Svg>
-            <Text style={styles.runMapLabel}>{distMi != null ? `${distMi} MI · LOOP` : 'PICK A ROUTE'}</Text>
-          </View>
-
-          {/* START + ROUTES button row */}
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
-              style={[styles.runStartFlex, { backgroundColor: runTypeColor }]}
-            >
-              <Text style={styles.runStartFlexText}>
-                ▶ START · {distMi != null ? `${distMi}MI ${(planned?.run_type || 'EASY').toUpperCase()}` : 'FREE RUN'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => navigation?.navigate?.('RouteSuggestions')}
-              style={styles.runRoutesBtn}
-            >
-              <Text style={styles.runRoutesBtnText}>ROUTES</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.runFooter}>
-            GPS LOCKED · {whoopData ? 'WHOOP CONNECTED' : 'NO WEARABLE'} · WEATHER 12° / CLEAR
-          </Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => { haptic.medium(); navigation?.navigate?.('LogRun'); }}
+            style={[styles.runStartFlex, { backgroundColor: runTypeColor, marginTop: 14 }]}
+          >
+            <Text style={styles.runStartFlexText}>＋ LOG A RUN</Text>
+          </TouchableOpacity>
         </CoachHero>
       </View>
-
-      {/* Audio coach toggle — keep accessible */}
-      <TouchableOpacity
-        style={styles.audioCoachToggle}
-        onPress={() => setAudioCoachEnabled(!audioCoachEnabled)}
-      >
-        <Ionicons
-          name={audioCoachEnabled ? 'volume-high' : 'volume-mute'}
-          size={16}
-          color={audioCoachEnabled ? colors.accent : colors.textTertiary}
-        />
-        <Text style={[
-          { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 1.6 },
-          { color: audioCoachEnabled ? colors.accent : colors.textTertiary },
-        ]}>
-          AUDIO COACH · {audioCoachEnabled ? 'ON' : 'OFF'}
-        </Text>
-      </TouchableOpacity>
 
       {/* Last run · splits — only if we have any runs */}
       {runItems.length > 0 && (
@@ -391,7 +322,10 @@ export default function TrainHomeScreen({ navigation }: any) {
             const dayShort = dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
             const monthDay = dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const dist = item.distance_miles != null ? `${item.distance_miles.toFixed(1)} mi` : '—';
-            const pace = item.avg_pace_seconds != null ? formatPace(item.avg_pace_seconds) : '—';
+            // The training feed sends a preformatted pace string (workouts.py
+            // `pace_formatted`); there is no avg_pace_seconds on TrainingItem, so
+            // reading that always yielded '—'.
+            const pace = item.pace_formatted || '—';
             return {
               id: `r-${item.id}`,
               day: dayShort,
@@ -683,7 +617,8 @@ export default function TrainHomeScreen({ navigation }: any) {
                   { v: String(todayRun.planned_run.target_duration_minutes ?? '—'), u: 'min' },
                 ]}
                 note={todayRun.planned_run.description || undefined}
-                onStart={() => navigation?.navigate?.('RunGPS', { audioCoachEnabled })}
+                onStart={() => { haptic.medium(); navigation?.navigate?.('LogRun'); }}
+                ctaLabel="＋ LOG RUN"
               />
             )}
             {todayWorkout && (
@@ -743,52 +678,6 @@ export default function TrainHomeScreen({ navigation }: any) {
   );
 }
 
-function LiftSessionCard({ item, onDelete, onPress }: {
-  item: TrainingItem; onDelete: () => void; onPress: () => void;
-}) {
-  const { animStyle, onPressIn, onPressOut } = usePressScale(0.97);
-  const typeColor = DAY_TYPE_COLORS[item.day_type || 'push'] || colors.accent;
-  const dateStr = new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
-  });
-  return (
-    <SwipeableRow onDelete={onDelete}>
-      <Animated.View style={animStyle}>
-        <TouchableOpacity
-          style={styles.sessionCard}
-          activeOpacity={0.7}
-          onPress={() => { haptic.light(); onPress(); }}
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-        >
-          <View style={styles.sessionLeft}>
-            <View style={[styles.sessionIcon, { backgroundColor: typeColor + '15' }]}>
-              <Ionicons name="barbell-outline" size={18} color={typeColor} />
-            </View>
-          </View>
-          <View style={styles.sessionCenter}>
-            <View style={styles.sessionTop}>
-              <Text style={styles.sessionLabel}>{item.label}</Text>
-              <View style={[styles.typeBadge, { backgroundColor: typeColor + '15' }]}>
-                <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-                  {(item.day_type || '').toUpperCase()}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.sessionDate}>{dateStr}</Text>
-          </View>
-          <View style={styles.sessionRight}>
-            <Text style={styles.sessionDetail}>{item.detail}</Text>
-            {item.rpe != null && (
-              <Text style={styles.sessionRpe}>RPE {item.rpe}</Text>
-            )}
-            <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    </SwipeableRow>
-  );
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -924,24 +813,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Run view (canvas)
-  runMapBox: {
-    height: 160,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.bg2,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  runMapLabel: {
-    position: 'absolute',
-    bottom: 8,
-    left: 10,
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.textTertiary,
-    letterSpacing: 1.6,
-  },
   runStartFlex: {
     flex: 1,
     paddingVertical: 15,
@@ -954,37 +825,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.bg,
     letterSpacing: 2,
-  },
-  runRoutesBtn: {
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  runRoutesBtnText: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.textSecondary,
-    letterSpacing: 1.6,
-  },
-  runFooter: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.textTertiary,
-    letterSpacing: 1.6,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  audioCoachToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: spacing.md,
-    marginHorizontal: spacing.md,
   },
 
   // ── Plan view (canvas)

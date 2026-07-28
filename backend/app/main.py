@@ -9,6 +9,18 @@ from dotenv import load_dotenv
 from pathlib import Path as _Path
 load_dotenv(_Path(__file__).resolve().parent.parent / ".env", override=True)  # override=True so .env wins over empty shell vars
 
+# Pull prod secrets (OPENAI_API_KEY, WHOOP_*, API_KEY, …) from AWS Secrets Manager
+# into the env BEFORE routers/services import. No-op locally (fail-open); never
+# overrides an explicit env var / .env value.
+from app.services.secrets import load_secrets_into_env  # noqa: E402
+load_secrets_into_env()
+
+# Run in the owner's timezone so date.today() (used everywhere for "today's"
+# todos / workouts / summary) matches the user's calendar day rather than the
+# UTC box's. datetime.utcnow() is unaffected, so absolute timestamps stay UTC.
+os.environ.setdefault("TZ", "America/New_York")
+time.tzset()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,7 +28,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.routers import concepts, daily, dashboard, entries, milestones, routes, runs, speaking, streaks, vision, weekly_reviews, whoop, workouts
+from app.routers import concepts, daily, dashboard, entries, integrations, milestones, runs, speaking, streaks, vdot, vision, weekly_reviews, whoop, workouts
 
 logger = logging.getLogger("mastery_tracker")
 
@@ -57,16 +69,28 @@ app.add_middleware(
 # --- API key auth — fail-closed ---
 _api_key = os.getenv("API_KEY", "")
 
-_PUBLIC_PATHS = {"/", "/health"}
+_PUBLIC_PATHS = {"/", "/health", "/api/config-status"}
 
 
 _testing = os.getenv("TESTING", "") == "1"
 
 
+def _is_public_path(path: str) -> bool:
+    if path in _PUBLIC_PATHS:
+        return True
+    # OAuth consent + provider redirect are hit by the browser / provider, which
+    # can't send the X-API-Key header. They carry their own OAuth state/code.
+    if path.startswith("/api/v1/integrations/") and (
+        path.endswith("/authorize") or path.endswith("/callback")
+    ):
+        return True
+    return False
+
+
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     """Require API key for all non-public endpoints. Fail closed if no key configured."""
-    if _testing or request.url.path in _PUBLIC_PATHS:
+    if _testing or _is_public_path(request.url.path):
         return await call_next(request)
     if not _api_key:
         return JSONResponse(status_code=503, content={"detail": "Server not configured (missing API_KEY)"})
@@ -94,12 +118,13 @@ app.include_router(entries.router)
 app.include_router(milestones.router)
 app.include_router(streaks.router)
 app.include_router(weekly_reviews.router)
-app.include_router(routes.router)
 app.include_router(runs.router)
+app.include_router(vdot.router)
 app.include_router(workouts.router)
 app.include_router(speaking.router)
 app.include_router(vision.router)
 app.include_router(whoop.router)
+app.include_router(integrations.router)
 app.include_router(concepts.router)
 app.include_router(concepts.link_router)
 
@@ -108,6 +133,25 @@ app.include_router(concepts.link_router)
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/api/config-status")
+async def config_status():
+    """Presence-check for required secrets (booleans only — never values).
+
+    Lets us confirm the Secrets Manager loader populated the env after deploy
+    without exposing any secret material.
+    """
+    def _set(name: str) -> bool:
+        return bool(os.getenv(name))
+
+    return {
+        "openai": _set("OPENAI_API_KEY"),
+        "api_key": _set("API_KEY"),
+        "whoop_client": _set("WHOOP_CLIENT_ID") and _set("WHOOP_CLIENT_SECRET"),
+        "database_url": _set("DATABASE_URL"),
+        "notion": _set("NOTION_TOKEN"),
+    }
 
 
 @app.get("/")

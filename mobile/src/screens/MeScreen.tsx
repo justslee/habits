@@ -2,19 +2,24 @@
  * MeScreen — profile + identity + connections + preferences + account.
  * Ported from `profile.jsx` `MeTab` in the design canvas.
  *
- * No new backend endpoints — pulls from existing `getDashboardStats` for stats
- * and shows local connection placeholders for Whoop/Strava/Calendar.
+ * Connections shows the real, opt-in Whoop integration status and lets the
+ * user connect/disconnect via the backend OAuth flow.
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Alert,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radius, spacing } from '../theme';
-import { getDashboardStats, DashboardStats } from '../api/client';
+import {
+  getDashboardStats, DashboardStats,
+  getIntegrationStatus, integrationAuthorizeUrl, disconnectIntegration,
+} from '../api/client';
+import { haptic } from '../utils/haptics';
 import ScreenBackground from '../components/ScreenBackground';
 import Topbar from '../components/Topbar';
 
@@ -35,6 +40,16 @@ export default function MeScreen() {
   const insets = useSafeAreaInsets();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [whoopConnected, setWhoopConnected] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const st = await getIntegrationStatus();
+      setWhoopConnected(!!st.whoop);
+    } catch (err) {
+      console.warn('MeScreen integration status error:', err);
+    }
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -47,7 +62,33 @@ export default function MeScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => { fetchStats(); fetchStatus(); }, [fetchStats, fetchStatus]);
+
+  const connectWhoop = useCallback(async () => {
+    haptic.medium();
+    try {
+      // Opens the backend OAuth consent flow; when the browser session ends we
+      // re-check status (the callback stores tokens server-side).
+      await WebBrowser.openAuthSessionAsync(integrationAuthorizeUrl('whoop'));
+    } catch (err) {
+      console.warn('Whoop connect error:', err);
+    }
+    fetchStatus();
+  }, [fetchStatus]);
+
+  const disconnectWhoop = useCallback(() => {
+    Alert.alert('Disconnect Whoop', 'Stop showing Whoop recovery/strain in the app?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Disconnect', style: 'destructive',
+        onPress: async () => {
+          haptic.medium();
+          try { await disconnectIntegration('whoop'); } catch (e) { console.warn(e); }
+          fetchStatus();
+        },
+      },
+    ]);
+  }, [fetchStatus]);
 
   // Stats — pulled from real dashboard data with sensible fallbacks
   const longestStreak = stats?.streaks?.length
@@ -78,9 +119,9 @@ export default function MeScreen() {
     {
       h: 'Connections',
       items: [
-        { k: 'Whoop', v: 'Connected', kind: 'status', good: true },
-        { k: 'Strava', v: 'Connected', kind: 'status', good: true },
-        { k: 'Calendar', v: 'Off', kind: 'status', good: false },
+        whoopConnected
+          ? { k: 'Whoop', v: 'Connected · tap to disconnect', kind: 'status', good: true, onPress: disconnectWhoop }
+          : { k: 'Whoop', v: 'Connect', kind: 'link', onPress: connectWhoop },
       ],
     },
     {

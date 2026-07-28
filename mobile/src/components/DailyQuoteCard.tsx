@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, radius } from '../theme';
 
 const QUOTES: Array<{ q: string; a: string }> = [
   { q: 'We are what we repeatedly do. Excellence, then, is not an act, but a habit.', a: 'ARISTOTLE' },

@@ -1,9 +1,9 @@
 """Speaking Practice models — record, transcribe, evaluate presentations."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin

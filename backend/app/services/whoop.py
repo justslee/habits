@@ -5,106 +5,58 @@ Full data from all endpoints, auto-refreshes tokens.
 
 import json
 import logging
-import os
-import time
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 from sqlalchemy.orm import Session
 
 from app.models.workout import WhoopSnapshot
+from app.services import oauth
 
 logger = logging.getLogger(__name__)
 
 WHOOP_API_BASE = "https://api.prod.whoop.com/developer/v2"
-TOKEN_PATH = Path.home() / ".config" / "whoop" / "tokens.json"
-
-# Hardcoded credentials (same as whoop-auth.js)
-WHOOP_CLIENT_ID = os.getenv(
-    "WHOOP_CLIENT_ID", "1e8ae741-dd42-4119-ad04-30c9f259b28d"
-)
-WHOOP_CLIENT_SECRET = os.getenv(
-    "WHOOP_CLIENT_SECRET",
-    "f9ae26fe8c23a2b2ebced854b071e15fc329736b5e7b3b8748a5f5a81d75512a",
-)
+PROVIDER = "whoop"
 
 
 class WhoopUnavailableError(Exception):
     pass
 
 
-def _load_tokens() -> dict[str, Any]:
-    if not TOKEN_PATH.exists():
-        raise WhoopUnavailableError("No Whoop token file found")
-    return json.loads(TOKEN_PATH.read_text())
+async def _api_get(path: str, user_id: int, db: Session, access_token: str) -> tuple[dict[str, Any], str]:
+    """GET a Whoop endpoint; on 401 refresh the user's token once and retry.
 
-
-def _save_tokens(tokens: dict[str, Any]) -> None:
-    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tokens["obtained_at"] = time.time()
-    TOKEN_PATH.write_text(json.dumps(tokens, indent=2))
-
-
-async def _refresh_token(tokens: dict[str, Any]) -> dict[str, Any]:
+    Returns (json, access_token) so the (possibly refreshed) token is reused.
+    """
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            "https://api.prod.whoop.com/oauth/oauth2/token",
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": tokens["refresh_token"],
-                "client_id": WHOOP_CLIENT_ID,
-                "client_secret": WHOOP_CLIENT_SECRET,
-            },
-        )
-        if resp.status_code != 200:
-            raise WhoopUnavailableError(f"Token refresh failed: {resp.text}")
-
-        new_data = resp.json()
-        tokens["access_token"] = new_data["access_token"]
-        if "refresh_token" in new_data:
-            tokens["refresh_token"] = new_data["refresh_token"]
-        tokens["expires_in"] = new_data.get("expires_in", 3600)
-        _save_tokens(tokens)
-        return tokens
-
-
-def _token_expired(tokens: dict[str, Any]) -> bool:
-    obtained = tokens.get("obtained_at", 0)
-    expires_in = tokens.get("expires_in", 3600)
-    return time.time() > obtained + expires_in - 60  # 60s buffer
-
-
-async def _api_get(path: str, tokens: dict[str, Any]) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    async with httpx.AsyncClient(timeout=15.0) as client:
+        headers = {"Authorization": f"Bearer {access_token}"}
         resp = await client.get(f"{WHOOP_API_BASE}{path}", headers=headers)
         if resp.status_code == 401:
-            tokens = await _refresh_token(tokens)
-            headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-            resp = await client.get(f"{WHOOP_API_BASE}{path}", headers=headers)
+            refreshed = await oauth.refresh_and_store(db, user_id, PROVIDER)
+            if not refreshed:
+                raise WhoopUnavailableError("Whoop token refresh failed")
+            access_token = refreshed
+            resp = await client.get(f"{WHOOP_API_BASE}{path}", headers={"Authorization": f"Bearer {access_token}"})
         if resp.status_code != 200:
             raise WhoopUnavailableError(f"Whoop API {resp.status_code}: {resp.text}")
-        return resp.json()
+        return resp.json(), access_token
 
 
-async def fetch_whoop_data() -> dict[str, Any]:
-    """Fetch comprehensive Whoop data: recovery, sleep, strain, workout, HR zones.
+async def fetch_whoop_data(user_id: int, db: Session) -> dict[str, Any]:
+    """Fetch comprehensive Whoop data for a connected user.
 
+    Raises WhoopUnavailableError if the user hasn't connected Whoop.
     Returns a rich dict with all available metrics.
     """
-    tokens = _load_tokens()
+    access_token = await oauth.valid_access_token(db, user_id, PROVIDER)
+    if not access_token:
+        raise WhoopUnavailableError("Whoop not connected")
 
-    # Auto-refresh if expired
-    if _token_expired(tokens):
-        tokens = await _refresh_token(tokens)
-
-    # Parallel-ish fetches (sequential for simplicity, could use asyncio.gather)
-    recovery_data = await _api_get("/recovery?limit=1", tokens)
-    sleep_data = await _api_get("/activity/sleep?limit=1", tokens)
-    cycle_data = await _api_get("/cycle?limit=1", tokens)
-    workout_data = await _api_get("/activity/workout?limit=3", tokens)
+    recovery_data, access_token = await _api_get("/recovery?limit=1", user_id, db, access_token)
+    sleep_data, access_token = await _api_get("/activity/sleep?limit=1", user_id, db, access_token)
+    cycle_data, access_token = await _api_get("/cycle?limit=1", user_id, db, access_token)
+    workout_data, access_token = await _api_get("/activity/workout?limit=3", user_id, db, access_token)
 
     result: dict[str, Any] = {
         # Recovery

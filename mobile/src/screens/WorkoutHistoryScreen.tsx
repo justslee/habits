@@ -16,7 +16,7 @@ import ScreenBackground from '../components/ScreenBackground';
 import ActivityListCard from '../components/ActivityListCard';
 import EmptyState from '../components/EmptyState';
 import { haptic } from '../utils/haptics';
-import { API_URL, apiHeaders, deleteWorkout, restoreWorkout, WorkoutSession } from '../api/client';
+import { API_URL, apiHeaders, deleteWorkout, restoreWorkout } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
 

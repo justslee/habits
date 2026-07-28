@@ -4,10 +4,9 @@ Stores the high-level vision, per-pillar targets, time horizon milestones,
 and anti-goals. Injected into all AI system prompts for context alignment.
 """
 
-from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text
+from sqlalchemy import ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin

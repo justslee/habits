@@ -7,7 +7,6 @@
 
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
 
 // Configure notification handler
 Notifications.setNotificationHandler({
@@ -48,70 +47,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
  * Schedule weekly review notification for Sunday evening.
  * Uses local notification scheduling so it works offline.
  */
-export async function scheduleWeeklyReviewReminder(): Promise<string | null> {
-  // Cancel existing weekly review notifications
-  await cancelWeeklyReviewReminder();
-
-  const id = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: '📊 Weekly Review Ready',
-      body: "Your weekly review is in. Let's see how you did.",
-      data: { screen: 'WeeklyReview' },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-      weekday: 1, // Sunday (1=Sun in Expo)
-      hour: 20,
-      minute: 0,
-    },
-  });
-
-  return id;
-}
-
-/**
- * Cancel scheduled weekly review notifications.
- */
-export async function cancelWeeklyReviewReminder(): Promise<void> {
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  for (const notif of scheduled) {
-    if (notif.content.data?.screen === 'WeeklyReview') {
-      await Notifications.cancelScheduledNotificationAsync(notif.identifier);
-    }
-  }
-}
-
-/**
- * Schedule end-of-day check-in reminder (TASK-P2-012).
- */
-export async function scheduleEODCheckIn(): Promise<string | null> {
-  // Cancel existing EOD notifications
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  for (const notif of scheduled) {
-    if (notif.content.data?.screen === 'CheckIn') {
-      await Notifications.cancelScheduledNotificationAsync(notif.identifier);
-    }
-  }
-
-  const id = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: '📝 Daily Check-In',
-      body: "Did you get 1% better today? Log your session.",
-      data: { screen: 'CheckIn' },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour: 21,
-      minute: 0,
-    },
-  });
-
-  return id;
-}
-
-/**
- * Schedule daily review reminder at 10:00 PM every day.
- */
 export async function scheduleDailyReview(): Promise<string | null> {
   // Cancel existing daily review notifications
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -140,13 +75,3 @@ export async function scheduleDailyReview(): Promise<string | null> {
 /**
  * Send an immediate local notification (for testing or on-demand delivery).
  */
-export async function sendLocalNotification(
-  title: string,
-  body: string,
-  data?: Record<string, unknown>,
-): Promise<void> {
-  await Notifications.scheduleNotificationAsync({
-    content: { title, body, data },
-    trigger: null, // immediate
-  });
-}
