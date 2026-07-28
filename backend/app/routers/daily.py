@@ -613,14 +613,18 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
         eval_obj = already_evaluated_entry.evaluation
         return {
             "evaluated": 1,
-            "result": {
-                "depth_score": eval_obj.depth_score,
-                "one_percent_better": eval_obj.one_percent_better,
-                "verdict_explanation": eval_obj.verdict_explanation,
-                "commentary": eval_obj.commentary,
-                "pillars_touched": pillars_touched,
-                "total_time_minutes": total_minutes,
-            },
+            "results": [
+                {
+                    "pillar_id": 0,
+                    "pillar_name": ", ".join(str(p) for p in pillars_touched) if pillars_touched else "Today",
+                    "depth_score": eval_obj.depth_score,
+                    "relevance_score": eval_obj.relevance_score,
+                    "one_percent_better": eval_obj.one_percent_better,
+                    "verdict_explanation": eval_obj.verdict_explanation,
+                    "commentary": eval_obj.commentary,
+                    "time_invested_minutes": total_minutes,
+                }
+            ],
             "reflection_applied": reflection is not None,
         }
 
