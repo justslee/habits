@@ -616,7 +616,7 @@ async def end_of_day_evaluation(db: Session = Depends(get_db)):
             "results": [
                 {
                     "pillar_id": 0,
-                    "pillar_name": ", ".join(str(p) for p in pillars_touched) if pillars_touched else "Today",
+                    "pillar_name": ", ".join(p["pillar_name"] for p in pillars_touched) if pillars_touched else "Today",
                     "depth_score": eval_obj.depth_score,
                     "relevance_score": eval_obj.relevance_score,
                     "one_percent_better": eval_obj.one_percent_better,
