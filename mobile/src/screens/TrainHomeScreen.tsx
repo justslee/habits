@@ -42,6 +42,30 @@ import SessionListCard from '../components/SessionListCard';
 
 type Segment = 'today' | 'run' | 'lift' | 'plan';
 
+/**
+ * Lift/set counts for a session card. A freshly *planned* session has no logged
+ * `exercises` yet — the plan lives as JSON in `ai_plan` — so fall back to the
+ * planned exercise list, otherwise every un-started workout reads "0 lifts / 0 sets".
+ */
+function workoutCounts(w: { exercises?: any[]; ai_plan?: string | null } | null): { lifts: number; sets: number } {
+  const logged = w?.exercises ?? [];
+  if (logged.length > 0) {
+    // Logged sets: distinct exercises = lifts, individual set rows = sets.
+    const names = new Set(logged.map((e: any) => e.exercise_name));
+    return { lifts: names.size, sets: logged.length };
+  }
+  try {
+    const planned = w?.ai_plan ? JSON.parse(w.ai_plan)?.exercises : null;
+    if (Array.isArray(planned) && planned.length > 0) {
+      return {
+        lifts: planned.length,
+        sets: planned.reduce((acc: number, e: any) => acc + (Number(e.sets) || 0), 0),
+      };
+    }
+  } catch { /* ai_plan not JSON — fall through to zeros */ }
+  return { lifts: 0, sets: 0 };
+}
+
 const SEGMENTS: { key: Segment; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'today', label: 'Today', icon: 'sunny-outline' },
   { key: 'run',   label: 'Run',   icon: 'footsteps-outline' },
@@ -182,7 +206,7 @@ export default function TrainHomeScreen({ navigation }: any) {
               ? <>{DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day. Top set is the lift that matters — <Text style={{ color: colors.accent }}>everything else is volume</Text>. Don't grind the accessories.</>
               : <>No lift today. Mobility, walk, sleep — those are the work.</>
           }
-          meta={todayWorkout ? `${(todayWorkout.exercises?.length ?? 0)} LIFTS · ~45 MIN` : undefined}
+          meta={todayWorkout ? `${workoutCounts(todayWorkout).lifts} LIFTS · ~45 MIN` : undefined}
           onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
         >
           {lastVolume != null && (
@@ -626,11 +650,19 @@ export default function TrainHomeScreen({ navigation }: any) {
                 kind="lift"
                 time={todayWorkout.status === 'completed' ? 'DONE' : 'TODAY'}
                 title={`${DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day`}
-                metrics={[
-                  { v: String(todayWorkout.exercises?.length ?? 0), u: 'lifts' },
-                  { v: String(todayWorkout.exercises?.reduce((acc, e) => acc + 1, 0) ?? 0), u: 'sets' },
-                  { v: '~45', u: 'min' },
-                ]}
+                metrics={(() => {
+                  const c = workoutCounts(todayWorkout);
+                  let mins = '~45';
+                  try {
+                    const est = todayWorkout.ai_plan ? JSON.parse(todayWorkout.ai_plan)?.estimated_duration_minutes : null;
+                    if (est) mins = `~${Math.round(Number(est))}`;
+                  } catch { /* keep default */ }
+                  return [
+                    { v: String(c.lifts), u: 'lifts' },
+                    { v: String(c.sets), u: 'sets' },
+                    { v: mins, u: 'min' },
+                  ];
+                })()}
                 note={todayWorkout.coach_notes || undefined}
                 onStart={() =>
                   todayWorkout.status === 'completed'

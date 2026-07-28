@@ -78,7 +78,8 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
       if (workoutSessionId != null) {
         // Live workout context → the workout-scoped chat.
         const res = await chatWithCoach(workoutSessionId, trimmed);
-        reply = (res as { reply?: string; message?: string }).reply
+        reply = (res as { reply?: string; message?: string; coach_response?: string }).reply
+             ?? (res as { coach_response?: string }).coach_response
              ?? (res as { message?: string }).message
              ?? fallbackFor(trimmed);
       } else {
