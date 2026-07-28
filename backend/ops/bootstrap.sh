@@ -42,6 +42,7 @@ DATABASE_URL=postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_
 OAUTH_REDIRECT_BASE=https://habits.looperapp.org
 ALLOWED_ORIGINS=https://habits.looperapp.org
 HABITS_SECRETS_NAME=habits/prod
+TZ=America/New_York
 DEBUG=false
 ENV
 fi

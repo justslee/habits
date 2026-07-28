@@ -15,6 +15,12 @@ load_dotenv(_Path(__file__).resolve().parent.parent / ".env", override=True)  # 
 from app.services.secrets import load_secrets_into_env  # noqa: E402
 load_secrets_into_env()
 
+# Run in the owner's timezone so date.today() (used everywhere for "today's"
+# todos / workouts / summary) matches the user's calendar day rather than the
+# UTC box's. datetime.utcnow() is unaffected, so absolute timestamps stay UTC.
+os.environ.setdefault("TZ", "America/New_York")
+time.tzset()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

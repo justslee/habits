@@ -6,6 +6,10 @@ Wants=postgresql.service
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/habits/backend
+# The box is UTC; run the app in the owner's timezone so date.today() (used
+# throughout for "today's" todos/workouts/etc.) matches the user's calendar day.
+# datetime.utcnow() stays UTC regardless, so stored timestamps are unaffected.
+Environment=TZ=America/New_York
 EnvironmentFile=/home/ubuntu/habits/backend/.env
 # uv-managed venv (created by `uv sync`), loopback-only — nginx is the sole listener.
 # Port 8001 avoids scorecard's 8000.
