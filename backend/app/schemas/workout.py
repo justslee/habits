@@ -80,6 +80,10 @@ class ChatMessage(BaseModel):
 
 class ChatResponse(BaseModel):
     coach_response: str
+    # Alias the coach's message as `reply` too: the mobile CoachSheet reads
+    # `res.reply ?? res.message`, so without this it discarded coach_response and
+    # always showed the canned fallback.
+    reply: str = ""
     parsed_sets: List[ExerciseLogCreate]
     session_summary: Optional[str] = None
     plan_updated: bool = False

@@ -290,6 +290,7 @@ async def chat_with_coach(
 
     return ChatResponse(
         coach_response=result["coach_response"],
+        reply=result["coach_response"],
         parsed_sets=[
             ExerciseLogCreate(
                 exercise_name=s["exercise_name"],
