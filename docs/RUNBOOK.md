@@ -1,192 +1,131 @@
 # RUNBOOK.md — How to Run Everything
 
-> **Deployer agent uses this file.** Keep commands copy-pasteable and idempotent.
-> Update this whenever run steps change.
+> Keep commands copy-pasteable and idempotent. Update whenever run steps change.
+> Architecture: the backend runs **on the always-on MacBook**, reachable from the phone
+> over **Tailscale**. Nothing is exposed to the public internet.
 
-## Prerequisites
+## Layout on the Mac
+
+| Path | What |
+|---|---|
+| `~/habits` | development checkout (feature branches, tests) |
+| `~/srv/habits` | **deploy clone**, always `origin/main`; the service runs from here. Never edit it. |
+| `~/Library/Application Support/Habits/env` | runtime secrets (mode 600, never in git) |
+| `~/Library/Application Support/Habits/mastery.db` | the database (SQLite) |
+| `~/Library/Logs/habits/` | `api.log`, `api.err.log`, `deploy.log`, `events.log`, … |
+| `~/Library/LaunchAgents/com.habits.*.plist` | launchd services (installed by `install.sh`) |
+
+## Services (launchd)
+
+| Label | Runs | Schedule |
+|---|---|---|
+| `com.habits.api` | `ops/mac/start-api.sh` → `alembic upgrade head` + uvicorn on `127.0.0.1:8000` | always (KeepAlive) |
+| `com.habits.deploy` | `ops/mac/deploy.sh` → pull `origin/main`, deps, migrate, restart, health-check, roll back on failure | every 5 min |
+| `com.habits.watchdog` | `ops/mac/watchdog.sh` → restart after 2 failed health checks | every 5 min |
+| `com.habits.backup` | `ops/mac/backup.sh` → SQLite snapshot to iCloud Drive `Habits Backups/`, 30-day rotation | 03:30 daily |
 
 ```bash
-# One-time setup (user runs these manually)
-brew install tailscale node python@3.12
-npm install -g eas-cli expo-cli
+# status / restart / logs
+launchctl list | grep com.habits
+launchctl kickstart -k gui/$(id -u)/com.habits.api
+tail -f ~/Library/Logs/habits/api.err.log ~/Library/Logs/habits/events.log
+
+# stop / start everything
+for s in api deploy watchdog backup; do launchctl bootout gui/$(id -u)/com.habits.$s; done
+bash ~/habits/backend/ops/mac/install.sh
 ```
 
-## Environment Variables
+## First-time setup on the Mac
 
-### Backend
+```bash
+# 0. prerequisites
+brew install python@3.12 node gh sqlite awscli session-manager-plugin
+# Tailscale from the App Store, logged in. In the admin console (DNS tab) enable
+# MagicDNS and HTTPS Certificates.
+
+# 1. runtime env — either pull the cloud one (while the EC2 box still exists) …
+bash backend/ops/mac/pull-prod-env.sh
+# … or start from the template and fill it in
+cp backend/ops/mac/env.example "$HOME/Library/Application Support/Habits/env"
+
+# 2. data — pull the production database down (one-off, while the box still exists)
+bash backend/ops/mac/pull-prod-data.sh
+
+# 3. services
+bash backend/ops/mac/install.sh
+
+# 4. HTTPS for the phone (real Let's Encrypt cert, tailnet-only)
+tailscale serve --bg --https=443 http://127.0.0.1:8000
+tailscale serve status
+
+# 5. verify from the phone (Tailscale VPN on):  https://justins-macbook-pro-2.tail2c4851.ts.net/health
+```
+
+Optional, no-VPN public access on the same hostname (only if ever needed):
+`tailscale funnel --bg 443`. The API key and rate limit still apply.
+
+## Power and reboots
+
+- `caffeinate -dimsu` runs from `com.looper.keepawake` (installed by the scorecard repo) so the Mac never sleeps.
+- `sudo pmset -a autorestart 1` — restart after a power failure.
+- FileVault is on: after a reboot the Mac waits at the unlock screen and nothing starts until the
+  password is typed. Turn off automatic macOS update restarts (System Settings → General →
+  Software Update → Automatic updates → off for "Install macOS updates").
+
+## Backend (development)
+
 ```bash
 cd backend
-cp .env.example .env
-# Edit .env with your values
-```
-
-### Mobile
-```bash
-cd mobile
-cp .env.example .env
-# Edit .env with your API URL
-```
-
----
-
-## Backend (Local)
-
-```bash
-# First time setup
-cd backend
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-
-# Run database migrations (creates data/mastery.db)
+cp .env.example .env            # dev values; the service uses ~/Library/Application Support/Habits/env
 alembic upgrade head
-
-# Seed reference data (pillars + default user)
-python -c "from app.db.database import SessionLocal; from app.db.seed import seed_all; db = SessionLocal(); seed_all(db); db.close(); print('Seeded OK')"
-
-# Start server
-source venv/bin/activate
-uvicorn app.main:app --reload --port 8000
-
-# Health check
-curl http://localhost:8000/health
-# Expected: {"status": "ok"}
+uvicorn app.main:app --reload --port 8001      # 8000 is the always-on service
 ```
 
-## Mobile (Local Dev)
+## Mobile
 
 ```bash
-# First time setup
 cd mobile
 npm install
-
-# Start Expo dev server
-npm start
-
-# Run on iOS Simulator (requires Xcode)
-npm run ios
-
-# Or scan QR code with Expo Go app on iPhone
+npx expo start                  # Expo Go / simulator
 ```
 
----
+The server URL and API key are baked in from `mobile/.env` (`EXPO_PUBLIC_API_URL`,
+`EXPO_PUBLIC_API_KEY`) at build time **and** can be changed on the phone without a rebuild
+under **Me → Server** (stored in the keychain). `mobile/public/config.json` still overrides
+the URL for the web build.
 
-## Tailscale (Private Network — iPhone ↔ MacBook)
-
-Tailscale creates a private WireGuard mesh. No public tunnel, zero internet exposure.
+## Tests and gates
 
 ```bash
-# --- One-time setup ---
-
-# MacBook
-brew install tailscale
-tailscale up                          # Log in (creates Tailscale account if needed)
-
-# Get your hostname (e.g., macbook.tail12345.ts.net)
-tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))"
-
-# Generate HTTPS cert for your hostname (optional but recommended for iOS ATS)
-tailscale cert justins-macbook-pro-2.tail173136.ts.net
-
-# iPhone
-# Install Tailscale from App Store → log in with same account
-# Both devices now share a private encrypted network
-
-# --- Update configs with your Tailscale hostname ---
-
-# backend/.env  →  ALLOWED_ORIGINS=...,https://justins-macbook-pro-2.tail173136.ts.net:8000
-# mobile/public/config.json  →  {"apiUrl":"https://justins-macbook-pro-2.tail173136.ts.net:8000"}
-# mobile/.env  →  EXPO_PUBLIC_API_URL=https://justins-macbook-pro-2.tail173136.ts.net:8000
-
-# --- Verify ---
-curl https://justins-macbook-pro-2.tail173136.ts.net:8000/health
-# Expected: {"status": "ok"}
+cd backend && source venv/bin/activate && pytest -q && ruff check app
+cd mobile && npx tsc --noEmit && npx jest && npx expo export --platform web
 ```
 
-### Why Tailscale over Cloudflare Tunnel?
-- **Stable URL**: Tailscale hostname never changes across restarts
-- **Zero public exposure**: Only devices on your Tailscale network can connect
-- **No tunnel process**: One fewer process to manage (no cloudflared)
-- **WireGuard encryption**: Peer-to-peer, fast, low-latency
-
----
-
-## Run Everything (Dev Mode)
-
-Open 2 terminals (no tunnel needed with Tailscale):
+## TestFlight
 
 ```bash
-# Terminal 1: Backend (reachable via Tailscale hostname automatically)
-cd backend && source venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Terminal 2: Mobile
-cd mobile && npm start
-```
-
-Or use the all-in-one script:
-```bash
-./scripts/start-tunnel.sh   # starts backend + prints Tailscale URL
-```
-
----
-
-## Tests
-
-```bash
-# Backend tests
-cd backend && source venv/bin/activate && pytest -v
-
-# Mobile tests
-cd mobile && npm test
-
-# All tests (from repo root)
-cd backend && source venv/bin/activate && pytest -v && cd ../mobile && npm test
-```
-
----
-
-## EAS Build (TestFlight Deployment)
-
-```bash
-# One-time setup
 cd mobile
-eas login
-eas build:configure
-
-# Build for iOS
-eas build --platform ios --profile production
-
-# Submit to TestFlight
-eas submit --platform ios
+eas build --platform ios --profile production --auto-submit
 ```
+Builds auto-increment the build number (`appVersionSource: remote`). Submission is
+non-interactive (`ascAppId` in `eas.json`).
 
----
+## Whoop OAuth
 
-## Smoke Tests (Deployer runs these)
-
-```bash
-# Backend alive
-curl -f http://localhost:8000/health || echo "FAIL: backend not running"
-
-# Backend returns valid JSON
-curl -sf http://localhost:8000/ | python3 -c "import sys,json; json.load(sys.stdin)" || echo "FAIL: API not returning valid JSON"
-
-# Mobile tests pass
-cd mobile && npm test || echo "FAIL: mobile tests failed"
-
-# Backend tests pass
-cd backend && source venv/bin/activate && pytest -v || echo "FAIL: backend tests failed"
-```
-
----
+Redirect URI registered with Whoop must include
+`https://justins-macbook-pro-2.tail2c4851.ts.net/api/v1/integrations/whoop/callback`
+(matches `OAUTH_REDIRECT_BASE` in the env file). Consent happens in the phone's browser,
+which is on the tailnet, so the callback resolves.
 
 ## Troubleshooting
 
 | Problem | Fix |
-|---------|-----|
-| Port 8000 in use | `lsof -ti:8000 \| xargs kill` |
-| Tailscale not connected | `tailscale up` (reconnect) |
-| Tailscale hostname unknown | `tailscale status` (shows hostname + IP) |
-| Expo not starting | `cd mobile && npx expo start --clear` |
-| iOS Simulator not found | `xcrun simctl list devices` |
-| Python venv not activated | `source backend/venv/bin/activate` |
+|---|---|
+| Phone shows "Can't reach the server" | Turn on Tailscale on the phone; check `tailscale status` on the Mac; `launchctl list \| grep com.habits.api` |
+| "API key rejected" banner | Me → Server: the key must equal `API_KEY` in the Mac env file |
+| `tailscale serve` says certs unsupported | Enable HTTPS Certificates in the Tailscale admin console (DNS tab) |
+| Service crash-looping | `tail -50 ~/Library/Logs/habits/api.err.log`; usually a missing env value or a migration error |
+| Deploy rolled back | `~/Library/Logs/habits/events.log` names the SHA; DB snapshot at `mastery.pre-deploy.db` |
+| Restore a backup | `gunzip -k "…/Habits Backups/mastery-YYYYMMDD-HHMM.db.gz"` then copy over `mastery.db` while the API is stopped |

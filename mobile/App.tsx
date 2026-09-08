@@ -4,8 +4,14 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
+import { Platform, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { registerForPushNotifications, scheduleDailyReview } from './src/services/notifications';
+import { registerDevice, serverReady } from './src/api/client';
+import { useServerStatus } from './src/hooks/useServerStatus';
+import ConnectionBanner from './src/components/ConnectionBanner';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif';
 import { JetBrainsMono_400Regular, JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
@@ -100,11 +106,24 @@ export default function App() {
     JetBrainsMono_500Medium,
   });
 
+  const server = useServerStatus();
+
   useEffect(() => {
-    // Request permissions and schedule daily review notification
-    registerForPushNotifications().then((token) => {
-      if (token !== null) {
-        scheduleDailyReview();
+    // Request permissions, schedule the daily review, and tell the server about this phone
+    registerForPushNotifications().then(async (token) => {
+      if (token === null) return;
+      scheduleDailyReview();
+      try {
+        await serverReady();
+        await registerDevice({
+          expo_push_token: token,
+          platform: Platform.OS,
+          app_version: Constants.expoConfig?.version ?? undefined,
+          build_number: Constants.nativeBuildVersion ?? undefined,
+          device_name: Device.deviceName ?? undefined,
+        });
+      } catch (err) {
+        console.warn('device registration failed:', err);
       }
     });
 
@@ -122,6 +141,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
+      <View style={{ flex: 1 }}>
+      <ConnectionBanner status={server.status} lastError={server.lastError} onRetry={server.retry} />
       <NavigationContainer ref={navigationRef}>
         <Tab.Navigator
           tabBar={props => <CustomTabBar {...props} />}
@@ -135,6 +156,7 @@ export default function App() {
         </Tab.Navigator>
         <StatusBar style="light" />
       </NavigationContainer>
+      </View>
     </SafeAreaProvider>
   );
 }

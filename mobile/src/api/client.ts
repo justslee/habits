@@ -1,25 +1,96 @@
 /**
  * API client for Mastery Tracker backend.
- * API_URL resolution order:
- * 1. Runtime config from /config.json (updated without rebuild)
- * 2. Build-time env var EXPO_PUBLIC_API_URL
- * 3. Fallback to localhost:8000
+ * API_URL / API_KEY resolution order:
+ * 1. Settings saved on the device (Me → Server) — changeable without a rebuild
+ * 2. Runtime /config.json (web only)
+ * 3. Build-time EXPO_PUBLIC_API_URL / EXPO_PUBLIC_API_KEY
+ * 4. Fallback to localhost:8000
+ *
+ * `API_URL` and `API_KEY` are live `let` bindings: screens that import API_URL
+ * see the updated value after the user changes the server.
  */
 
-let API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
-const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
+import { Platform } from 'react-native';
+import { DEFAULT_API_KEY, DEFAULT_SERVER_URL, loadServerSettings } from '../services/settings';
+
+let API_URL = DEFAULT_SERVER_URL;
+let API_KEY = DEFAULT_API_KEY;
+
+const _listeners = new Set<() => void>();
+
+/** Subscribe to server URL/key changes (used by the connectivity hook). */
+export function subscribeServerChange(fn: () => void): () => void {
+  _listeners.add(fn);
+  return () => { _listeners.delete(fn); };
+}
+
+/** Apply new server settings immediately (after the user saves them). */
+export function setRuntimeServer(serverUrl: string, apiKey: string): void {
+  API_URL = serverUrl;
+  API_KEY = apiKey;
+  _listeners.forEach((fn) => fn());
+}
+
+export function getApiUrl(): string {
+  return API_URL;
+}
 
 const _configPromise: Promise<void> = (async () => {
+  if (Platform.OS === 'web') {
+    try {
+      const res = await fetch('/config.json', { cache: 'no-store' });
+      if (res.ok) {
+        const cfg = await res.json();
+        if (cfg.apiUrl) API_URL = cfg.apiUrl;
+      }
+    } catch {
+      // config.json not available — use build-time value
+    }
+  }
   try {
-    const res = await fetch('/config.json', { cache: 'no-store' });
-    if (res.ok) {
-      const cfg = await res.json();
-      if (cfg.apiUrl) API_URL = cfg.apiUrl;
+    const saved = await loadServerSettings();
+    if (saved.isCustom) {
+      API_URL = saved.serverUrl;
+      API_KEY = saved.apiKey;
     }
   } catch {
-    // config.json not available — use build-time value
+    // keep defaults
   }
 })();
+
+/** Wait until saved settings have been applied (call before the first request). */
+export function serverReady(): Promise<void> {
+  return _configPromise;
+}
+
+/**
+ * Probe a server. Checks /health (public) and, when a key is given, an authed
+ * endpoint so a wrong API key is reported as such rather than as "offline".
+ */
+export async function checkHealth(
+  opts: { serverUrl?: string; apiKey?: string; timeoutMs?: number } = {},
+): Promise<{ ok: boolean; error: string | null }> {
+  await _configPromise;
+  const base = opts.serverUrl ?? API_URL;
+  const key = opts.apiKey ?? API_KEY;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
+  try {
+    const health = await fetch(`${base}/health`, { signal: controller.signal });
+    if (!health.ok) return { ok: false, error: `Server responded ${health.status}` };
+    const authed = await fetch(`${base}/api/v1/integrations/status`, {
+      headers: key ? { 'X-API-Key': key } : {},
+      signal: controller.signal,
+    });
+    if (authed.status === 401) return { ok: false, error: 'API key rejected' };
+    if (authed.status === 503) return { ok: false, error: 'Server has no API key configured' };
+    return { ok: true, error: null };
+  } catch (err: any) {
+    return { ok: false, error: err?.name === 'AbortError' ? 'Timed out' : 'Unreachable' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export interface EntryCreatePayload {
   description: string;
@@ -94,6 +165,20 @@ export function apiHeaders(): Record<string, string> {
 }
 
 export { API_URL };
+
+// --- Devices (server-initiated push) ---
+
+export interface DeviceRegistration {
+  expo_push_token: string;
+  platform?: string;
+  app_version?: string;
+  build_number?: string;
+  device_name?: string;
+}
+
+export function registerDevice(payload: DeviceRegistration): Promise<{ id: number }> {
+  return request('/api/v1/devices', { method: 'POST', body: JSON.stringify(payload) });
+}
 
 export function createEntry(payload: EntryCreatePayload): Promise<EntryResponse> {
   // Entry creation triggers LLM evaluation (~30-60s)

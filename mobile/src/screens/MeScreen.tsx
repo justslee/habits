@@ -18,10 +18,14 @@ import { colors, fonts, radius, spacing } from '../theme';
 import {
   getDashboardStats, DashboardStats,
   getIntegrationStatus, integrationAuthorizeUrl, disconnectIntegration,
+  getApiUrl,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
 import ScreenBackground from '../components/ScreenBackground';
 import Topbar from '../components/Topbar';
+import ServerSettingsSheet from '../components/ServerSettingsSheet';
+import { useServerStatus } from '../hooks/useServerStatus';
+import { serverHost } from '../services/settings';
 
 interface SectionRow {
   k: string;
@@ -41,6 +45,9 @@ export default function MeScreen() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [whoopConnected, setWhoopConnected] = useState(false);
+  const [serverSheet, setServerSheet] = useState(false);
+  const [serverUrl, setServerUrl] = useState(getApiUrl());
+  const server = useServerStatus();
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -114,6 +121,19 @@ export default function MeScreen() {
         { k: 'Vision · 2026', v: 'Edit', kind: 'link' },
         { k: 'Pillars · 5', v: 'Manage', kind: 'link' },
         { k: 'Anti-goals', v: '—', kind: 'link' },
+      ],
+    },
+    {
+      h: 'Server',
+      items: [
+        {
+          k: 'Backend',
+          v: server.status === 'online' ? 'Connected' : server.status === 'checking' ? 'Checking' : (server.lastError ?? 'Unreachable'),
+          kind: 'status',
+          good: server.status === 'online',
+          onPress: server.retry,
+        },
+        { k: serverHost(serverUrl), v: 'Change', kind: 'link', onPress: () => { haptic.light(); setServerSheet(true); } },
       ],
     },
     {
@@ -217,6 +237,15 @@ export default function MeScreen() {
 
         <View style={{ height: 80 }} />
       </ScrollView>
+      <ServerSettingsSheet
+        visible={serverSheet}
+        onClose={() => setServerSheet(false)}
+        onChanged={() => {
+          setServerUrl(getApiUrl());
+          fetchStats();
+          fetchStatus();
+        }}
+      />
     </ScreenBackground>
   );
 }
