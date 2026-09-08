@@ -28,7 +28,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.routers import concepts, daily, dashboard, entries, integrations, milestones, runs, speaking, streaks, vdot, vision, weekly_reviews, whoop, workouts
+from app.routers import concepts, daily, dashboard, devices, entries, integrations, milestones, runs, speaking, streaks, vdot, vision, weekly_reviews, whoop, workouts
 
 logger = logging.getLogger("mastery_tracker")
 
@@ -125,6 +125,7 @@ app.include_router(speaking.router)
 app.include_router(vision.router)
 app.include_router(whoop.router)
 app.include_router(integrations.router)
+app.include_router(devices.router)
 app.include_router(concepts.router)
 app.include_router(concepts.link_router)
 

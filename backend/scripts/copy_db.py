@@ -24,7 +24,19 @@ import os
 import sys
 from typing import Any
 
-from sqlalchemy import JSON, MetaData, String, Table, Text, create_engine, delete, func, insert, select, text
+from sqlalchemy import (
+    JSON,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    delete,
+    func,
+    insert,
+    select,
+    text,
+)
 from sqlalchemy.engine import Connection, Engine
 
 SKIP_TABLES = {"alembic_version"}
@@ -52,7 +64,9 @@ def _coerce_row(row: dict[str, Any], table: Table) -> dict[str, Any]:
 def _alembic_rev(engine: Engine) -> str | None:
     try:
         with engine.connect() as conn:
-            return conn.execute(text("select version_num from alembic_version")).scalar()
+            return conn.execute(
+                text("select version_num from alembic_version")
+            ).scalar()
     except Exception:  # noqa: BLE001 — table may not exist
         return None
 
@@ -63,11 +77,15 @@ def _reset_pg_sequences(conn: Connection, tables: list[Table]) -> None:
         if len(pk) != 1:
             continue
         col = pk[0].name
-        seq = conn.execute(text("select pg_get_serial_sequence(:t, :c)"), {"t": t.name, "c": col}).scalar()
+        seq = conn.execute(
+            text("select pg_get_serial_sequence(:t, :c)"), {"t": t.name, "c": col}
+        ).scalar()
         if not seq:
             continue
         conn.execute(
-            text(f"select setval('{seq}', coalesce((select max({col}) from {t.name}), 0) + 1, false)")
+            text(
+                f"select setval('{seq}', coalesce((select max({col}) from {t.name}), 0) + 1, false)"
+            )
         )
 
 
@@ -87,7 +105,10 @@ def main() -> int:
     src_rev, dst_rev = _alembic_rev(src), _alembic_rev(dst)
     print(f"source alembic revision: {src_rev}\ntarget alembic revision: {dst_rev}")
     if src_rev != dst_rev:
-        print("ERROR: revisions differ — run `alembic upgrade head` against DST_URL first", file=sys.stderr)
+        print(
+            "ERROR: revisions differ — run `alembic upgrade head` against DST_URL first",
+            file=sys.stderr,
+        )
         return 2
 
     src_meta = MetaData()
@@ -111,11 +132,17 @@ def main() -> int:
             for t in reversed(ordered):
                 if not dry_run:
                     dconn.execute(delete(dst_meta.tables[t.name]))
-            print("target tables emptied" if not dry_run else "(dry run) would empty target tables")
+            print(
+                "target tables emptied"
+                if not dry_run
+                else "(dry run) would empty target tables"
+            )
 
         for t in ordered:
             target = dst_meta.tables[t.name]
-            rows = [_coerce_row(dict(r._mapping), target) for r in sconn.execute(select(t))]
+            rows = [
+                _coerce_row(dict(r._mapping), target) for r in sconn.execute(select(t))
+            ]
             print(f"  {t.name:<24} {len(rows):>6} rows")
             total += len(rows)
             if dry_run or not rows:
@@ -135,7 +162,9 @@ def main() -> int:
     with src.connect() as sconn, dst.connect() as dconn:
         for t in ordered:
             s = sconn.execute(select(func.count()).select_from(t)).scalar()
-            d = dconn.execute(select(func.count()).select_from(dst_meta.tables[t.name])).scalar()
+            d = dconn.execute(
+                select(func.count()).select_from(dst_meta.tables[t.name])
+            ).scalar()
             if s != d:
                 mismatched.append((t.name, s, d))
     if mismatched:

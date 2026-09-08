@@ -16,7 +16,7 @@
 | Auth | Single shared `X-API-Key` header, rate limit 60/min, CORS allowlist. No user accounts (single user). |
 | Tests | Backend: 210 pass, 1 pre-existing failure (`test_workout_api.py::TestExerciseProfiles::test_list_empty`, also noted in PR #14). Mobile: 1 Jest smoke test. |
 | This Mac | M2 Pro, 32 GB, macOS 26.2. `caffeinate -dimsu` already runs from `com.looper.keepawake` (scorecard). FileVault **on**. Tailscale installed but **stopped** (tailnet `tail2c4851`). `cloudflared` installed, not logged in. AWS CLI creds present. Xcode present. `eas` logged in as the owner. |
-| Existing agents | `~/.openclaw` gateway (v2026.2.24, Telegram channel, browser tool) is installed but its launchd job is **crash-looping** (exit -6). Claude Code with the Telegram plugin is working (this session). Scorecard has a mature always-on loop: `ops/mac/start.sh`, `.claude/agents`, guard hook, bundle-to-ship policy. |
+| Existing agents | OpenClaw gateway **retired 2026-09-08** (launchd job removed, package uninstalled). Claude Code reaches the phone through Remote Control (the Claude app); the Telegram plugin is retired. Scorecard has a mature always-on loop: `ops/mac/start.sh`, `.claude/agents`, guard hook, bundle-to-ship policy. |
 | Repo docs | Root still carries the Feb starter-kit files (`manager.md`, `builder.md`, `TASKS*.md`, `SPEC.md`, ...) duplicated under `docs/`. `docs/CONTEXT.md`/`STATUS.md` describe the Feb architecture (Anthropic, Cloudflare tunnel), not what runs. |
 
 Implication: this is not "deploy to the Mac for the first time". It is a **migration back from the cloud** with a data move, a URL change on the phone, and a deploy pipeline swap.
@@ -28,7 +28,7 @@ Implication: this is not "deploy to the Mac for the first time". It is a **migra
 ```
 iPhone (TestFlight)                     Anywhere
   Habits app ── Tailscale VPN (WireGuard) ──► https://justins-macbook-pro-2.tail2c4851.ts.net
-  Telegram ────────────────────────────────► Claude Code operator session
+  Claude app (Remote Control) ─────────────► Claude Code operator session
   TestFlight app  ◄── new builds ─────────── EAS (cloud build, auto-submit)
 
 MacBook (always on, tailnet only, nothing public)
@@ -38,7 +38,7 @@ MacBook (always on, tailnet only, nothing public)
   launchd: com.habits.backup   nightly SQLite snapshot → iCloud Drive (+ optional S3)
   launchd: com.looper.keepawake (exists)
   Claude Code "Habits operator": /loop — builds backlog, merges when gates pass, ships TestFlight,
-      runs browser tasks (Playwright, headed Chrome profile), answers Telegram
+      runs browser tasks (Playwright, headed Chrome profile), reachable from the Claude app
   Backend brain (metered API, OpenAI or Anthropic): in-app evaluations, coaching, assistant chat
 ```
 
@@ -61,10 +61,10 @@ Single user, one machine, ~1 MB of data. SQLite is already the local path; backu
 Nothing to change today; `llm.py` already abstracts two tiers. The assistant work in Phase 4 needs tool calling, which both providers support. If you want everything on Anthropic (the OpenClaw config already prefers `claude-opus-4-6`), that is a one-file swap in `llm.py` plus re-adding the SDK. Decide when Phase 4 starts.
 
 **DECIDE D — Merge policy: auto-merge when gates pass (recommended).**
-You said you do not want to review PRs granularly. So: the operator opens a PR, gates run (pytest, `tsc --noEmit`, jest, `expo export`, `/code-review`), and it merges itself. Your review surface becomes the TestFlight build plus a one-word revert from Telegram. Branch protection requires the checks, not a human.
+You said you do not want to review PRs granularly. So: the operator opens a PR, gates run (pytest, `tsc --noEmit`, jest, `expo export`, `/code-review`), and it merges itself. Your review surface becomes the TestFlight build plus a one-word revert from the Claude app. Branch protection requires the checks, not a human.
 
-**DECIDE E — Retire OpenClaw or fix it.**
-It is crash-looping and would compete with the Claude Code Telegram bot for the same role. Recommended: unload `ai.openclaw.gateway` and let Claude Code be the single operator. Keep the config around in case you want its browser tool later.
+**DECIDE E — OpenClaw: retired (done 2026-09-08).**
+The `ai.openclaw.gateway` launchd job was removed and the global package uninstalled. Claude Code is the single operator. The `~/.openclaw` folder (424 MB of config, logs and browser profiles) was left in place for you to delete.
 
 ---
 
@@ -80,7 +80,7 @@ Ordered by dependency. Phase 1 and 2 together get the app off the cloud. Phases 
 4. **launchd service `com.habits.api`.** `backend/ops/mac/start-api.sh` (activate venv, `alembic upgrade head`, `uvicorn --host 127.0.0.1 --port 8000`), plist with `RunAtLoad` + `KeepAlive`, logs to `~/Library/Logs/habits/`. Bind to loopback only; Tailscale fronts it.
 5. **Tailscale.** `tailscale up`, enable start-at-login in the app, confirm MagicDNS + HTTPS are on in the admin console, then `tailscale serve --bg --https=443 http://127.0.0.1:8000`. Test `curl https://justins-macbook-pro-2.tail2c4851.ts.net/health` from the phone on cellular with the VPN on.
 6. **Backups.** `com.habits.backup` runs nightly: `sqlite3 mastery.db ".backup ..."` into iCloud Drive with 30-day rotation. Optional: Litestream to S3 for continuous replication.
-7. **Uptime.** A tiny watchdog (launchd, every 5 min): if `/health` fails twice, restart the service and send a Telegram message. Also surface a "server unreachable" state in the app (Phase 2).
+7. **Uptime.** A tiny watchdog (launchd, every 5 min): if `/health` fails twice, restart the service and post a macOS notification and log the event. Also surface a "server unreachable" state in the app (Phase 2).
 8. **Power and reboots.** `caffeinate` already prevents sleep. Set `pmset -a autorestart 1` for power-failure recovery. Known limit: FileVault means a reboot stops at the unlock screen and nothing starts until you type the password. Mitigation: turn off automatic macOS update restarts; accept a manual unlock after rare reboots.
 9. **Decommission the cloud.** After 3 days of the phone hitting the Mac with no issues: `systemctl disable --now habits-api` on EC2 via SSM (scorecard untouched), delete `.github/workflows/deploy.yml`, `backend/deploy/`, `backend/ops/bootstrap.sh`, `backend/app/services/secrets.py`, drop `boto3` and `psycopg` from requirements. Leave the Route 53 record until the last cloud-era build is off every device.
 
@@ -98,13 +98,13 @@ Acceptance: app on the phone, on cellular, loads today's data from the Mac; Mac 
 Reuse scorecard's proven scaffolding, adapted:
 
 1. **Consolidate the repo brain.** Move the Feb starter-kit files out of the root (`manager.md`, `builder.md`, `deployer.md`, `TASKS*.md`, `SPEC.md` duplicates, `WORKOUT-UI-REDESIGN.md`, `update-tunnel.sh`, `scripts/start-tunnel.sh`) into `docs/archive/` or delete. Write a real `CLAUDE.md` (commands, gates, layout, rules) and `.claude/agents/` (eng-lead, builder, reviewer, qa, release-manager) plus `.claude/hooks/guard.sh` that hard-blocks `.env`, migrations edits without tests, force-push, and `rm -rf`. Rewrite `docs/CONTEXT.md`, `STATUS.md`, `RUNBOOK.md` to describe the Mac architecture.
-2. **Backlog as data.** `backlog.json` with priority, size, and a `visible_to_owner` flag. The operator picks the next item; you add items from Telegram ("add to backlog: ...") or from the in-app feedback button (below).
+2. **Backlog as data.** `backlog.json` with priority, size, and a `visible_to_owner` flag. The operator picks the next item; you add items from the Claude app ("add to backlog: ...") or from the in-app feedback button (below).
 3. **Gates, then self-merge.** PR → CI (GitHub Actions on `ubuntu-latest`: pytest, ruff, `tsc --noEmit`, jest, `expo export --platform web`) → `/code-review` → `/security-review` for anything touching auth, data, or new endpoints → `gh pr merge --squash --auto`. Branch protection: required checks, no required reviewers.
-4. **Backend auto-deploy on the Mac.** `com.habits.deploy` polls `origin/main` every 5 min. On change: `git pull --ff-only`, `pip install -r`, `alembic upgrade head`, restart `com.habits.api`, health-check, and on failure `git checkout` the previous SHA + restart + Telegram alert. This replaces `deploy.yml`.
+4. **Backend auto-deploy on the Mac.** `com.habits.deploy` polls `origin/main` every 5 min. On change: `git pull --ff-only`, `pip install -r`, `alembic upgrade head`, restart `com.habits.api`, health-check, and on failure `git checkout` the previous SHA + restart + macOS notification. This replaces `deploy.yml`.
 5. **Auto-TestFlight.** A GitHub Actions workflow on push to `main` with `paths: mobile/**`: `eas build --platform ios --profile production --auto-submit --non-interactive` using an `EXPO_TOKEN` repo secret. Throttle to at most one build per day (a concurrency group plus a "changed since last build" check) so the 30-builds/month free tier lasts; the operator can force one. Fallback for outages or speed: `eas build --local` on the Mac, which has Xcode.
-6. **Prototypes behind Labs.** New or experimental screens ship behind a "Labs" section in the Me tab with a per-feature toggle, so a half-done idea can reach your phone without touching the main flow. You tap in, try it, and say "keep" or "kill" on Telegram. Promotion out of Labs is a backlog item.
+6. **Prototypes behind Labs.** New or experimental screens ship behind a "Labs" section in the Me tab with a per-feature toggle, so a half-done idea can reach your phone without touching the main flow. You tap in, try it, and say "keep" or "kill" from the Claude app. Promotion out of Labs is a backlog item.
 7. **Feedback from inside the prototype.** A shake-to-report or "Feedback" button posts `{screen, text, screenshot}` to `POST /api/v1/feedback`; the operator turns unread feedback into backlog items each loop. This closes the loop without you writing prompts.
-8. **Notifications, rarely.** Telegram only for: a new TestFlight build (with a three-line "what to try"), a blocker, or a rollback. Never for routine merges.
+8. **Notifications, rarely.** Remote Control push only for: a new TestFlight build (with a three-line "what to try"), a blocker, or a rollback. Never for routine merges.
 9. **Run it.** `ops/mac/start.sh` → `caffeinate claude --remote-control "Habits operator" --permission-mode auto`, then `/loop 4h ...`. Supervise the first day, as scorecard's RUN.md prescribes.
 
 ### Phase 4 — Assistant and memory
@@ -117,9 +117,9 @@ Reuse scorecard's proven scaffolding, adapted:
 
 ### Phase 5 — Browser agent with secure checkout
 
-1. **Task queue.** `assistant_tasks` (type, payload, status: queued | running | needs_approval | approved | done | failed, artifacts: screenshots, summary). Created from the app chat, Telegram, or a schedule ("weekly groceries").
+1. **Task queue.** `assistant_tasks` (type, payload, status: queued | running | needs_approval | approved | done | failed, artifacts: screenshots, summary). Created from the app chat, the Claude app, or a schedule ("weekly groceries").
 2. **Executor on the Mac.** The operator session picks up queued tasks and drives a dedicated headed Chrome profile via Playwright MCP. You log that profile into each merchant once. Merchant allowlist plus per-merchant monthly caps live in `merchant_accounts`.
-3. **Build → verify → ask → submit.** Agent builds the cart, screenshots the final cart page, writes a plain summary (items, quantities, total, delivery window), and sets the task to `needs_approval`. Backend pushes to the phone; the app shows an approval sheet gated by Face ID (`expo-local-authentication`). Approve → task `approved` → agent submits using the merchant's saved payment method → receipt screenshot stored on the task, an `orders` row written, Telegram confirmation.
+3. **Build → verify → ask → submit.** Agent builds the cart, screenshots the final cart page, writes a plain summary (items, quantities, total, delivery window), and sets the task to `needs_approval`. Backend pushes to the phone; the app shows an approval sheet gated by Face ID (`expo-local-authentication`). Approve → task `approved` → agent submits using the merchant's saved payment method → receipt screenshot stored on the task, an `orders` row written, push confirmation.
 4. **Hard rules.** The app never stores card numbers. No checkout without an approved task. Approval expires in 15 minutes and is bound to the cart total; a changed total requires re-approval. Every task keeps its full screenshot trail.
 5. **Why it needs Phase 1's choices.** Logged-in merchant sessions live on this Mac; that is why the API stays tailnet-only and the Chrome profile is separate from your own.
 

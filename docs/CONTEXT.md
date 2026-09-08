@@ -19,7 +19,7 @@
 | Pkg (FE)   | npm (Expo default) | Expo compatibility                     |
 | Formatter  | ruff (BE), prettier (FE) | Non-negotiable, run before commit  |
 | Port (BE)  | 8000             | FastAPI default                          |
-| AI Backend | Anthropic SDK (claude-opus-4-6) | Call via `call_claude()` in `evaluation.py`; requires `ANTHROPIC_API_KEY` |
+| AI Backend | OpenAI Responses API (gpt-5.6-sol / gpt-5.5) | `structured_output()` / `generate_text()` in `services/llm.py`; requires `OPENAI_API_KEY` |
 
 ## Architecture
 
@@ -75,8 +75,8 @@
 | Component | Target                  | Access Method                      |
 |-----------|-------------------------|------------------------------------|
 | Frontend  | iPhone via TestFlight   | Expo EAS Build                     |
-| Backend   | Local MacBook :8000     | Cloudflare Tunnel (HTTPS)          |
-| Anthropic | api.anthropic.com       | ANTHROPIC_API_KEY env var          |
+| Backend   | Always-on MacBook :8000 (launchd) | Tailscale (`tailscale serve`, HTTPS, tailnet-only) |
+| LLM       | api.openai.com (Responses API) | OPENAI_API_KEY in the Mac env file |
 
 ## Expo / React Native Notes
 

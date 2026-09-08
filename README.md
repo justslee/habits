@@ -8,11 +8,11 @@ running coaching, speaking practice, and a North Star progress view.
 | Piece | Tech |
 | --- | --- |
 | Backend | FastAPI (Python 3.12), SQLAlchemy, Alembic |
-| Database | Postgres in production; SQLite for local dev |
+| Database | SQLite on the always-on Mac (nightly backups to iCloud Drive) |
 | Mobile | React Native / Expo (SDK 54), TypeScript |
 | AI | OpenAI Responses API — `gpt-5.6-sol` (reasoning), `gpt-5.5` (fast tier) |
 | Speech-to-text | Deepgram `nova-3` |
-| Hosting | EC2 (systemd + nginx) behind an ALB at `habits.looperapp.org` |
+| Hosting | Always-on MacBook (launchd) behind Tailscale at `justins-macbook-pro-2.tail2c4851.ts.net` |
 
 ## Layout
 
@@ -50,6 +50,7 @@ npx expo start
 
 ## Deploy
 
-Push to `main` triggers `.github/workflows/deploy.yml`, which deploys the backend
-via AWS SSM (git pull → deps → `alembic upgrade head` → restart `habits-api`).
+The backend self-deploys on the Mac: `com.habits.deploy` polls `origin/main` every 5 minutes
+and pulls, migrates, restarts and health-checks (rolling back on failure). See
+[docs/RUNBOOK.md](docs/RUNBOOK.md) and `backend/ops/mac/`.
 Mobile ships via `eas build --platform ios --profile production --auto-submit`.

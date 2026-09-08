@@ -21,6 +21,7 @@ from app.models.concept_touch import ConceptTouch
 from app.models.speaking import SpeakingSession, SpeakingEvaluation
 from app.models.coaching import CoachingObservation
 from app.models.integration import OAuthConnection
+from app.models.device import PushDevice
 
 __all__ = [
     "Base",
@@ -53,4 +54,5 @@ __all__ = [
     "SpeakingEvaluation",
     "CoachingObservation",
     "OAuthConnection",
+    "PushDevice",
 ]
