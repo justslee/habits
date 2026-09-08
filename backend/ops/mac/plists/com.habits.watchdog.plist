@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Habits watchdog: every 5 min, restart the API after two failed health checks. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.habits.watchdog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SRV__/watchdog.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__HOME__</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/habits/watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/habits/watchdog.log</string>
+</dict>
+</plist>
