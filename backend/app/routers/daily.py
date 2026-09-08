@@ -391,7 +391,6 @@ async def get_daily_summary(db: Session = Depends(get_db)):
     # Workout preview
     workout_preview = None
     workout_day_type = None
-    whoop_recovery = None
     try:
         from app.services.workout_generator import get_day_type_for_date
         workout_day_type = get_day_type_for_date(today)
@@ -402,13 +401,6 @@ async def get_daily_summary(db: Session = Depends(get_db)):
     except Exception:
         pass
 
-    try:
-        from app.services.whoop import fetch_whoop_data
-        whoop_data = await fetch_whoop_data(user.id, db)
-        whoop_recovery = whoop_data.get("recovery_score")
-    except Exception:
-        pass  # Whoop not connected / unavailable — summary works without it
-
     return DailySummaryResponse(
         quote=quote_text,
         quote_author=quote_author,
@@ -416,7 +408,6 @@ async def get_daily_summary(db: Session = Depends(get_db)):
         habits=[_habit_to_response(h, today, db) for h in habits],
         workout_preview=workout_preview,
         workout_day_type=workout_day_type,
-        whoop_recovery=whoop_recovery,
     )
 
 

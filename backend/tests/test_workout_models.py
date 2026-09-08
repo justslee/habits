@@ -6,7 +6,6 @@ from app.models.user import User
 from app.models.workout import (
     ExerciseLog,
     ExerciseProfile,
-    WhoopSnapshot,
     WorkoutSession,
 )
 
@@ -48,21 +47,6 @@ class TestWorkoutSession:
         assert len(session.exercises) == 1
         assert session.exercises[0].volume_load == 825
 
-    def test_session_with_whoop(self, db_session):
-        user = db_session.query(User).first()
-        session = WorkoutSession(
-            user_id=user.id,
-            session_date=date.today(),
-            day_type="push",
-            whoop_recovery_score=78,
-            whoop_hrv=68,
-            whoop_resting_hr=52,
-            whoop_sleep_score=85,
-        )
-        db_session.add(session)
-        db_session.commit()
-        assert session.whoop_recovery_score == 78
-
 
 class TestExerciseProfile:
     def test_create_profile(self, db_session):
@@ -92,23 +76,6 @@ class TestExerciseProfile:
         assert profile.stall_count == 0
         assert profile.sessions_at_current_weight == 0
         assert profile.mesocycle_week == 1
-
-
-class TestWhoopSnapshot:
-    def test_create_snapshot(self, db_session):
-        user = db_session.query(User).first()
-        snap = WhoopSnapshot(
-            user_id=user.id,
-            snapshot_date=date.today(),
-            recovery_score=74,
-            hrv=71,
-            resting_hr=50,
-            sleep_score=84,
-            strain_score=12.5,
-        )
-        db_session.add(snap)
-        db_session.commit()
-        assert snap.recovery_score == 74
 
 
 class TestExerciseLog:

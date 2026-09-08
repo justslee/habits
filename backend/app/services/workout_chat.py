@@ -115,12 +115,6 @@ def _build_chat_context(session: WorkoutSession, db: Session) -> str:
     """Build context of what's been done so far in the session."""
     lines = [f"Session type: {session.day_type.upper()} day"]
 
-    # Whoop context
-    if session.whoop_recovery_score:
-        lines.append(f"Whoop recovery: {session.whoop_recovery_score}%")
-        if session.whoop_hrv:
-            lines.append(f"HRV: {session.whoop_hrv}, RHR: {session.whoop_resting_hr}")
-
     if session.ai_plan:
         try:
             plan = json.loads(session.ai_plan) if isinstance(session.ai_plan, str) else session.ai_plan
@@ -459,7 +453,7 @@ async def _analyze_session_and_save_observations(
     prompt = f"""Analyze this completed {session.day_type.upper()} session and generate 2-3 specific coaching observations.
 Be precise and data-driven. No vague encouragement — concrete patterns only.
 
-RPE: {session.overall_rpe or 'N/A'} | WHOOP recovery: {session.whoop_recovery_score or '?'}%
+RPE: {session.overall_rpe or 'N/A'}
 
 {planned_str}
 

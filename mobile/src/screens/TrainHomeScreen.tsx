@@ -9,7 +9,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, Animated, AppState,
+  RefreshControl, Animated,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,8 +24,6 @@ import {
 } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
-import WhoopCard from '../components/WhoopCard';
-import { getWhoopData, WhoopData } from '../api/client';
 import {
   DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
 } from '../constants/trainingSchedule';
@@ -36,7 +34,6 @@ import SegmentedSwitch from '../components/SegmentedSwitch';
 import CoachHero from '../components/CoachHero';
 import CoachSheet from '../components/CoachSheet';
 import Topbar from '../components/Topbar';
-import WhoopHeroCard from '../components/WhoopHeroCard';
 import WorkoutStartCard from '../components/WorkoutStartCard';
 import SessionListCard from '../components/SessionListCard';
 
@@ -61,11 +58,9 @@ export default function TrainHomeScreen({ navigation }: any) {
   const [todayWorkout, setTodayWorkout] = useState<WorkoutSession | null>(null);
   const [todayRun, setTodayRun] = useState<TodayRunData | null>(null);
   const [activePlan, setActivePlan] = useState<TrainingPlanData | null>(null);
-  const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
 
   const [coachOpen, setCoachOpen] = useState(false);
   const heroScale = usePressScale(0.97);
-  const appState = useRef(AppState.currentState);
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<{
@@ -75,20 +70,18 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [training, summary, workout, run, plan, whoop] = await Promise.allSettled([
+      const [training, summary, workout, run, plan] = await Promise.allSettled([
         getRecentTraining(14),
         getWeekSummary(),
         getTodayWorkout(),
         getTodayRun(),
         getActivePlan(),
-        getWhoopData(),
       ]);
       if (training.status === 'fulfilled') setRecentTraining(training.value);
       if (summary.status === 'fulfilled') setWeekSummary(summary.value);
       if (workout.status === 'fulfilled') setTodayWorkout(workout.value);
       if (run.status === 'fulfilled') setTodayRun(run.value);
       if (plan.status === 'fulfilled') setActivePlan(plan.value);
-      if (whoop.status === 'fulfilled') setWhoopData(whoop.value);
     } catch (err) {
       console.warn('TrainHome fetch error:', err);
     }
@@ -102,17 +95,6 @@ export default function TrainHomeScreen({ navigation }: any) {
     const unsub = navigation?.addListener?.('focus', fetchData);
     return unsub;
   }, [navigation, fetchData]);
-
-  // Re-fetch WHOOP data when app returns to foreground (recovery score updates throughout the day)
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', nextState => {
-      if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        getWhoopData().then(setWhoopData).catch(() => {});
-      }
-      appState.current = nextState;
-    });
-    return () => sub.remove();
-  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -601,11 +583,9 @@ export default function TrainHomeScreen({ navigation }: any) {
                         ? <>{todayRun.planned_run.run_type === 'easy' ? 'Aerobic deposit' : 'Run'} today. {todayRun.planned_run.description || 'Stay easy.'}</>
                         : <>Mobility, walk, sleep — those are the work today.</>
                 }
-                meta={whoopData?.recovery_score != null ? `RECOVERY ${Math.round(whoopData.recovery_score)}% · WHOOP` : undefined}
                 onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
               />
             </View>
-            {whoopData && <WhoopHeroCard data={whoopData} />}
             {todayRun?.planned_run && (
               <WorkoutStartCard
                 kind="run"

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from pathlib import Path as _Path
 load_dotenv(_Path(__file__).resolve().parent.parent / ".env", override=True)  # override=True so .env wins over empty shell vars
 
-# Pull prod secrets (OPENAI_API_KEY, WHOOP_*, API_KEY, …) from AWS Secrets Manager
+# Pull prod secrets (OPENAI_API_KEY, API_KEY, …) from AWS Secrets Manager
 # into the env BEFORE routers/services import. No-op locally (fail-open); never
 # overrides an explicit env var / .env value.
 from app.services.secrets import load_secrets_into_env  # noqa: E402
@@ -28,7 +28,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.routers import concepts, daily, dashboard, devices, entries, integrations, milestones, runs, speaking, streaks, vdot, vision, weekly_reviews, whoop, workouts
+from app.routers import concepts, daily, dashboard, devices, entries, milestones, runs, speaking, streaks, vdot, vision, weekly_reviews, workouts
 
 logger = logging.getLogger("mastery_tracker")
 
@@ -76,15 +76,7 @@ _testing = os.getenv("TESTING", "") == "1"
 
 
 def _is_public_path(path: str) -> bool:
-    if path in _PUBLIC_PATHS:
-        return True
-    # OAuth consent + provider redirect are hit by the browser / provider, which
-    # can't send the X-API-Key header. They carry their own OAuth state/code.
-    if path.startswith("/api/v1/integrations/") and (
-        path.endswith("/authorize") or path.endswith("/callback")
-    ):
-        return True
-    return False
+    return path in _PUBLIC_PATHS
 
 
 @app.middleware("http")
@@ -123,8 +115,6 @@ app.include_router(vdot.router)
 app.include_router(workouts.router)
 app.include_router(speaking.router)
 app.include_router(vision.router)
-app.include_router(whoop.router)
-app.include_router(integrations.router)
 app.include_router(devices.router)
 app.include_router(concepts.router)
 app.include_router(concepts.link_router)
@@ -149,7 +139,6 @@ async def config_status():
     return {
         "openai": _set("OPENAI_API_KEY"),
         "api_key": _set("API_KEY"),
-        "whoop_client": _set("WHOOP_CLIENT_ID") and _set("WHOOP_CLIENT_SECRET"),
         "database_url": _set("DATABASE_URL"),
         "notion": _set("NOTION_TOKEN"),
     }

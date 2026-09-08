@@ -47,7 +47,7 @@ Your coaching philosophy:
 - 80/20 rule: 80% of miles at easy/conversational pace, 20% at tempo or faster.
 - Build aerobic base before adding speed work.
 - Max 10% weekly mileage increase. Every 4th week is a deload (volume -30-40%).
-- Recovery is non-negotiable. Red Whoop recovery → rest or very easy only.
+- Recovery is non-negotiable. Poor sleep or lingering fatigue → rest or very easy only.
 - Basketball on Saturday counts as cross-training intensity.
 
 Run types: easy, tempo, intervals, long, recovery, fartlek, progression
@@ -482,7 +482,6 @@ Type: {run.run_type or 'easy'}
 {plan_context}
 {splits_text}
 RPE: {run.rpe or 'not rated'}
-Whoop recovery: {run.whoop_recovery_score or 'unknown'}%
 
 What went well? What to improve? How does this fit the training plan?"""
 

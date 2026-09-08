@@ -35,10 +35,6 @@ def _session_to_response(session: WorkoutSession) -> WorkoutSessionResponse:
         session_date=session.session_date.isoformat(),
         day_type=session.day_type,
         status=session.status,
-        whoop_recovery_score=session.whoop_recovery_score,
-        whoop_hrv=session.whoop_hrv,
-        whoop_resting_hr=session.whoop_resting_hr,
-        whoop_sleep_score=session.whoop_sleep_score,
         ai_plan=session.ai_plan,
         coach_notes=session.coach_notes,
         overall_rpe=session.overall_rpe,
@@ -177,26 +173,12 @@ async def get_today_plan(db: Session = Depends(get_db)):
         else:
             return _session_to_response(session)
 
-    # Fetch Whoop data
-    whoop_data = {}
-    try:
-        from app.services.whoop import fetch_whoop_data, cache_whoop_snapshot
-        whoop_data = await fetch_whoop_data(user.id, db)
-        cache_whoop_snapshot(user.id, whoop_data, db)
-    except Exception:
-        pass  # Whoop unavailable — continue without it
-
-    # Generate plan (with Whoop recovery context)
-    plan = await generate_workout_plan(user.id, day_type, whoop_data or None, db)
+    plan = await generate_workout_plan(user.id, day_type, db)
 
     session = WorkoutSession(
         user_id=user.id,
         session_date=today,
         day_type=day_type,
-        whoop_recovery_score=whoop_data.get("recovery_score"),
-        whoop_hrv=whoop_data.get("hrv"),
-        whoop_resting_hr=whoop_data.get("resting_hr"),
-        whoop_sleep_score=whoop_data.get("sleep_score"),
         ai_plan=json.dumps(plan),
         coach_notes=plan.get("coach_notes"),
         status="planned",

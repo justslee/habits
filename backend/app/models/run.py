@@ -33,10 +33,6 @@ class RunSession(Base, TimestampMixin):
     rpe: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Whoop context
-    whoop_recovery_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    whoop_strain: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-
     # AI feedback
     ai_feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

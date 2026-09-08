@@ -1,5 +1,5 @@
 /**
- * WorkoutDetailScreen — Whoop-inspired workout summary.
+ * WorkoutDetailScreen — workout summary.
  * Shows hero stats, recovery data, and exercise breakdown.
  */
 import React, { useEffect, useState, useCallback } from 'react';
@@ -8,8 +8,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getWorkoutSession, getWhoopData, getWhoopSnapshot, WorkoutSession, ExerciseLogData, WhoopData } from '../api/client';
-import WhoopCard from '../components/WhoopCard';
+import { getWorkoutSession, WorkoutSession, ExerciseLogData } from '../api/client';
 import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton, SkeletonRow, SkeletonStatCard } from '../components/Skeleton';
@@ -66,7 +65,6 @@ export default function WorkoutDetailScreen({ route }: any) {
   const { sessionId } = route.params;
   const insets = useSafeAreaInsets();
   const [session, setSession] = useState<WorkoutSession | null>(null);
-  const [whoopData, setWhoopData] = useState<WhoopData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -74,16 +72,6 @@ export default function WorkoutDetailScreen({ route }: any) {
     try {
       const data = await getWorkoutSession(sessionId);
       setSession(data);
-      // Prefer live WHOOP data; fall back to historical snapshot for past sessions
-      try {
-        const live = await getWhoopData();
-        setWhoopData(live);
-      } catch {
-        try {
-          const snapshot = await getWhoopSnapshot(data.session_date);
-          setWhoopData(snapshot);
-        } catch { /* no whoop data available */ }
-      }
     } catch (err) {
       console.warn('Failed to fetch workout detail:', err);
     } finally {
@@ -138,11 +126,6 @@ export default function WorkoutDetailScreen({ route }: any) {
   const plan = session.ai_plan ? JSON.parse(session.ai_plan) : null;
   const estimatedMin = plan?.estimated_duration_minutes || null;
 
-  // Recovery color
-  const recoveryScore = session.whoop_recovery_score;
-  const recoveryColor = (recoveryScore ?? 0) >= 67 ? colors.success
-    : (recoveryScore ?? 0) >= 34 ? colors.warning : colors.error;
-
   return (
     <ScreenBackground>
     <ScrollView
@@ -164,7 +147,7 @@ export default function WorkoutDetailScreen({ route }: any) {
         </View>
       </View>
 
-      {/* Stats Grid — Whoop-style hero numbers */}
+      {/* Stats Grid — hero numbers */}
       <View style={s.card}>
         <View style={s.statsGrid}>
           <View style={s.statItem}>
@@ -195,11 +178,6 @@ export default function WorkoutDetailScreen({ route }: any) {
           )}
         </View>
       </View>
-
-      {/* Whoop Data */}
-      {whoopData && whoopData.recovery_score != null && (
-        <WhoopCard data={whoopData} />
-      )}
 
       {/* Coach Notes */}
       {session.coach_notes && (
@@ -350,7 +328,7 @@ const s = StyleSheet.create({
   card: { ...cardStyle, marginBottom: spacing.md },
   cardLabel: { fontFamily: fonts.mono, fontSize: 10, color: colors.textTertiary, letterSpacing: 1.8, marginBottom: spacing.md },
 
-  // Stats grid (Whoop-style)
+  // Stats grid
   statsGrid: { flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap' },
   statItem: { alignItems: 'center', minWidth: 70, marginBottom: spacing.sm },
   statValue: { ...typography.title2, color: colors.text, fontVariant: ['tabular-nums'] },

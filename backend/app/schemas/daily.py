@@ -75,4 +75,3 @@ class DailySummaryResponse(BaseModel):
     habits: List[HabitResponse]
     workout_preview: Optional[str] = None
     workout_day_type: Optional[str] = None
-    whoop_recovery: Optional[float] = None
