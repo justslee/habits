@@ -81,7 +81,6 @@ interface DailySummary {
   habits: Habit[];
   workout_preview: string | null;
   workout_day_type: string | null;
-  whoop_recovery: number | null;
 }
 
 // ── Main Screen ────────────────────────────────────────────────────────────────
@@ -375,11 +374,6 @@ export default function DailyScreen() {
     weekday: 'long', month: 'long', day: 'numeric',
   });
 
-  const recoveryColor = summary?.whoop_recovery != null
-    ? (summary.whoop_recovery >= 67 ? colors.success
-      : summary.whoop_recovery >= 34 ? colors.warning : colors.error)
-    : null;
-
   const progressPct = totalItems > 0
     ? `${Math.min(100, Math.round((totalComplete / totalItems) * 100))}%`
     : '0%';
@@ -418,12 +412,7 @@ export default function DailyScreen() {
             <View style={{ marginHorizontal: -spacing.md }}>
               <Topbar
                 title={dateStr}
-                caption={
-                  summary?.workout_preview && summary?.whoop_recovery != null
-                    ? `${summary.workout_preview.toUpperCase()} · RECOVERY ${Math.round(summary.whoop_recovery)}%`
-                    : summary?.workout_preview?.toUpperCase()
-                      ?? (summary?.whoop_recovery != null ? `RECOVERY ${Math.round(summary.whoop_recovery)}%` : undefined)
-                }
+                caption={summary?.workout_preview?.toUpperCase()}
               />
             </View>
 

@@ -40,7 +40,6 @@ interface WorkoutListItem {
   day_type: string;
   status: string;
   overall_rpe: number | null;
-  whoop_recovery_score: number | null;
   exercises: Array<{
     exercise_name: string;
     set_number: number;

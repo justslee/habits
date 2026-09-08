@@ -3,7 +3,6 @@
 WorkoutSession: a single training session (push day, cardio, etc.)
 ExerciseLog: individual sets within a session
 ExerciseProfile: persistent per-exercise tracking for progressive overload
-WhoopSnapshot: cached Whoop biometric data
 """
 
 import datetime
@@ -26,12 +25,6 @@ class WorkoutSession(Base, TimestampMixin):
 
     # Day type: push, pull, legs, cardio, basketball, rest
     day_type: Mapped[str] = mapped_column(String(20), nullable=False)
-
-    # Whoop context at time of session
-    whoop_recovery_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    whoop_hrv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    whoop_resting_hr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    whoop_sleep_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # AI-generated plan (JSON)
     ai_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -130,24 +123,3 @@ class ExerciseProfile(Base, TimestampMixin):
     def __repr__(self) -> str:
         return f"<ExerciseProfile({self.exercise_name}: {self.current_working_weight}lbs, {self.progression_status})>"
 
-
-class WhoopSnapshot(Base, TimestampMixin):
-    """Cached Whoop biometric data for trend analysis."""
-
-    __tablename__ = "whoop_snapshots"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    snapshot_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
-
-    recovery_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    hrv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    resting_hr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    sleep_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    strain_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-
-    # Full Whoop API response as JSON (for historical detail views)
-    full_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    def __repr__(self) -> str:
-        return f"<WhoopSnapshot(date={self.snapshot_date}, recovery={self.recovery_score})>"

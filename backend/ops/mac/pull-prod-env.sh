@@ -44,11 +44,10 @@ ssm "habits env cleanup" "pkill -f 'http.server $PORT' || true; rm -rf /tmp/hx2;
 
 echo "==> adapting for the Mac"
 {
-  grep -v -E '^(DATABASE_URL|OAUTH_REDIRECT_BASE|ALLOWED_ORIGINS|HABITS_SECRETS_DISABLED|HABITS_SECRETS_NAME|TESTING|PORT)=' "$DEST.tmp"
+  grep -v -E '^(DATABASE_URL|OAUTH_REDIRECT_BASE|WHOOP_CLIENT_ID|WHOOP_CLIENT_SECRET|ALLOWED_ORIGINS|HABITS_SECRETS_DISABLED|HABITS_SECRETS_NAME|TESTING|PORT)=' "$DEST.tmp"
   echo ""
   echo "# --- Mac overrides (written by ops/mac/pull-prod-env.sh) ---"
   echo "DATABASE_URL=sqlite:///$HABITS_HOME/mastery.db"
-  echo "OAUTH_REDIRECT_BASE=https://$TS_HOST"
   echo "ALLOWED_ORIGINS=https://$TS_HOST,http://localhost:8081,http://localhost:19006"
   echo "HABITS_SECRETS_DISABLED=1"
   echo "PORT=8000"

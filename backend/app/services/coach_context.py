@@ -1,7 +1,6 @@
 """Coach Context Builder — assembles rich athlete profiles for AI coaching.
 
 Replaces static prompt context with data-driven context:
-  - 14-day WHOOP trends
   - Per-exercise history and progression state
   - Weak-point analysis (stall patterns + relative strength ratios)
   - Active coaching observations from prior sessions
@@ -12,76 +11,13 @@ into the LLM, so the coach "sees" the athlete's current state.
 
 import logging
 from datetime import date, timedelta
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.coaching import CoachingObservation
-from app.models.workout import ExerciseLog, ExerciseProfile, WhoopSnapshot, WorkoutSession
+from app.models.workout import ExerciseLog, ExerciseProfile, WorkoutSession
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# WHOOP trend
-# ---------------------------------------------------------------------------
-
-def get_whoop_trend(db: Session, user_id: int, days: int = 14) -> dict:
-    """WHOOP recovery/HRV/sleep trends over the past N days."""
-    cutoff = date.today() - timedelta(days=days)
-    snapshots = (
-        db.query(WhoopSnapshot)
-        .filter(
-            WhoopSnapshot.user_id == user_id,
-            WhoopSnapshot.snapshot_date >= cutoff,
-        )
-        .order_by(WhoopSnapshot.snapshot_date.asc())
-        .all()
-    )
-
-    if not snapshots:
-        return {"available": False}
-
-    recoveries = [s.recovery_score for s in snapshots if s.recovery_score is not None]
-    hrvs       = [s.hrv           for s in snapshots if s.hrv            is not None]
-    sleeps     = [s.sleep_score   for s in snapshots if s.sleep_score    is not None]
-
-    avg_recovery = sum(recoveries) / len(recoveries) if recoveries else None
-    avg_hrv      = sum(hrvs)       / len(hrvs)       if hrvs       else None
-    avg_sleep    = sum(sleeps)     / len(sleeps)      if sleeps     else None
-
-    # Trend: last 3 readings vs earlier
-    trend = "stable"
-    if len(recoveries) >= 5:
-        recent = sum(recoveries[-3:]) / 3
-        prior  = sum(recoveries[:-3]) / len(recoveries[:-3])
-        if recent > prior + 5:
-            trend = "improving"
-        elif recent < prior - 5:
-            trend = "declining"
-
-    # Sleep consistency via std-dev
-    sleep_consistency = "n/a"
-    if len(sleeps) >= 5:
-        mean = avg_sleep
-        std  = (sum((s - mean) ** 2 for s in sleeps) / len(sleeps)) ** 0.5
-        if std < 5:
-            sleep_consistency = "consistent"
-        elif std < 12:
-            sleep_consistency = "moderate"
-        else:
-            sleep_consistency = "inconsistent"
-
-    return {
-        "available": True,
-        "days_sampled": len(snapshots),
-        "avg_recovery": round(avg_recovery, 1) if avg_recovery is not None else None,
-        "avg_hrv":      round(avg_hrv,      1) if avg_hrv      is not None else None,
-        "avg_sleep":    round(avg_sleep,    1) if avg_sleep     is not None else None,
-        "trend": trend,
-        "sleep_consistency": sleep_consistency,
-        "latest_recovery": snapshots[-1].recovery_score if snapshots else None,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -214,14 +150,13 @@ def identify_weak_points(db: Session, user_id: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def build_athlete_profile(db: Session, user_id: int) -> dict:
-    """Full athlete snapshot: profiles, WHOOP trend, observations, weak points."""
+    """Full athlete snapshot: profiles, observations, weak points."""
     profiles = (
         db.query(ExerciseProfile)
         .filter(ExerciseProfile.user_id == user_id)
         .all()
     )
 
-    whoop_trend  = get_whoop_trend(db, user_id)
     weak_points  = identify_weak_points(db, user_id)
 
     observations = (
@@ -266,7 +201,6 @@ def build_athlete_profile(db: Session, user_id: int) -> dict:
             }
             for p in profiles
         ],
-        "whoop_trend": whoop_trend,
         "weak_points": weak_points,
         "coaching_observations": [
             {
@@ -292,41 +226,18 @@ def build_workout_context(
     db: Session,
     user_id: int,
     day_type: str,
-    recovery_data: Optional[dict] = None,
 ) -> str:
     """Build the full context string for the workout generation prompt.
 
     Returns a structured text block fed into the LLM user message.
     """
     from app.services.progressive_overload import get_next_session_targets
-    from app.services.whoop import get_recovery_adjustment
     from app.services.workout_generator import DAY_EXERCISES, SPORT_SPECIFIC_EXERCISES
 
     athlete = build_athlete_profile(db, user_id)
 
-    # Recovery
-    recovery_score = recovery_data.get("recovery_score") if recovery_data else None
-    adjustment = get_recovery_adjustment(recovery_score)
-
     lines = ["=== ATHLETE CONTEXT ==="]
 
-    # WHOOP trend
-    whoop = athlete["whoop_trend"]
-    if whoop.get("available"):
-        lines.append(
-            f"14-day WHOOP: avg recovery {whoop['avg_recovery']}%, "
-            f"avg HRV {whoop['avg_hrv']}ms, trend {whoop['trend']}, "
-            f"sleep {whoop['sleep_consistency']}"
-        )
-    if recovery_data:
-        lines.append(
-            f"Today: recovery {recovery_data.get('recovery_score', '?')}%, "
-            f"HRV {recovery_data.get('hrv', '?')}ms, "
-            f"RHR {recovery_data.get('resting_hr', '?')}bpm, "
-            f"sleep {recovery_data.get('sleep_score', '?')}%"
-        )
-    lines.append(f"Recovery level: {adjustment['level']} — {adjustment['note']}")
-    lines.append(f"Volume modifier: {adjustment['volume_modifier']}x")
 
     # Current macro block (majority vote across all profiles)
     macro_blocks = [

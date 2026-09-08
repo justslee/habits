@@ -112,13 +112,6 @@ eas build --platform ios --profile production --auto-submit
 Builds auto-increment the build number (`appVersionSource: remote`). Submission is
 non-interactive (`ascAppId` in `eas.json`).
 
-## Whoop OAuth
-
-Redirect URI registered with Whoop must include
-`https://justins-macbook-pro-2.tail2c4851.ts.net/api/v1/integrations/whoop/callback`
-(matches `OAUTH_REDIRECT_BASE` in the env file). Consent happens in the phone's browser,
-which is on the tailnet, so the callback resolves.
-
 ## Troubleshooting
 
 | Problem | Fix |

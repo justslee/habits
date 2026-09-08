@@ -35,7 +35,7 @@ export const colors = {
   info: '#7AB0E8',
   good: '#76C99C',          // alias for design parity (canvas calls success "good")
   warn: '#D2C56F',          // alias for design parity
-  recoveryGreen: '#7DD3A4', // Whoop recovery (≈ oklch 0.78 0.16 150)
+  recoveryGreen: '#7DD3A4', // positive / recovery green (≈ oklch 0.78 0.16 150)
   prGold: '#D9C56F',        // PR badges (≈ oklch 0.78 0.13 90)
 
   // Pillar colors — load-bearing, unchanged

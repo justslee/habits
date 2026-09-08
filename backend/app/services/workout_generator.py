@@ -123,7 +123,7 @@ Programming rules:
 - Progressive overload is the foundation — every session attempts progress (weight, reps, or quality).
 - Saturday basketball impacts Monday readiness — adjust Monday volume accordingly.
 - Prioritize compounds. Use accessories to address flagged weaknesses.
-- Recovery < 50%: reduce volume 20-30%. Recovery < 34%: active recovery only, no lifting.
+- Poor sleep or lingering fatigue: reduce volume 20-30%. Ill or injured: active recovery only, no lifting.
 - NO TRICEP DIPS — shoulder injury. Use pushdowns, skull crushers, or overhead extensions.
 - Basketball athlete needs: hip stability, rotational power, ankle mobility, single-leg strength.
   → Legs day includes plyometrics during strength/peaking blocks.
@@ -140,13 +140,12 @@ Use the submit_workout_plan tool to return the structured plan."""
 def _build_workout_context(
     user_id: int,
     day_type: str,
-    recovery_data: Optional[dict],
     db: Session,
 ) -> str:
     """Build the user-message context string for the Coach LLM."""
     # Lazy import to avoid circular dependency
     from app.services.coach_context import build_workout_context as _rich_ctx
-    return _rich_ctx(db=db, user_id=user_id, day_type=day_type, recovery_data=recovery_data)
+    return _rich_ctx(db=db, user_id=user_id, day_type=day_type)
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +155,6 @@ def _build_workout_context(
 async def generate_workout_plan(
     user_id: int,
     day_type: str,
-    recovery_data: Optional[dict],
     db: Session,
 ) -> dict[str, Any]:
     """Generate a complete workout plan for the given day type."""
@@ -169,22 +167,6 @@ async def generate_workout_plan(
                 "Your body builds during recovery."
             ),
             "estimated_duration_minutes": 0,
-        }
-
-    recovery_score = recovery_data.get("recovery_score") if recovery_data else None
-    if recovery_score is not None and recovery_score < 34:
-        return {
-            "exercises": [
-                {"name": "Light Walk",   "sets": 1, "reps": "20 min", "weight": None, "rest_seconds": 0, "notes": "Easy pace"},
-                {"name": "Foam Rolling", "sets": 1, "reps": "10 min", "weight": None, "rest_seconds": 0, "notes": "Full body"},
-                {"name": "Stretching",   "sets": 1, "reps": "10 min", "weight": None, "rest_seconds": 0, "notes": "Focus tight areas"},
-            ],
-            "pre_jog": None,
-            "coach_notes": (
-                f"Recovery critically low ({recovery_score}%). No lifting today. "
-                "Active recovery only. Rest IS training."
-            ),
-            "estimated_duration_minutes": 40,
         }
 
     # Determine current macro block for this athlete
@@ -201,7 +183,7 @@ async def generate_workout_plan(
     )
 
     system_prompt = _build_coach_system_prompt(current_block)
-    context = _build_workout_context(user_id, day_type, recovery_data, db)
+    context = _build_workout_context(user_id, day_type, db)
 
     user_prompt = f"Generate today's {day_type.upper()} workout.\n\n{context}"
 

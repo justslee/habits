@@ -50,7 +50,6 @@ def _run_to_response(run: RunSession) -> RunSessionResponse:
         weather=run.weather,
         rpe=run.rpe,
         notes=run.notes,
-        whoop_recovery_score=run.whoop_recovery_score,
         ai_feedback=run.ai_feedback,
         status=run.status,
         splits=[
@@ -94,18 +93,6 @@ def create_run(payload: RunSessionCreate, db: Session = Depends(get_db)):
         notes=payload.notes,
         status="completed",
     )
-    # Attach Whoop context from the day's cached snapshot, mirroring what workout
-    # sessions store. Read-only and cache-based, so a logged run never depends on a
-    # live Whoop call (or on Whoop being connected at all).
-    try:
-        from app.services.whoop import get_whoop_snapshot_by_date
-        snap = get_whoop_snapshot_by_date(user.id, run_date, db)
-        if snap:
-            run.whoop_recovery_score = snap.get("recovery_score")
-            run.whoop_strain = snap.get("strain_score")
-    except Exception:
-        pass  # No Whoop data — runs log fine without it
-
     db.add(run)
     db.flush()
 
@@ -311,7 +298,7 @@ def get_plan_week(plan_id: int, week_num: int, db: Session = Depends(get_db)):
 
 @router.get("/today-plan", response_model=TodayRunResponse)
 async def get_today_plan(db: Session = Depends(get_db)):
-    """Get today's planned run (if any). Adjusts for Whoop recovery.
+    """Get today's planned run (if any).
 
     Skips the run plan if:
     - Today already has a completed (non-run) workout session
@@ -349,31 +336,6 @@ async def get_today_plan(db: Session = Depends(get_db)):
 
     if not planned:
         return TodayRunResponse(has_planned_run=False)
-
-    # Check Whoop recovery — adjust plan if low
-    recovery_score = None  # type: Optional[float]
-    try:
-        from app.services.whoop import fetch_whoop_data
-        whoop_data = await fetch_whoop_data(user.id, db)
-        recovery_score = whoop_data.get("recovery_score")
-
-        if recovery_score is not None and recovery_score < 33:
-            # Very low recovery → suggest rest instead
-            planned.description = (
-                f"Recovery at {recovery_score:.0f}% — rest recommended. "
-                f"Original plan: {planned.description or planned.run_type}"
-            )
-            planned.run_type = "recovery"
-        elif recovery_score is not None and recovery_score < 50:
-            # Low recovery → downgrade to easy
-            if planned.run_type in ("tempo", "intervals", "fartlek", "progression"):
-                planned.description = (
-                    f"Recovery at {recovery_score:.0f}% — scaled to easy. "
-                    f"Original: {planned.run_type} run"
-                )
-                planned.run_type = "easy"
-    except Exception:
-        pass  # Whoop unavailable — use plan as-is
 
     return TodayRunResponse(
         has_planned_run=True,

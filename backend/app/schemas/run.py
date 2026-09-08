@@ -48,7 +48,6 @@ class RunSessionResponse(BaseModel):
     weather: Optional[str]
     rpe: Optional[int]
     notes: Optional[str]
-    whoop_recovery_score: Optional[float]
     ai_feedback: Optional[str]
     status: str
     splits: List[RunSplitResponse]

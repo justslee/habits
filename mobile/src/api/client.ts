@@ -78,7 +78,7 @@ export async function checkHealth(
   try {
     const health = await fetch(`${base}/health`, { signal: controller.signal });
     if (!health.ok) return { ok: false, error: `Server responded ${health.status}` };
-    const authed = await fetch(`${base}/api/v1/integrations/status`, {
+    const authed = await fetch(`${base}/api/v1/devices`, {
       headers: key ? { 'X-API-Key': key } : {},
       signal: controller.signal,
     });
@@ -263,10 +263,6 @@ export interface WorkoutSession {
   session_date: string;
   day_type: string;
   status: string;
-  whoop_recovery_score: number | null;
-  whoop_hrv: number | null;
-  whoop_resting_hr: number | null;
-  whoop_sleep_score: number | null;
   ai_plan: string | null;
   coach_notes: string | null;
   overall_rpe: number | null;
@@ -618,83 +614,3 @@ export function getCrossPillarLinks(): Promise<ConceptLinkData[]> {
   return request('/api/v1/concepts/cross-pillar');
 }
 
-// --- Whoop ---
-
-export interface WhoopData {
-  recovery_score: number | null;
-  hrv: number | null;
-  resting_hr: number | null;
-  spo2: number | null;
-  skin_temp_celsius: number | null;
-
-  sleep_score: number | null;
-  sleep_consistency: number | null;
-  sleep_efficiency: number | null;
-  respiratory_rate: number | null;
-  total_sleep_minutes: number | null;
-  rem_minutes: number | null;
-  deep_sleep_minutes: number | null;
-  light_sleep_minutes: number | null;
-  awake_minutes: number | null;
-  sleep_cycles: number | null;
-  disturbances: number | null;
-  sleep_needed_minutes: number | null;
-  sleep_debt_minutes: number | null;
-
-  strain_score: number | null;
-  calories: number | null;
-  avg_hr: number | null;
-  max_hr: number | null;
-
-  workout_strain: number | null;
-  workout_sport: string | null;
-  workout_duration_minutes: number | null;
-  workout_avg_hr: number | null;
-  workout_max_hr: number | null;
-  workout_calories: number | null;
-  workout_hr_zones: {
-    zone_0_min: number;
-    zone_1_min: number;
-    zone_2_min: number;
-    zone_3_min: number;
-    zone_4_min: number;
-    zone_5_min: number;
-  } | null;
-
-  recent_workouts: {
-    sport: string;
-    strain: number;
-    avg_hr: number;
-    max_hr: number;
-    calories: number;
-    start: string;
-    end: string;
-  }[];
-}
-
-export function getWhoopData(): Promise<WhoopData> {
-  return request('/api/v1/whoop/');
-}
-
-export function getWhoopSnapshot(date: string): Promise<WhoopData> {
-  return request(`/api/v1/whoop/snapshot/${date}`);
-}
-
-// --- Integrations (opt-in OAuth: Whoop today) ---
-
-export interface IntegrationStatus {
-  whoop: boolean;
-}
-
-export function getIntegrationStatus(): Promise<IntegrationStatus> {
-  return request('/api/v1/integrations/status');
-}
-
-/** The URL to open in a browser to start a provider's OAuth consent flow. */
-export function integrationAuthorizeUrl(provider: 'whoop'): string {
-  return `${API_URL}/api/v1/integrations/${provider}/authorize`;
-}
-
-export function disconnectIntegration(provider: 'whoop'): Promise<{ disconnected: boolean; provider: string }> {
-  return request(`/api/v1/integrations/${provider}`, { method: 'DELETE' });
-}

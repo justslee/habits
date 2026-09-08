@@ -45,10 +45,6 @@ class WorkoutSessionResponse(BaseModel):
     session_date: str
     day_type: str
     status: str
-    whoop_recovery_score: Optional[float]
-    whoop_hrv: Optional[float]
-    whoop_resting_hr: Optional[float]
-    whoop_sleep_score: Optional[float]
     ai_plan: Optional[str]
     coach_notes: Optional[str]
     overall_rpe: Optional[int]

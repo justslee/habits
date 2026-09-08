@@ -55,7 +55,6 @@
 │  └──────────────────────────────────────┘                    │
 │                                                               │
 │  ┌─────────────────┐                                         │
-│  │   Whoop API     │ (read-only)                             │
 │  └─────────────────┘                                         │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -68,7 +67,6 @@
 - Branch strategy: `main` is always deployable. Feature branches: `feat/<task-id>-<short-name>`.
 - Commits: conventional commits (`feat:`, `fix:`, `test:`, `chore:`).
 - LLM calls use the Anthropic SDK directly via `call_claude()` in `app/services/evaluation.py`.
-- Whoop API is read-only.
 
 ## Deployment Targets
 

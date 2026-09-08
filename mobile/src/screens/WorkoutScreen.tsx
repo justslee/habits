@@ -95,11 +95,6 @@ export default function WorkoutScreen() {
   }
 
   const plan = session?.ai_plan ? JSON.parse(session.ai_plan) : null;
-  const hasWhoop = session?.whoop_recovery_score != null;
-
-  // Recovery color
-  const recoveryColor = (session?.whoop_recovery_score ?? 0) >= 67 ? colors.success
-    : (session?.whoop_recovery_score ?? 0) >= 34 ? colors.warning : colors.error;
 
   return (
     <ScreenBackground>
@@ -111,7 +106,6 @@ export default function WorkoutScreen() {
         <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.md }}>
           <Text style={s.dayEyebrow}>
             {(session?.day_type || '').toUpperCase()} DAY
-            {session?.whoop_recovery_score != null ? ` · RECOVERY ${Math.round(session.whoop_recovery_score)}%` : ''}
           </Text>
           <Text style={s.screenTitle}>{DAY_LABELS[session?.day_type || ''] || session?.day_type}</Text>
           {session?.coach_notes && !sessionComplete && (
@@ -129,44 +123,6 @@ export default function WorkoutScreen() {
             <Text style={s.coachNoteText}>{session.coach_notes}</Text>
           )}
         </View>
-
-        {/* Whoop Recovery Card */}
-        {hasWhoop && (
-          <View style={[s.card, { borderColor: recoveryColor + '30' }]}>
-            <View style={s.whoopHeader}>
-              <Ionicons name="heart" size={16} color={recoveryColor} />
-              <Text style={[s.whoopTitle, { color: recoveryColor }]}>Recovery</Text>
-            </View>
-            <View style={s.whoopStats}>
-              <View style={s.whoopStat}>
-                <Text style={[s.whoopValue, { color: recoveryColor }]}>{Math.round(session!.whoop_recovery_score!)}%</Text>
-                <Text style={s.whoopLabel}>Score</Text>
-              </View>
-              {session!.whoop_hrv && (
-                <View style={s.whoopStat}>
-                  <Text style={s.whoopValue}>{Math.round(session!.whoop_hrv!)}</Text>
-                  <Text style={s.whoopLabel}>HRV</Text>
-                </View>
-              )}
-              {session!.whoop_resting_hr && (
-                <View style={s.whoopStat}>
-                  <Text style={s.whoopValue}>{Math.round(session!.whoop_resting_hr!)}</Text>
-                  <Text style={s.whoopLabel}>RHR</Text>
-                </View>
-              )}
-              {session!.whoop_sleep_score && (
-                <View style={s.whoopStat}>
-                  <Text style={s.whoopValue}>{Math.round(session!.whoop_sleep_score!)}%</Text>
-                  <Text style={s.whoopLabel}>Sleep</Text>
-                </View>
-              )}
-            </View>
-            {/* Recovery bar */}
-            <View style={s.recoveryBarTrack}>
-              <View style={[s.recoveryBarFill, { width: `${session!.whoop_recovery_score ?? 0}%`, backgroundColor: recoveryColor }]} />
-            </View>
-          </View>
-        )}
 
         {/* Plan */}
         {plan?.exercises && plan.exercises.length > 0 && (
@@ -451,18 +407,10 @@ const s = StyleSheet.create({
   retryBtn: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, backgroundColor: colors.accent, borderRadius: radius.sm },
   retryText: { ...typography.bodyBold, color: '#fff' },
 
-  // Whoop card
+  // Cards
   card: { ...cardStyle, marginBottom: spacing.md },
   cardLabel: { ...typography.micro, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: spacing.md },
 
-  whoopHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
-  whoopTitle: { ...typography.caption, fontWeight: '700' },
-  whoopStats: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
-  whoopStat: { alignItems: 'center' },
-  whoopValue: { ...typography.title2, color: colors.text },
-  whoopLabel: { ...typography.micro, color: colors.textTertiary, marginTop: 2 },
-  recoveryBarTrack: { height: 4, backgroundColor: colors.input, borderRadius: 2 },
-  recoveryBarFill: { height: 4, borderRadius: 2 },
 
   exerciseRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
