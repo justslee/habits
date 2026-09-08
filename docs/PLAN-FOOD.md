@@ -1,6 +1,6 @@
 # Plan — Food: two-week meal cycles, swipe-to-choose, bag building, guarded ordering
 
-> Written 2026-09-08. Builds on `PLAN-LOCAL-ASSISTANT.md` Phases 4 (memory, push, assistant) and 5
+> Written 2026-09-08, revised the same day (decisions: Google Calendar, six tabs, spend tracking). Builds on `PLAN-LOCAL-ASSISTANT.md` Phases 4 (memory, push, assistant) and 5
 > (task queue, browser executor, approval gate). Owner decisions are marked **DECIDE**.
 
 ## 1. What the feature is, in one cycle
@@ -26,7 +26,8 @@ Every two weeks, on a schedule that already knows when you are travelling:
 | Not too creative, but variety | Deck mix: 70 % from your proven set (rotating so nothing repeats two cycles in a row), 30 % new candidates. New candidates are near neighbours of what you already like. |
 | Two-week cadence, store minimums, don't break the bank | Bags are optimised across stores for minimums, delivery fees, and a quality tier per ingredient (meat and produce high, staples standard). |
 | Safe payment | See §6. Layered, boring, auditable. |
-| Calendar awareness | Travel days come from your calendars automatically; the cycle shrinks around them. |
+| Calendar awareness | Travel days come from Google Calendar automatically; the cycle shrinks around them. |
+| Track spend | Every placed order is a ledger row: per cycle, per store, per meal, protein per dollar, waste, and a monthly budget line (§7b). |
 | Nice UI, its own tab | A **Food** tab. Swipe deck, 14-day strip, bags, approvals, pantry. |
 
 ## 3. Data model (SQLite, alongside the memory tables from Phase 4)
@@ -44,7 +45,8 @@ Every two weeks, on a schedule that already knows when you are travelling:
 | `cart_tasks` | bag → operator task: status (queued / building / needs_review / approved / placing / placed / failed), cart screenshot, line items as read from the cart, cart total |
 | `order_approvals` | cart_task, cart_total, bag hash, approved_at, expires_at, used_at, biometric flag |
 | `orders` | cart_task → merchant order id, total, receipt screenshot, delivery window |
-| `calendar_feeds` | ICS URL, label, last_synced |
+| `calendar_feeds` | Google Calendar secret iCal URL, label, last_synced |
+| `spend_ledger` | order → store, cycle, goods total, fees, tip, line items JSON, receipt ref; plus per-recipe cost allocation |
 | `preference_weights` | feature → weight (cuisine, protein source, prep time bucket, ingredient count, reheat method, site), updated after each cycle |
 
 Existing Phase 4 `memories` gets entries the assistant can read in plain language: "hates microwaved rice", "always has gochugaru and soy sauce", "H Mart for Korean staples".
@@ -87,24 +89,36 @@ This is the part that must be boring. Layers, each sufficient on its own:
 
 ## 7. Calendars and pantry
 
-- **Travel detection without OAuth.** Google Calendar and iCloud calendars both publish a private ICS URL. The backend polls them daily, and an LLM classifies events into travel / away spans (flights, hotels, all-day events in other cities, "trip" keywords). You confirm the first few classifications; after that it is automatic. Notion is optional: if you keep a travel database there, the existing token reads it.
+- **Travel detection without OAuth (decided: Google Calendar).** Google Calendar publishes a secret iCal address per calendar (Settings → Integrate calendar). The backend polls it daily, and an LLM classifies events into travel / away spans (flights, hotels, all-day events in other cities, "trip" keywords). You confirm the first few classifications; after that it is automatic.
 - **Cycle scheduling.** The next shop date is computed from the current cycle end and travel spans, then a push asks for the pantry check two days ahead.
 - **Pantry check UI.** The checklist is generated from the last bags plus staples. Three-state tap per item; unknown items can be typed or dictated. Shelf-life projections pre-fill the likely state so you mostly confirm.
 
 ## 8. The Food tab
 
-**DECIDE F1 — Tab layout.** Five tabs are already in use. Recommended: Daily · Train · Food · North Star · Me, with Speaking reachable from a card on Daily and from North Star's public-speaking pillar. Alternative: keep six tabs.
+**Decided — Tab layout.** Six tabs: Daily · Train · Speak · North Star · Food · Me. Food is added; Speak stays.
 
 Screens:
 
-- **Food home** — cycle status, next shop date, tonight's meal with the reheat method, a "what's for lunch" leftover hint, pantry summary, the pending approval if any.
+- **Food home** — cycle status, next shop date, tonight's meal with the reheat method, a "what's for lunch" leftover hint, pantry summary, the pending approval if any, spend so far this cycle.
 - **Deck** — full-bleed recipe cards: photo, title, source and rating, prep and cook minutes, protein per serving, keeps-for days, reheat icon, ingredient count with essentials highlighted. Swipe right or left; tap to expand; long-press "never show again".
 - **Plan** — 14-day strip with travel days greyed out, meals on cook days spanning the days they cover, drag to move, tap a meal for the recipe.
 - **Bags** — one section per store: items, matched products, quantities, subtotal versus minimum, projected waste warnings, swap suggestions. Approve bags.
 - **Carts and approvals** — cart screenshot, line items as read from the store, total, Face ID approve or reject with a reason.
 - **Orders** — history with receipts.
+- **Spend** — cycle-over-cycle chart by store, per-meal cost, protein per dollar, waste, budget line, CSV export.
 - **Pantry** — the current estimate, editable any time.
 - **Recipe** — the normalised recipe with essential ingredients marked, your notes, times cooked, rating.
+
+## 7b. Spend tracking
+
+Every placed order writes a `spend_ledger` row: store, cycle, goods total with fees and tip separated, and the line items as read from the receipt. From that:
+
+- **This cycle versus the last six**, stacked by store, fees called out.
+- **Per meal and per day**: bag items are allocated to the recipes that used them, giving a cost per serving and a cost per eating day.
+- **Protein per dollar** per recipe.
+- **Waste**: items bought as leftovers-expected and reported gone at the next pantry check, priced.
+- **A monthly budget line** you set once; the bag builder warns when a cycle would cross it.
+- CSV export.
 
 ## 9. Learning loop
 
@@ -121,14 +135,15 @@ Screens:
 | F2 Cycle and Deck | Meal cycles, deck scoring, swipe UI, 14-day plan strip, cook-day pushes | F1, server push | 2 to 3 days |
 | F3 Bags | Pantry model and check UI, shopping list with package rounding and waste projection, store allocation with minimums, Bags screen | F2 | 2 days |
 | F4 Cart builder | Task queue, Playwright executor with a dedicated Chrome profile, per-store adapters (H Mart, Amazon Whole Foods, DoorDash Wegmans), product matching with remembered picks, supervised mode | Local-first Phase 5 task queue | 3 to 4 days |
-| F5 Payment gate | Approval tokens with Face ID, total re-verification, caps, kill switch, idempotency, audit, Orders screen | F4 | 2 days |
-| F6 Calendars and learning | ICS polling and travel classification, cycle scheduling, preference weights, post-cycle summary into memory | F2 | 2 days |
+| F5 Payment gate and ledger | Approval tokens with Face ID, total re-verification, caps, kill switch, idempotency, audit, Orders and Spend screens | F4 | 2 to 3 days |
+| F6 Calendar and learning | Google Calendar iCal polling and travel classification, cycle scheduling, preference weights, post-cycle summary into memory | F2 | 2 days |
 
 F1 to F3 are useful on their own: a plan and a shopping list you could order by hand. F4 and F5 add the browser. F6 makes it hands-off.
 
 ## 11. Open decisions
 
-- **DECIDE F1** tab layout (above).
 - **DECIDE F2** eat-out days per cycle default (2).
-- **DECIDE F3** which store is the anchor when all three could cover the list (recommended: H Mart for any cycle with Korean meals, Wegmans via DoorDash otherwise).
+- **DECIDE F3** anchor store when all three could cover the list (recommended: H Mart for any cycle with Korean meals, Wegmans via DoorDash otherwise).
 - **DECIDE F4** supervised mode duration (recommended: first 3 cycles, then per-store promotion).
+
+Interactive mock of the whole flow: the "Two-Week Kitchen" artifact page (§0).
