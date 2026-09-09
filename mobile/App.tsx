@@ -32,6 +32,9 @@ import FoodHomeScreen from './src/screens/food/FoodHomeScreen';
 import FoodPantryScreen from './src/screens/food/FoodPantryScreen';
 import FoodDeckScreen from './src/screens/food/FoodDeckScreen';
 import FoodPlanScreen from './src/screens/food/FoodPlanScreen';
+import FoodBagsScreen from './src/screens/food/FoodBagsScreen';
+import FoodCartsScreen from './src/screens/food/FoodCartsScreen';
+import FoodSpendScreen from './src/screens/food/FoodSpendScreen';
 import CustomTabBar from './src/components/CustomTabBar';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
@@ -57,6 +60,9 @@ function FoodStackScreen() {
         <FoodStack.Screen name="FoodPantry" component={FoodPantryScreen} options={{ title: 'Pantry' }} />
         <FoodStack.Screen name="FoodDeck" component={FoodDeckScreen} options={{ title: 'Pick meals' }} />
         <FoodStack.Screen name="FoodPlan" component={FoodPlanScreen} options={{ title: 'Plan' }} />
+        <FoodStack.Screen name="FoodBags" component={FoodBagsScreen} options={{ title: 'Bags' }} />
+        <FoodStack.Screen name="FoodCarts" component={FoodCartsScreen} options={{ title: 'Carts' }} />
+        <FoodStack.Screen name="FoodSpend" component={FoodSpendScreen} options={{ title: 'Spend' }} />
       </FoodStack.Navigator>
     </ErrorBoundary>
   );

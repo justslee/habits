@@ -90,10 +90,9 @@ export default function FoodPlanScreen({ navigation, route }: any) {
           </View>
         ))}
 
-        <View style={[s.card, { marginTop: 12 }]}>
-          <Text style={typography.eyebrow}>NEXT</Text>
-          <Text style={s.help}>Bags, carts and Face ID approvals arrive in the next builds. For now this is your shopping plan: the essential ingredients of these meals, minus what the pantry says you have.</Text>
-        </View>
+        <TouchableOpacity style={s.btn} onPress={() => { haptic.medium(); navigation.navigate('FoodBags', { cycleId }); }} activeOpacity={0.9}>
+          <Text style={s.btnText}>Build bags</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodDeck', { cycleId })}><Text style={s.ghostText}>Back to the deck</Text></TouchableOpacity>
         <TouchableOpacity style={s.ghost} onPress={finish}><Text style={[s.ghostText, { color: colors.textTertiary }]}>Close this cycle</Text></TouchableOpacity>
@@ -138,6 +137,8 @@ const s = StyleSheet.create({
   mini: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   miniT: { fontFamily: fonts.medium, fontSize: 11, color: colors.textSecondary },
   pill: { fontFamily: fonts.mono, fontSize: 9.5, letterSpacing: 1 },
+  btn: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 15, alignItems: 'center', marginTop: 12 },
+  btnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.bg },
   ghost: { alignItems: 'center', paddingVertical: 10 },
   ghostText: { fontFamily: fonts.medium, fontSize: 13, color: colors.accentLight },
 });
