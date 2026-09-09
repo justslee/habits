@@ -527,6 +527,8 @@ def taste(db: Session = Depends(get_db)):
 
 # --- bags (F3) ---------------------------------------------------------------
 
+from app.models.food import MerchantAccount  # noqa: E402
+
 from app.models.food import FoodSettings, ShoppingBag  # noqa: E402
 from app.services import bag_builder  # noqa: E402
 
@@ -624,10 +626,18 @@ class MerchantOut(BaseModel):
     store: str
     name: str
     site_url: str | None
+    location: str | None = None
+    channel: str = "site"
+    quality_tier: str = "standard"
     minimum: float
     delivery_fee: float
     enabled: bool
     supervised: bool
+    deal_text: str | None = None
+    deal_value: float = 0.0
+    deal_min: float = 0.0
+    deal_expires: datetime.date | None = None
+    deal_active: bool = False
 
 
 class MerchantPatch(BaseModel):
@@ -635,24 +645,104 @@ class MerchantPatch(BaseModel):
     delivery_fee: float | None = Field(default=None, ge=0)
     enabled: bool | None = None
     supervised: bool | None = None
+    name: str | None = None
+    location: str | None = None
+    deal_text: str | None = None
+    deal_value: float | None = Field(default=None, ge=0)
+    deal_min: float | None = Field(default=None, ge=0)
+    deal_expires: datetime.date | None = None
+
+
+def _merchant_out(m: MerchantAccount) -> MerchantOut:
+    return MerchantOut(
+        store=m.store,
+        name=m.name,
+        site_url=m.site_url,
+        location=m.location,
+        channel=m.channel or "site",
+        quality_tier=m.quality_tier or "standard",
+        minimum=m.minimum,
+        delivery_fee=m.delivery_fee,
+        enabled=m.enabled,
+        supervised=m.supervised,
+        deal_text=m.deal_text,
+        deal_value=m.deal_value or 0.0,
+        deal_min=m.deal_min or 0.0,
+        deal_expires=m.deal_expires,
+        deal_active=bag_builder.deal_active(m),
+    )
+
+
+class MerchantCreate(BaseModel):
+    store: str = Field(pattern=r"^[a-z0-9_]{2,20}$")
+    name: str
+    channel: str = Field(default="doordash", pattern="^(site|doordash|amazon)$")
+    location: str | None = None
+    site_url: str | None = None
+    quality_tier: str = Field(default="high", pattern="^(high|standard)$")
+    minimum: float = Field(default=0, ge=0)
+    delivery_fee: float = Field(default=0, ge=0)
+    deal_text: str | None = None
+    deal_value: float = Field(default=0, ge=0)
+    deal_min: float = Field(default=0, ge=0)
+    deal_expires: datetime.date | None = None
 
 
 @router.get("/merchants", response_model=list[MerchantOut])
 def list_merchants(db: Session = Depends(get_db)):
     user = _user(db)
     ms = bag_builder.ensure_merchants(db, user.id)
-    return [
-        MerchantOut(
-            store=m.store,
-            name=m.name,
-            site_url=m.site_url,
-            minimum=m.minimum,
-            delivery_fee=m.delivery_fee,
-            enabled=m.enabled,
-            supervised=m.supervised,
+    return [_merchant_out(m) for m in ms.values()]
+
+
+@router.post("/merchants", response_model=MerchantOut)
+def create_merchant(payload: MerchantCreate, db: Session = Depends(get_db)):
+    """Add a store (typically a DoorDash grocer with a deal)."""
+    user = _user(db)
+    if payload.store in bag_builder.ensure_merchants(db, user.id):
+        raise HTTPException(
+            status_code=409, detail="Store already exists; PATCH it instead"
         )
-        for m in ms.values()
-    ]
+    m = MerchantAccount(
+        user_id=user.id, supervised=True, enabled=True, **payload.model_dump()
+    )
+    db.add(m)
+    db.commit()
+    return _merchant_out(m)
+
+
+@router.post("/merchants/scan-deals")
+def scan_deals(db: Session = Depends(get_db)):
+    """Ask the browser executor for current DoorDash grocery deals (playwright mode only)."""
+    user = _user(db)
+    if cart_service_mode() != "playwright":
+        return {
+            "mode": "dry_run",
+            "deals": [],
+            "note": "Set FOOD_EXECUTOR=playwright and run the cart worker to scan DoorDash for deals.",
+        }
+    from app.services.store_adapters import scan_doordash_deals
+
+    deals = scan_doordash_deals()
+    ms = bag_builder.ensure_merchants(db, user.id)
+    for d in deals:
+        m = ms.get(d["store"])
+        if m and m.channel == "doordash":
+            m.deal_text, m.deal_value, m.deal_min, m.deal_expires = (
+                d.get("text"),
+                d.get("value", 0.0),
+                d.get("min", 0.0),
+                d.get("expires"),
+            )
+            m.deal_seen_at = datetime.datetime.now()
+    db.commit()
+    return {"mode": "playwright", "deals": deals}
+
+
+def cart_service_mode() -> str:
+    from app.services.cart_service import executor_mode
+
+    return executor_mode()
 
 
 @router.patch("/merchants/{store}", response_model=MerchantOut)
@@ -664,15 +754,7 @@ def patch_merchant(store: str, payload: MerchantPatch, db: Session = Depends(get
     for k, v in payload.model_dump(exclude_none=True).items():
         setattr(m, k, v)
     db.commit()
-    return MerchantOut(
-        store=m.store,
-        name=m.name,
-        site_url=m.site_url,
-        minimum=m.minimum,
-        delivery_fee=m.delivery_fee,
-        enabled=m.enabled,
-        supervised=m.supervised,
-    )
+    return _merchant_out(m)
 
 
 class SettingsOut(BaseModel):
@@ -1119,3 +1201,28 @@ def add_travel(payload: TravelAdd, db: Session = Depends(get_db)):
 async def tick(force: bool = False, db: Session = Depends(get_db)):
     """Run the daily scheduler now (calendar sync, cycle close-out, pushes)."""
     return await food_scheduler.daily_tick(db, force=force)
+
+
+# --- recipe discovery ---------------------------------------------------------
+
+from app.services import recipe_discovery  # noqa: E402
+
+
+@router.post("/discover")
+async def discover(
+    limit: int = Query(default=6, ge=1, le=12), db: Session = Depends(get_db)
+):
+    """Find new candidate recipes on the web (Maangchi, Just One Cookbook first) and add them to the catalogue."""
+    user = _user(db)
+    _ensure_seeded(db, user)
+    return await recipe_discovery.discover(db, user.id, limit=limit)
+
+
+@router.get("/discover/queries")
+def discover_queries(db: Session = Depends(get_db)):
+    user = _user(db)
+    _ensure_seeded(db, user)
+    return {
+        "queries": recipe_discovery.queries_for(db, user.id),
+        "sources": recipe_discovery.SOURCE_PRIORITY,
+    }

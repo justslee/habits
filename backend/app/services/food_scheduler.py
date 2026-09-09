@@ -157,4 +157,21 @@ async def daily_tick(
             settings.last_cook_push = today
             db.commit()
             did["cook_push"] = meal.recipe.title
+    # 5. weekly discovery: keep a few fresh candidates on hand (Sundays, when the pool is thin)
+    if force or (today.weekday() == 6 and settings.last_discovery != today):
+        from app.models.food import Recipe
+        from app.services.recipe_discovery import discover
+
+        n_candidates = (
+            db.query(Recipe)
+            .filter(Recipe.user_id == user.id, Recipe.status == "candidate")
+            .count()
+        )
+        if n_candidates < 5 and not force:
+            try:
+                did["discovery"] = await discover(db, user.id, limit=4)
+            except Exception as e:  # noqa: BLE001
+                did["discovery"] = f"error: {e}"
+        settings.last_discovery = today
+        db.commit()
     return did

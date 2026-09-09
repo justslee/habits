@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import time
 from pathlib import Path
 
@@ -249,3 +250,73 @@ def adapter_for(store: str, mode: str | None = None):
     if mode == "playwright":
         return PlaywrightAdapter(store)
     return DryRunAdapter()
+
+
+# ---------------------------------------------------------------------------
+# DoorDash deals (best effort; tune on first supervised run)
+# ---------------------------------------------------------------------------
+
+DOORDASH_GROCERY = "https://www.doordash.com/grocery/"
+QUALITY_GROCERS = (
+    "wegmans",
+    "whole foods",
+    "citarella",
+    "eataly",
+    "westside market",
+    "morton williams",
+    "gourmet garage",
+    "fairway",
+    "zabar",
+)
+
+
+def scan_doordash_deals() -> list[dict]:
+    """Open DoorDash grocery in the Habits profile and read store cards with promo badges.
+    Returns [{store, name, text, value, min, expires}]. Store keys match merchant_accounts."""
+    from playwright.sync_api import sync_playwright
+
+    out: list[dict] = []
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=False,
+            channel="chrome",
+            viewport={"width": 1280, "height": 900},
+        )
+        page = ctx.new_page()
+        page.goto(DOORDASH_GROCERY, wait_until="domcontentloaded")
+        time.sleep(3)
+        cards = page.locator("a[href*='/store/']")
+        for i in range(min(cards.count(), 60)):
+            card = cards.nth(i)
+            text = card.inner_text(timeout=2000).strip()
+            low = text.lower()
+            if not any(g in low for g in QUALITY_GROCERS):
+                continue
+            promo = None
+            m = re.search(r"\$(\d+)\s*off\s*\$?(\d+)?", low)
+            if m:
+                promo = {"value": float(m.group(1)), "min": float(m.group(2) or 0)}
+            elif "% off" in low:
+                pm = re.search(r"(\d+)% off", low)
+                promo = {
+                    "value": 0.0,
+                    "min": 0.0,
+                    "percent": float(pm.group(1)) if pm else None,
+                }
+            name = text.split("\n")[0][:60]
+            key = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:20]
+            out.append(
+                {
+                    "store": "weg" if "wegmans" in low else key,
+                    "name": name,
+                    "text": text.replace("\n", " · ")[:160],
+                    "value": (promo or {}).get("value", 0.0),
+                    "min": (promo or {}).get("min", 0.0),
+                    "expires": None,
+                    "has_deal": promo is not None,
+                }
+            )
+        ctx.close()
+    return [d for d in out if d["has_deal"]]

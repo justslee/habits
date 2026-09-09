@@ -268,6 +268,7 @@ class FoodSettings(Base, TimestampMixin):
     approval_ttl_minutes: Mapped[int] = mapped_column(Integer, default=15)
     last_pantry_push: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     last_cook_push: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    last_discovery: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     total_tolerance: Mapped[float] = mapped_column(
         Float, default=3.0
     )  # $ drift allowed between approval and placement
@@ -295,6 +296,20 @@ class MerchantAccount(Base, TimestampMixin):
         Boolean, default=True
     )  # executor stops on Place Order
     orders_this_cycle: Mapped[int] = mapped_column(Integer, default=0)
+    location: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    channel: Mapped[str] = mapped_column(
+        String(20), default="site"
+    )  # site | doordash | amazon
+    quality_tier: Mapped[str] = mapped_column(
+        String(10), default="standard"
+    )  # high | standard
+    deal_text: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    deal_value: Mapped[float] = mapped_column(
+        Float, default=0.0
+    )  # $ off when goods ≥ deal_min
+    deal_min: Mapped[float] = mapped_column(Float, default=0.0)
+    deal_expires: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    deal_seen_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
     preferred_products: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )  # ingredient name → product memory

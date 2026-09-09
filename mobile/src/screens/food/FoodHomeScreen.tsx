@@ -138,7 +138,11 @@ export default function FoodHomeScreen({ navigation }: any) {
         <TouchableOpacity style={s.btn} onPress={cta.onPress} activeOpacity={0.9}>
           <Text style={s.btnText}>{cta.label}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodSpend')}><Text style={s.ghostText}>Spend ledger</Text></TouchableOpacity>
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
+          <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodRecipes')}><Text style={s.ghostText}>Recipes</Text></TouchableOpacity>
+          <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodStores')}><Text style={s.ghostText}>Stores</Text></TouchableOpacity>
+          <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodSpend')}><Text style={s.ghostText}>Spend</Text></TouchableOpacity>
+        </View>
         <View style={{ height: 120 }} />
       </ScrollView>
     </ScreenBackground>
