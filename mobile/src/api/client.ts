@@ -743,3 +743,119 @@ export function completeCycle(cycleId: number): Promise<FoodCycle> {
 export function getTaste(): Promise<{ profile: TasteEntry[] }> {
   return request('/api/v1/food/taste');
 }
+
+// --- Food bags (F3) ---
+
+export interface BagItem {
+  ingredient_id: number;
+  name: string;
+  packs: number;
+  pack_label: string;
+  unit_price: number;
+  line_total: number;
+  uses: number;
+  recipes: string[];
+  shelf_stable: boolean;
+  alt_stores: string[];
+  waste_note: string | null;
+  projected_waste_value: number;
+  moved_from: string | null;
+}
+
+export interface Bag {
+  id: number;
+  store: string;
+  name: string;
+  items: BagItem[];
+  goods_total: number;
+  minimum: number;
+  delivery_fee: number;
+  short: boolean;
+  shortfall: number;
+  projected_waste: number;
+  status: string;
+}
+
+export interface BagsResponse {
+  cycle_id: number;
+  bags: Bag[];
+  goods_total: number;
+  fees_total: number;
+  total: number;
+  budget_per_cycle: number;
+  over_budget: number;
+  store_count: number;
+}
+
+export function buildBags(cycleId: number): Promise<BagsResponse> {
+  return request(`/api/v1/food/cycles/${cycleId}/bags`, { method: 'POST' });
+}
+export function getBags(cycleId: number): Promise<BagsResponse> {
+  return request(`/api/v1/food/cycles/${cycleId}/bags`);
+}
+export function approveBags(cycleId: number): Promise<BagsResponse> {
+  return request(`/api/v1/food/cycles/${cycleId}/bags/approve`, { method: 'POST' });
+}
+
+// --- Food carts, gate, orders, spend (F4–F5) ---
+
+export interface CartLine { name: string; qty: number; unit_price: number; line_total: number; product: string }
+export interface CartEvent { ts: string; event: string; detail: string | null }
+export interface CartTask {
+  id: number;
+  bag_id: number;
+  store: string;
+  name: string;
+  status: 'queued' | 'building' | 'needs_review' | 'approved' | 'placing' | 'awaiting_human' | 'placed' | 'failed' | 'rejected';
+  supervised: boolean;
+  cart_lines: CartLine[];
+  cart_total: number | null;
+  screenshot_path: string | null;
+  error: string | null;
+  attempts: number;
+  events: CartEvent[];
+  approval_expires_at: string | null;
+  order: { merchant_order_id: string | null; total: number; placed_at: string; placed_by: string; delivery_window: string | null } | null;
+}
+export interface FoodSettingsData {
+  budget_per_cycle: number; per_order_cap: number; per_cycle_cap: number; ordering_enabled: boolean;
+  supervised_cycles_remaining: number; approval_ttl_minutes: number; total_tolerance: number;
+}
+export interface SpendSummary {
+  current: null | {
+    cycle_id: number; goods: number; fees: number; total: number; per_eating_day: number; per_serving: number;
+    protein_g_per_dollar: number | null; budget_per_cycle: number; vs_budget: number; orders: number;
+    per_meal: { meal_id: number; title: string; cost: number; per_serving: number; protein_g_per_dollar: number | null }[];
+  };
+  history: { cycle_id: number; label: string; by_store: Record<string, number>; goods: number; fees: number; total: number }[];
+  average_total: number;
+  budget_per_cycle: number;
+}
+
+export function getCarts(cycleId: number): Promise<CartTask[]> {
+  return request(`/api/v1/food/cycles/${cycleId}/carts`);
+}
+export function runCart(taskId: number): Promise<CartTask> {
+  return request(`/api/v1/food/carts/${taskId}/run`, { method: 'POST' });
+}
+export function approveCart(taskId: number, biometric: boolean): Promise<{ cart: CartTask; token: string; expires_at: string }> {
+  return request(`/api/v1/food/carts/${taskId}/approve`, { method: 'POST', body: JSON.stringify({ biometric }) });
+}
+export function placeCart(taskId: number, token: string): Promise<CartTask> {
+  return request(`/api/v1/food/carts/${taskId}/place`, { method: 'POST', body: JSON.stringify({ token }) });
+}
+export function confirmPlaced(taskId: number, merchantOrderId?: string): Promise<CartTask> {
+  return request(`/api/v1/food/carts/${taskId}/confirm-placed`, { method: 'POST', body: JSON.stringify({ merchant_order_id: merchantOrderId ?? null }) });
+}
+export function rejectCart(taskId: number, reason?: string): Promise<CartTask> {
+  return request(`/api/v1/food/carts/${taskId}/reject`, { method: 'POST', body: JSON.stringify({ reason: reason ?? null }) });
+}
+export function getFoodSettings(): Promise<FoodSettingsData> {
+  return request('/api/v1/food/settings');
+}
+export function patchFoodSettings(p: Partial<FoodSettingsData>): Promise<FoodSettingsData> {
+  return request('/api/v1/food/settings', { method: 'PATCH', body: JSON.stringify(p) });
+}
+export function getSpend(): Promise<SpendSummary> {
+  return request('/api/v1/food/spend');
+}

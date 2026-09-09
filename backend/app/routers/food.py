@@ -502,6 +502,9 @@ def complete_cycle(cycle_id: int, db: Session = Depends(get_db)):
     cycle.status = "done"
     db.commit()
     fp.decay_weights(db, user.id)
+    from app.services.cart_service import reset_cycle_counters
+
+    reset_cycle_counters(db, user.id)
     db.refresh(cycle)
     return _cycle_out(cycle)
 
@@ -514,3 +517,412 @@ def taste(db: Session = Depends(get_db)):
     user = _user(db)
     _ensure_seeded(db, user)
     return {"profile": fp.taste_profile(db, user.id)}
+
+
+# --- bags (F3) ---------------------------------------------------------------
+
+from app.models.food import FoodSettings, MerchantAccount, ShoppingBag  # noqa: E402
+from app.services import bag_builder  # noqa: E402
+
+
+class BagOut(BaseModel):
+    id: int
+    store: str
+    name: str
+    items: list[dict]
+    goods_total: float
+    minimum: float
+    delivery_fee: float
+    short: bool
+    shortfall: float
+    projected_waste: float
+    status: str
+
+
+class BagsOut(BaseModel):
+    cycle_id: int
+    bags: list[BagOut]
+    goods_total: float
+    fees_total: float
+    total: float
+    budget_per_cycle: float
+    over_budget: float
+    store_count: int
+
+
+def _bags_out(db: Session, user: User, cycle: MealCycle) -> BagsOut:
+    settings = bag_builder.ensure_food_settings(db, user.id)
+    merchants = bag_builder.ensure_merchants(db, user.id)
+    bags = (
+        db.query(ShoppingBag)
+        .filter(ShoppingBag.cycle_id == cycle.id)
+        .order_by(ShoppingBag.goods_total.desc())
+        .all()
+    )
+    goods = round(sum(b.goods_total for b in bags), 2)
+    fees = round(sum(b.delivery_fee for b in bags), 2)
+    return BagsOut(
+        cycle_id=cycle.id,
+        bags=[
+            BagOut(
+                id=b.id,
+                store=b.store,
+                name=merchants[b.store].name if b.store in merchants else b.store,
+                items=b.items or [],
+                goods_total=b.goods_total,
+                minimum=b.minimum,
+                delivery_fee=b.delivery_fee,
+                short=b.short,
+                shortfall=b.shortfall,
+                projected_waste=b.projected_waste,
+                status=b.status,
+            )
+            for b in bags
+        ],
+        goods_total=goods,
+        fees_total=fees,
+        total=round(goods + fees, 2),
+        budget_per_cycle=settings.budget_per_cycle,
+        over_budget=round(max(0.0, goods + fees - settings.budget_per_cycle), 2),
+        store_count=len(bags),
+    )
+
+
+@router.post("/cycles/{cycle_id}/bags", response_model=BagsOut)
+def build_bags(cycle_id: int, db: Session = Depends(get_db)):
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    if not cycle.meals:
+        raise HTTPException(status_code=422, detail="Build the plan first")
+    bag_builder.build_bags(db, user.id, cycle)
+    return _bags_out(db, user, cycle)
+
+
+@router.get("/cycles/{cycle_id}/bags", response_model=BagsOut)
+def get_bags(cycle_id: int, db: Session = Depends(get_db)):
+    user = _user(db)
+    return _bags_out(db, user, _cycle(db, user, cycle_id))
+
+
+@router.post("/cycles/{cycle_id}/bags/approve", response_model=BagsOut)
+def approve_bags(cycle_id: int, db: Session = Depends(get_db)):
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    if not db.query(ShoppingBag).filter(ShoppingBag.cycle_id == cycle.id).count():
+        raise HTTPException(status_code=422, detail="Build the bags first")
+    bag_builder.approve_bags(db, cycle)
+    return _bags_out(db, user, cycle)
+
+
+class MerchantOut(BaseModel):
+    store: str
+    name: str
+    site_url: str | None
+    minimum: float
+    delivery_fee: float
+    enabled: bool
+    supervised: bool
+
+
+class MerchantPatch(BaseModel):
+    minimum: float | None = Field(default=None, ge=0)
+    delivery_fee: float | None = Field(default=None, ge=0)
+    enabled: bool | None = None
+    supervised: bool | None = None
+
+
+@router.get("/merchants", response_model=list[MerchantOut])
+def list_merchants(db: Session = Depends(get_db)):
+    user = _user(db)
+    ms = bag_builder.ensure_merchants(db, user.id)
+    return [
+        MerchantOut(
+            store=m.store,
+            name=m.name,
+            site_url=m.site_url,
+            minimum=m.minimum,
+            delivery_fee=m.delivery_fee,
+            enabled=m.enabled,
+            supervised=m.supervised,
+        )
+        for m in ms.values()
+    ]
+
+
+@router.patch("/merchants/{store}", response_model=MerchantOut)
+def patch_merchant(store: str, payload: MerchantPatch, db: Session = Depends(get_db)):
+    user = _user(db)
+    m = bag_builder.ensure_merchants(db, user.id).get(store)
+    if not m:
+        raise HTTPException(status_code=404, detail="Unknown store")
+    for k, v in payload.model_dump(exclude_none=True).items():
+        setattr(m, k, v)
+    db.commit()
+    return MerchantOut(
+        store=m.store,
+        name=m.name,
+        site_url=m.site_url,
+        minimum=m.minimum,
+        delivery_fee=m.delivery_fee,
+        enabled=m.enabled,
+        supervised=m.supervised,
+    )
+
+
+class SettingsOut(BaseModel):
+    budget_per_cycle: float
+    per_order_cap: float
+    per_cycle_cap: float
+    ordering_enabled: bool
+    supervised_cycles_remaining: int
+    approval_ttl_minutes: int
+    total_tolerance: float
+
+
+class SettingsPatch(BaseModel):
+    budget_per_cycle: float | None = Field(default=None, ge=0)
+    per_order_cap: float | None = Field(default=None, ge=0)
+    per_cycle_cap: float | None = Field(default=None, ge=0)
+    ordering_enabled: bool | None = None
+    supervised_cycles_remaining: int | None = Field(default=None, ge=0)
+
+
+def _settings_out(s: FoodSettings) -> SettingsOut:
+    return SettingsOut(
+        budget_per_cycle=s.budget_per_cycle,
+        per_order_cap=s.per_order_cap,
+        per_cycle_cap=s.per_cycle_cap,
+        ordering_enabled=s.ordering_enabled,
+        supervised_cycles_remaining=s.supervised_cycles_remaining,
+        approval_ttl_minutes=s.approval_ttl_minutes,
+        total_tolerance=s.total_tolerance,
+    )
+
+
+@router.get("/settings", response_model=SettingsOut)
+def get_settings(db: Session = Depends(get_db)):
+    user = _user(db)
+    return _settings_out(bag_builder.ensure_food_settings(db, user.id))
+
+
+@router.patch("/settings", response_model=SettingsOut)
+def patch_settings(payload: SettingsPatch, db: Session = Depends(get_db)):
+    user = _user(db)
+    s = bag_builder.ensure_food_settings(db, user.id)
+    for k, v in payload.model_dump(exclude_none=True).items():
+        setattr(s, k, v)
+    db.commit()
+    return _settings_out(s)
+
+
+# --- carts, the payment gate, orders, spend (F4–F5) --------------------------
+
+from app.models.food import CartTask, Order  # noqa: E402
+from app.services import cart_service, store_adapters  # noqa: E402
+
+
+class CartOut(BaseModel):
+    id: int
+    bag_id: int
+    store: str
+    name: str
+    status: str
+    supervised: bool
+    cart_lines: list[dict]
+    cart_total: float | None
+    screenshot_path: str | None
+    error: str | None
+    attempts: int
+    events: list[dict]
+    approval_expires_at: datetime.datetime | None
+    order: dict | None
+
+
+def _cart_out(db: Session, user: User, t: CartTask) -> CartOut:
+    merchants = bag_builder.ensure_merchants(db, user.id)
+    live = (
+        db.query(OrderApprovalModel)
+        .filter(
+            OrderApprovalModel.cart_task_id == t.id,
+            OrderApprovalModel.used_at.is_(None),
+            OrderApprovalModel.revoked.is_(False),
+        )
+        .order_by(OrderApprovalModel.id.desc())
+        .first()
+    )
+    order = db.query(Order).filter(Order.cart_task_id == t.id).first()
+    return CartOut(
+        id=t.id,
+        bag_id=t.bag_id,
+        store=t.store,
+        name=merchants[t.store].name if t.store in merchants else t.store,
+        status=t.status,
+        supervised=t.supervised,
+        cart_lines=t.cart_lines or [],
+        cart_total=t.cart_total,
+        screenshot_path=t.screenshot_path,
+        error=t.error,
+        attempts=t.attempts,
+        events=t.events or [],
+        approval_expires_at=live.expires_at if live else None,
+        order={
+            "merchant_order_id": order.merchant_order_id,
+            "total": order.total,
+            "placed_at": order.placed_at.isoformat(),
+            "placed_by": order.placed_by,
+            "delivery_window": order.delivery_window,
+        }
+        if order
+        else None,
+    )
+
+
+from app.models.food import OrderApproval as OrderApprovalModel  # noqa: E402
+
+
+def _task(db: Session, user: User, task_id: int) -> CartTask:
+    t = (
+        db.query(CartTask)
+        .join(MealCycle)
+        .filter(CartTask.id == task_id, MealCycle.user_id == user.id)
+        .first()
+    )
+    if not t:
+        raise HTTPException(status_code=404, detail="Cart not found")
+    return t
+
+
+def _gate(fn):
+    try:
+        return fn()
+    except cart_service.GateError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+@router.get("/cycles/{cycle_id}/carts", response_model=list[CartOut])
+def list_carts(cycle_id: int, run: bool = True, db: Session = Depends(get_db)):
+    """Carts for the cycle. Creates queued tasks for approved bags and, in dry-run mode, builds them inline."""
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    tasks = cart_service.create_tasks_for_cycle(db, user.id, cycle)
+    if run and cart_service.executor_mode() == "dry_run":
+        for t in tasks:
+            if t.status == "queued":
+                cart_service.run_task(db, t, store_adapters.adapter_for(t.store))
+    return [_cart_out(db, user, t) for t in tasks]
+
+
+@router.post("/carts/{task_id}/run", response_model=CartOut)
+def run_cart(task_id: int, db: Session = Depends(get_db)):
+    user = _user(db)
+    t = _task(db, user, task_id)
+    if t.status in ("failed", "rejected"):
+        t.status = "queued"
+    cart_service.run_task(db, t, store_adapters.adapter_for(t.store))
+    return _cart_out(db, user, t)
+
+
+class ApproveIn(BaseModel):
+    biometric: bool = False
+
+
+class ApproveOut(BaseModel):
+    cart: CartOut
+    token: str
+    expires_at: datetime.datetime
+
+
+@router.post("/carts/{task_id}/approve", response_model=ApproveOut)
+def approve_cart(task_id: int, payload: ApproveIn, db: Session = Depends(get_db)):
+    user = _user(db)
+    t = _task(db, user, task_id)
+    a = _gate(
+        lambda: cart_service.approve_task(db, user.id, t, biometric=payload.biometric)
+    )
+    return ApproveOut(
+        cart=_cart_out(db, user, t), token=a.token, expires_at=a.expires_at
+    )
+
+
+class PlaceIn(BaseModel):
+    token: str
+
+
+@router.post("/carts/{task_id}/place", response_model=CartOut)
+def place_cart(task_id: int, payload: PlaceIn, db: Session = Depends(get_db)):
+    user = _user(db)
+    t = _task(db, user, task_id)
+    _gate(
+        lambda: cart_service.place_task(
+            db, user.id, t, payload.token, store_adapters.adapter_for(t.store)
+        )
+    )
+    return _cart_out(db, user, t)
+
+
+class ConfirmIn(BaseModel):
+    merchant_order_id: str | None = None
+
+
+@router.post("/carts/{task_id}/confirm-placed", response_model=CartOut)
+def confirm_placed(task_id: int, payload: ConfirmIn, db: Session = Depends(get_db)):
+    user = _user(db)
+    t = _task(db, user, task_id)
+    _gate(
+        lambda: cart_service.confirm_human_placed(
+            db, user.id, t, payload.merchant_order_id
+        )
+    )
+    return _cart_out(db, user, t)
+
+
+class RejectIn(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/carts/{task_id}/reject", response_model=CartOut)
+def reject_cart(task_id: int, payload: RejectIn, db: Session = Depends(get_db)):
+    user = _user(db)
+    t = _task(db, user, task_id)
+    _gate(lambda: cart_service.reject_task(db, t, payload.reason))
+    return _cart_out(db, user, t)
+
+
+@router.get("/spend")
+def spend(db: Session = Depends(get_db)):
+    user = _user(db)
+    current = (
+        db.query(MealCycle)
+        .filter(MealCycle.user_id == user.id, MealCycle.status != "done")
+        .order_by(MealCycle.start_date.desc())
+        .first()
+    )
+    return cart_service.spend_summary(db, user.id, current)
+
+
+@router.get("/orders")
+def list_orders(db: Session = Depends(get_db)):
+    user = _user(db)
+    rows = (
+        db.query(Order)
+        .join(MealCycle)
+        .filter(MealCycle.user_id == user.id)
+        .order_by(Order.placed_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": o.id,
+            "store": o.store,
+            "cycle_id": o.cycle_id,
+            "merchant_order_id": o.merchant_order_id,
+            "goods_total": o.goods_total,
+            "fees": o.fees,
+            "total": o.total,
+            "placed_at": o.placed_at.isoformat(),
+            "placed_by": o.placed_by,
+            "line_items": o.line_items or [],
+        }
+        for o in rows
+    ]

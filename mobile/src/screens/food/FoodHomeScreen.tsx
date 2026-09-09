@@ -69,7 +69,9 @@ export default function FoodHomeScreen({ navigation }: any) {
     ? { label: 'Start a two-week cycle', onPress: startCycle }
     : cycle.status === 'deck'
       ? { label: 'Continue picking meals', onPress: () => navigation.navigate('FoodDeck', { cycleId: cycle.id }) }
-      : { label: 'See the plan', onPress: () => navigation.navigate('FoodPlan', { cycleId: cycle.id }) };
+      : cycle.status === 'planned'
+        ? { label: 'See the plan · build bags', onPress: () => navigation.navigate('FoodPlan', { cycleId: cycle.id }) }
+        : { label: 'Carts & approvals', onPress: () => navigation.navigate('FoodCarts', { cycleId: cycle.id }) };
 
   return (
     <ScreenBackground>
@@ -126,6 +128,7 @@ export default function FoodHomeScreen({ navigation }: any) {
         <TouchableOpacity style={s.btn} onPress={cta.onPress} activeOpacity={0.9}>
           <Text style={s.btnText}>{cta.label}</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodSpend')}><Text style={s.ghostText}>Spend ledger</Text></TouchableOpacity>
         <View style={{ height: 120 }} />
       </ScrollView>
     </ScreenBackground>
@@ -161,4 +164,6 @@ const s = StyleSheet.create({
   chipText: { fontFamily: fonts.mono, fontSize: 11, color: colors.accentLight },
   btn: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 15, alignItems: 'center', marginTop: 4 },
   btnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.bg },
+  ghost: { alignItems: 'center', paddingVertical: 12 },
+  ghostText: { fontFamily: fonts.medium, fontSize: 13, color: colors.accentLight },
 });

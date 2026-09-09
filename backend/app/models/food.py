@@ -247,3 +247,153 @@ class PreferenceWeight(Base, TimestampMixin):
     feature: Mapped[str] = mapped_column(String(60), nullable=False)
     weight: Mapped[float] = mapped_column(Float, default=0.0)
     samples: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FoodSettings(Base, TimestampMixin):
+    """Single-row knobs for the food feature. Caps live here and in the app, never only in a prompt."""
+
+    __tablename__ = "food_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, unique=True
+    )
+    budget_per_cycle: Mapped[float] = mapped_column(Float, default=220.0)
+    per_order_cap: Mapped[float] = mapped_column(Float, default=180.0)
+    per_cycle_cap: Mapped[float] = mapped_column(Float, default=300.0)
+    ordering_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # global kill switch
+    supervised_cycles_remaining: Mapped[int] = mapped_column(Integer, default=3)
+    approval_ttl_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    total_tolerance: Mapped[float] = mapped_column(
+        Float, default=3.0
+    )  # $ drift allowed between approval and placement
+
+
+class MerchantAccount(Base, TimestampMixin):
+    """A store the bag builder can allocate to. Minimums and fees are estimates the cart builder overwrites."""
+
+    __tablename__ = "merchant_accounts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "store", name="uq_merchant_user_store"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    store: Mapped[str] = mapped_column(String(20), nullable=False)  # hmart | wf | weg
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    site_url: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    minimum: Mapped[float] = mapped_column(Float, default=0.0)
+    delivery_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    supervised: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )  # executor stops on Place Order
+    orders_this_cycle: Mapped[int] = mapped_column(Integer, default=0)
+    preferred_products: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # ingredient name → product memory
+
+
+class ShoppingBag(Base, TimestampMixin):
+    """One store's share of a cycle's shopping list."""
+
+    __tablename__ = "shopping_bags"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cycle_id: Mapped[int] = mapped_column(
+        ForeignKey("meal_cycles.id"), nullable=False, index=True
+    )
+    store: Mapped[str] = mapped_column(String(20), nullable=False)
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    goods_total: Mapped[float] = mapped_column(Float, default=0.0)
+    minimum: Mapped[float] = mapped_column(Float, default=0.0)
+    delivery_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    short: Mapped[bool] = mapped_column(Boolean, default=False)
+    shortfall: Mapped[float] = mapped_column(Float, default=0.0)
+    projected_waste: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(
+        String(20), default="proposed"
+    )  # proposed | approved | carted | ordered
+    bag_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    cycle: Mapped[MealCycle] = relationship()
+
+
+class CartTask(Base, TimestampMixin):
+    """One store cart for one bag, driven by the executor. Status machine:
+    queued → building → needs_review → approved → placing → (awaiting_human →) placed | failed | rejected."""
+
+    __tablename__ = "cart_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cycle_id: Mapped[int] = mapped_column(
+        ForeignKey("meal_cycles.id"), nullable=False, index=True
+    )
+    bag_id: Mapped[int] = mapped_column(
+        ForeignKey("shopping_bags.id"), nullable=False, unique=True
+    )
+    store: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    supervised: Mapped[bool] = mapped_column(Boolean, default=True)
+    cart_lines: Mapped[list | None] = mapped_column(
+        JSON, nullable=True
+    )  # as read back from the store page
+    cart_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    screenshot_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False
+    )
+    events: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # audit trail [{ts, event, detail}]
+
+    bag: Mapped[ShoppingBag] = relationship()
+
+
+class OrderApproval(Base, TimestampMixin):
+    """A signed, single-use, expiring approval bound to one cart task and its total."""
+
+    __tablename__ = "order_approvals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cart_task_id: Mapped[int] = mapped_column(
+        ForeignKey("cart_tasks.id"), nullable=False, index=True
+    )
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    approved_total: Mapped[float] = mapped_column(Float, nullable=False)
+    bag_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    biometric: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime.datetime] = mapped_column(nullable=False)
+    used_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Order(Base, TimestampMixin):
+    """A placed order. Doubles as the spend ledger row."""
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cart_task_id: Mapped[int] = mapped_column(
+        ForeignKey("cart_tasks.id"), nullable=False, unique=True
+    )
+    cycle_id: Mapped[int] = mapped_column(
+        ForeignKey("meal_cycles.id"), nullable=False, index=True
+    )
+    store: Mapped[str] = mapped_column(String(20), nullable=False)
+    merchant_order_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    goods_total: Mapped[float] = mapped_column(Float, default=0.0)
+    fees: Mapped[float] = mapped_column(Float, default=0.0)
+    tip: Mapped[float] = mapped_column(Float, default=0.0)
+    total: Mapped[float] = mapped_column(Float, default=0.0)
+    line_items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    receipt_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    delivery_window: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    placed_at: Mapped[datetime.datetime] = mapped_column(nullable=False)
+    placed_by: Mapped[str] = mapped_column(String(20), default="human")  # human | agent

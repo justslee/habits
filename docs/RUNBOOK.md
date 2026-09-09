@@ -112,6 +112,29 @@ eas build --platform ios --profile production --auto-submit
 Builds auto-increment the build number (`appVersionSource: remote`). Submission is
 non-interactive (`ascAppId` in `eas.json`).
 
+## Food: carts and ordering
+
+The Food tab plans two-week cycles and builds store carts. Two executor modes:
+
+| `FOOD_EXECUTOR` | What builds the cart |
+|---|---|
+| `dry_run` (default) | The API simulates the cart from bag prices, inline. Whole approval flow works with no browser. |
+| `playwright` | `scripts/cart_worker.py` drives a dedicated Chrome profile (`~/Library/Application Support/Habits/chrome-profile`). |
+
+```bash
+cd ~/srv/habits/backend && source .venv/bin/activate
+pip install playwright && playwright install chrome
+FOOD_EXECUTOR=playwright python scripts/cart_worker.py --login hmart     # sign in once per store
+FOOD_EXECUTOR=playwright python scripts/cart_worker.py                   # poll queued carts
+```
+
+The payment gate lives in `app/services/cart_service.py`: kill switch (`ordering_enabled`, off by
+default), per-order and per-cycle caps, one order per store per cycle, Face ID single-use approvals
+bound to the cart total with a 15-minute expiry, total re-verification before Place Order,
+supervised mode (the executor parks on Place Order; you press it and confirm in the app),
+idempotent order recording, and an event audit trail on every cart. Screenshots land in
+`~/Library/Application Support/Habits/carts/`.
+
 ## Troubleshooting
 
 | Problem | Fix |
