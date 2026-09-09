@@ -266,6 +266,8 @@ class FoodSettings(Base, TimestampMixin):
     )  # global kill switch
     supervised_cycles_remaining: Mapped[int] = mapped_column(Integer, default=3)
     approval_ttl_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    last_pantry_push: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    last_cook_push: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     total_tolerance: Mapped[float] = mapped_column(
         Float, default=3.0
     )  # $ drift allowed between approval and placement
@@ -397,3 +399,41 @@ class Order(Base, TimestampMixin):
     delivery_window: Mapped[str | None] = mapped_column(String(80), nullable=True)
     placed_at: Mapped[datetime.datetime] = mapped_column(nullable=False)
     placed_by: Mapped[str] = mapped_column(String(20), default="human")  # human | agent
+
+
+class CalendarFeed(Base, TimestampMixin):
+    """A Google Calendar secret iCal address (read-only, no OAuth)."""
+
+    __tablename__ = "calendar_feeds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    url: Mapped[str] = mapped_column(String(600), nullable=False)
+    label: Mapped[str] = mapped_column(String(80), default="Google Calendar")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class TravelSpan(Base, TimestampMixin):
+    """Days the owner is away, derived from calendar events. Ignored spans don't affect cycles."""
+
+    __tablename__ = "travel_spans"
+    __table_args__ = (UniqueConstraint("feed_id", "uid", name="uq_travel_feed_uid"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    feed_id: Mapped[int | None] = mapped_column(
+        ForeignKey("calendar_feeds.id"), nullable=True
+    )
+    uid: Mapped[str] = mapped_column(String(200), nullable=False)
+    start_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    summary: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    ignored: Mapped[bool] = mapped_column(Boolean, default=False)

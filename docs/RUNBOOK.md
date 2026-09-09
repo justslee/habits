@@ -135,6 +135,15 @@ supervised mode (the executor parks on Place Order; you press it and confirm in 
 idempotent order recording, and an event audit trail on every cart. Screenshots land in
 `~/Library/Application Support/Habits/carts/`.
 
+## Food: Google Calendar travel and the scheduler
+
+Food → Travel: paste the calendar's *Secret address in iCal format* (Google Calendar → Settings →
+Integrate calendar). The API polls it hourly (`FOOD_SCHEDULER=1`, in-process), classifies events into
+travel spans (keywords first, LLM second when a key is present), and new cycles subtract them
+automatically. The same hourly tick closes finished cycles with a summary, pushes "check the pantry"
+two days before the next cycle, and "cook X tonight" on cook days after 4 pm. `POST /api/v1/food/tick?force=1`
+runs it by hand.
+
 ## Troubleshooting
 
 | Problem | Fix |

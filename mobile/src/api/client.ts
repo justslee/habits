@@ -859,3 +859,33 @@ export function patchFoodSettings(p: Partial<FoodSettingsData>): Promise<FoodSet
 export function getSpend(): Promise<SpendSummary> {
   return request('/api/v1/food/spend');
 }
+
+// --- Food calendar & travel (F6) ---
+
+export interface CalendarFeedData {
+  id: number; label: string; url_host: string; enabled: boolean; last_synced_at: string | null; last_error: string | null; spans: number;
+}
+export interface TravelSpanData {
+  id: number; start_date: string; end_date: string; days: number; summary: string | null; reason: string | null; confirmed: boolean; ignored: boolean;
+}
+export function getCalendarFeeds(): Promise<CalendarFeedData[]> {
+  return request('/api/v1/food/calendar');
+}
+export function putCalendarFeed(url: string): Promise<CalendarFeedData> {
+  return request('/api/v1/food/calendar', { method: 'PUT', body: JSON.stringify({ url }) });
+}
+export function syncCalendar(): Promise<CalendarFeedData[]> {
+  return request('/api/v1/food/calendar/sync', { method: 'POST' });
+}
+export function deleteCalendarFeed(): Promise<{ deleted: boolean }> {
+  return request('/api/v1/food/calendar', { method: 'DELETE' });
+}
+export function getTravel(): Promise<TravelSpanData[]> {
+  return request('/api/v1/food/travel');
+}
+export function patchTravel(id: number, p: { confirmed?: boolean; ignored?: boolean }): Promise<TravelSpanData> {
+  return request(`/api/v1/food/travel/${id}`, { method: 'PATCH', body: JSON.stringify(p) });
+}
+export function addTravel(p: { start_date: string; end_date: string; summary?: string }): Promise<TravelSpanData> {
+  return request('/api/v1/food/travel', { method: 'POST', body: JSON.stringify(p) });
+}

@@ -7,12 +7,16 @@ import time
 from dotenv import load_dotenv
 
 from pathlib import Path as _Path
-load_dotenv(_Path(__file__).resolve().parent.parent / ".env", override=True)  # override=True so .env wins over empty shell vars
+
+load_dotenv(
+    _Path(__file__).resolve().parent.parent / ".env", override=True
+)  # override=True so .env wins over empty shell vars
 
 # Pull prod secrets (OPENAI_API_KEY, API_KEY, …) from AWS Secrets Manager
 # into the env BEFORE routers/services import. No-op locally (fail-open); never
 # overrides an explicit env var / .env value.
 from app.services.secrets import load_secrets_into_env  # noqa: E402
+
 load_secrets_into_env()
 
 # Run in the owner's timezone so date.today() (used everywhere for "today's"
@@ -28,7 +32,22 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.routers import concepts, daily, dashboard, devices, entries, food, milestones, runs, speaking, streaks, vdot, vision, weekly_reviews, workouts
+from app.routers import (
+    concepts,
+    daily,
+    dashboard,
+    devices,
+    entries,
+    food,
+    milestones,
+    runs,
+    speaking,
+    streaks,
+    vdot,
+    vision,
+    weekly_reviews,
+    workouts,
+)
 
 logger = logging.getLogger("mastery_tracker")
 
@@ -50,12 +69,18 @@ app.state.limiter = limiter
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try again later."})
+    return JSONResponse(
+        status_code=429, content={"detail": "Rate limit exceeded. Try again later."}
+    )
 
 
 # --- CORS — restrict to known origins ---
 _allowed_origins = [
-    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:19006,http://localhost:8081").split(",") if o.strip()
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:19006,http://localhost:8081"
+    ).split(",")
+    if o.strip()
 ]
 
 app.add_middleware(
@@ -85,10 +110,15 @@ async def api_key_middleware(request: Request, call_next):
     if _testing or _is_public_path(request.url.path):
         return await call_next(request)
     if not _api_key:
-        return JSONResponse(status_code=503, content={"detail": "Server not configured (missing API_KEY)"})
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Server not configured (missing API_KEY)"},
+        )
     provided = request.headers.get("X-API-Key", "")
     if not hmac.compare_digest(provided, _api_key):
-        return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+        return JSONResponse(
+            status_code=401, content={"detail": "Invalid or missing API key"}
+        )
     return await call_next(request)
 
 
@@ -100,7 +130,13 @@ async def request_logging_middleware(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     elapsed_ms = (time.time() - start) * 1000
-    logger.info("%s %s %s %.0fms", request.method, request.url.path, response.status_code, elapsed_ms)
+    logger.info(
+        "%s %s %s %.0fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
     return response
 
 
@@ -121,6 +157,38 @@ app.include_router(concepts.router)
 app.include_router(concepts.link_router)
 
 
+# --- Food scheduler: hourly in-process tick (calendar sync, cycle close-out, pushes) ---
+_scheduler_task = None
+
+
+async def _food_scheduler_loop():
+    import asyncio
+
+    from app.db.database import SessionLocal
+    from app.services.food_scheduler import daily_tick
+
+    await asyncio.sleep(20)  # let the server settle
+    while True:
+        db = SessionLocal()
+        try:
+            await daily_tick(db)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("food scheduler tick failed: %s", e)
+        finally:
+            db.close()
+        await asyncio.sleep(3600)
+
+
+@app.on_event("startup")
+async def _start_scheduler():
+    global _scheduler_task
+    import asyncio
+
+    if _testing or os.getenv("FOOD_SCHEDULER", "1") != "1":
+        return
+    _scheduler_task = asyncio.create_task(_food_scheduler_loop())
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -134,6 +202,7 @@ async def config_status():
     Lets us confirm the Secrets Manager loader populated the env after deploy
     without exposing any secret material.
     """
+
     def _set(name: str) -> bool:
         return bool(os.getenv(name))
 

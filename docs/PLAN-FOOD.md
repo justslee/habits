@@ -1,6 +1,7 @@
 # Plan — Food: two-week meal cycles, swipe-to-choose, bag building, guarded ordering
 
-> Written 2026-09-08, revised the same day (decisions: Google Calendar, six tabs, spend tracking; deck stop rule and learning hardened). Builds on `PLAN-LOCAL-ASSISTANT.md` Phases 4 (memory, push, assistant) and 5
+> Written 2026-09-08, revised the same day (decisions: Google Calendar, six tabs, spend tracking; deck stop rule and learning hardened).
+> **Status 2026-09-09: F1–F6 shipped.** Backend under `/api/v1/food`, Food tab in the app. The browser adapters run in supervised mode and their selectors are tuned on first use; until then `FOOD_EXECUTOR=dry_run` simulates carts so the whole approval flow is exercisable. Builds on `PLAN-LOCAL-ASSISTANT.md` Phases 4 (memory, push, assistant) and 5
 > (task queue, browser executor, approval gate). Owner decisions are marked **DECIDE**.
 
 ## 1. What the feature is, in one cycle

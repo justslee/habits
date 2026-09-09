@@ -8,8 +8,8 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View, RefreshControl } 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, radius, spacing, typography } from '../../theme';
 import {
-  FoodCycle, FoodPlan, PantryEntry, TasteEntry,
-  createCycle, getCurrentCycle, getPantry, getPlan, getTaste,
+  FoodCycle, FoodPlan, PantryEntry, TasteEntry, TravelSpanData,
+  createCycle, getCurrentCycle, getPantry, getPlan, getTaste, getTravel,
 } from '../../api/client';
 import { haptic } from '../../utils/haptics';
 import ScreenBackground from '../../components/ScreenBackground';
@@ -26,15 +26,17 @@ export default function FoodHomeScreen({ navigation }: any) {
   const [plan, setPlan] = useState<FoodPlan | null>(null);
   const [pantry, setPantry] = useState<PantryEntry[]>([]);
   const [taste, setTaste] = useState<TasteEntry[]>([]);
+  const [travel, setTravel] = useState<TravelSpanData[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [c, p, t] = await Promise.all([getCurrentCycle(), getPantry(), getTaste()]);
+      const [c, p, t, tr] = await Promise.all([getCurrentCycle(), getPantry(), getTaste(), getTravel().catch(() => [])]);
       setCycle(c);
       setPantry(p);
       setTaste(t.profile);
+      setTravel(tr.filter(x => !x.ignored));
       setPlan(c && c.status !== 'deck' ? await getPlan(c.id) : null);
     } catch (err) {
       console.warn('FoodHome load error:', err);
@@ -105,9 +107,17 @@ export default function FoodHomeScreen({ navigation }: any) {
         <View style={s.card}>
           <Text style={s.lbl}>THIS CYCLE</Text>
           <Row k="Meals kept" sub={plan?.meals.map(m => m.recipe.title).join(' · ') || (cycle ? 'pick them in the deck' : '—')} v={String(plan?.meals.length ?? 0)} />
-          <Row k="Eating days" sub={cycle ? `14 − ${cycle.travel_days.length} travel − ${cycle.eat_out_days} eat-out` : 'travel from Google Calendar (coming)'} v={String(cycle?.eating_days ?? '—')} />
+          <Row k="Eating days" sub={cycle ? `14 − ${cycle.travel_days.length} travel − ${cycle.eat_out_days} eat-out` : 'travel comes from Google Calendar'} v={String(cycle?.eating_days ?? '—')} />
           <Row k="Covered" sub={plan ? (plan.open_days ? `${plan.open_days} open · eat out or keep one more` : 'fully covered') : '—'} v={String(plan?.covered_days ?? '—')} />
         </View>
+
+        <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => navigation.navigate('FoodCalendar')}>
+          <Text style={s.lbl}>TRAVEL · GOOGLE CALENDAR</Text>
+          {travel.length ? travel.slice(0, 3).map(t => (
+            <Text key={t.id} style={s.body}>{t.summary || 'Away'} · {t.start_date.slice(5)} → {t.end_date.slice(5)} · {t.days}d{t.confirmed ? '' : ' · unconfirmed'}</Text>
+          )) : <Text style={s.body}>No upcoming travel on file</Text>}
+          <Text style={s.help}>Tap to connect your calendar or add travel by hand</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => navigation.navigate('FoodPantry', { cycleId: cycle?.id })}>
           <Text style={s.lbl}>PANTRY</Text>

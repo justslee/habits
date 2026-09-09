@@ -406,13 +406,19 @@ def create_cycle(payload: CycleCreate, db: Session = Depends(get_db)):
     user = _user(db)
     _ensure_seeded(db, user)
     start = payload.start_date or datetime.date.today()
+    end = start + datetime.timedelta(days=fp.CYCLE_DAYS - 1)
+    travel = list(payload.travel_days)
+    if not travel:  # auto-fill from the calendar; ignored spans are skipped
+        from app.services.calendar_sync import travel_days_between
+
+        travel = travel_days_between(db, user.id, start, end)
     cycle = MealCycle(
         user_id=user.id,
         start_date=start,
-        end_date=start + datetime.timedelta(days=fp.CYCLE_DAYS - 1),
+        end_date=end,
         shop_date=payload.shop_date or start,
         status="deck",
-        travel_days=[d.isoformat() for d in payload.travel_days],
+        travel_days=[d.isoformat() for d in travel],
         eat_out_days=payload.eat_out_days,
     )
     db.add(cycle)
@@ -521,7 +527,7 @@ def taste(db: Session = Depends(get_db)):
 
 # --- bags (F3) ---------------------------------------------------------------
 
-from app.models.food import FoodSettings, MerchantAccount, ShoppingBag  # noqa: E402
+from app.models.food import FoodSettings, ShoppingBag  # noqa: E402
 from app.services import bag_builder  # noqa: E402
 
 
@@ -926,3 +932,190 @@ def list_orders(db: Session = Depends(get_db)):
         }
         for o in rows
     ]
+
+
+# --- calendar, travel, scheduler (F6) ----------------------------------------
+
+from app.models.food import CalendarFeed, TravelSpan  # noqa: E402
+from app.services import calendar_sync, food_scheduler  # noqa: E402
+
+
+class FeedOut(BaseModel):
+    id: int
+    label: str
+    url_host: str
+    enabled: bool
+    last_synced_at: datetime.datetime | None
+    last_error: str | None
+    spans: int
+
+
+class FeedIn(BaseModel):
+    url: str = Field(min_length=12, max_length=600)
+    label: str = "Google Calendar"
+
+
+def _feed_out(db: Session, f: CalendarFeed) -> FeedOut:
+    from urllib.parse import urlparse
+
+    return FeedOut(
+        id=f.id,
+        label=f.label,
+        url_host=urlparse(f.url).netloc,
+        enabled=f.enabled,
+        last_synced_at=f.last_synced_at,
+        last_error=f.last_error,
+        spans=db.query(TravelSpan).filter(TravelSpan.feed_id == f.id).count(),
+    )
+
+
+@router.get("/calendar", response_model=list[FeedOut])
+def list_feeds(db: Session = Depends(get_db)):
+    user = _user(db)
+    return [
+        _feed_out(db, f)
+        for f in db.query(CalendarFeed).filter(CalendarFeed.user_id == user.id).all()
+    ]
+
+
+@router.put("/calendar", response_model=FeedOut)
+async def put_feed(payload: FeedIn, db: Session = Depends(get_db)):
+    """Set (or replace) the Google Calendar secret iCal address and sync it right away."""
+    user = _user(db)
+    if not payload.url.startswith("https://") or ".ics" not in payload.url:
+        raise HTTPException(
+            status_code=422,
+            detail="Paste the 'Secret address in iCal format' from Google Calendar settings (an https URL ending in .ics).",
+        )
+    feed = db.query(CalendarFeed).filter(CalendarFeed.user_id == user.id).first()
+    if feed is None:
+        feed = CalendarFeed(user_id=user.id, url=payload.url, label=payload.label)
+        db.add(feed)
+    else:
+        feed.url, feed.label, feed.enabled = payload.url, payload.label, True
+    db.commit()
+    try:
+        await calendar_sync.sync_feed(db, feed)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=422, detail=f"Could not read that calendar: {e}"
+        )
+    return _feed_out(db, feed)
+
+
+@router.post("/calendar/sync", response_model=list[FeedOut])
+async def sync_feeds(db: Session = Depends(get_db)):
+    user = _user(db)
+    feeds = db.query(CalendarFeed).filter(CalendarFeed.user_id == user.id).all()
+    for f in feeds:
+        try:
+            await calendar_sync.sync_feed(db, f)
+        except Exception:  # noqa: BLE001 — error is recorded on the feed
+            pass
+    return [_feed_out(db, f) for f in feeds]
+
+
+@router.delete("/calendar")
+def delete_feed(db: Session = Depends(get_db)):
+    user = _user(db)
+    for f in db.query(CalendarFeed).filter(CalendarFeed.user_id == user.id).all():
+        for s in db.query(TravelSpan).filter(TravelSpan.feed_id == f.id).all():
+            db.delete(s)
+        db.delete(f)
+    db.commit()
+    return {"deleted": True}
+
+
+class TravelOut(BaseModel):
+    id: int
+    start_date: datetime.date
+    end_date: datetime.date
+    days: int
+    summary: str | None
+    reason: str | None
+    confirmed: bool
+    ignored: bool
+
+
+def _travel_out(s: TravelSpan) -> TravelOut:
+    return TravelOut(
+        id=s.id,
+        start_date=s.start_date,
+        end_date=s.end_date,
+        days=(s.end_date - s.start_date).days + 1,
+        summary=s.summary,
+        reason=s.reason,
+        confirmed=s.confirmed,
+        ignored=s.ignored,
+    )
+
+
+@router.get("/travel", response_model=list[TravelOut])
+def list_travel(db: Session = Depends(get_db)):
+    user = _user(db)
+    today = datetime.date.today()
+    rows = (
+        db.query(TravelSpan)
+        .filter(
+            TravelSpan.user_id == user.id,
+            TravelSpan.end_date >= today - datetime.timedelta(days=7),
+        )
+        .order_by(TravelSpan.start_date)
+        .all()
+    )
+    return [_travel_out(s) for s in rows]
+
+
+class TravelPatch(BaseModel):
+    confirmed: bool | None = None
+    ignored: bool | None = None
+
+
+@router.patch("/travel/{span_id}", response_model=TravelOut)
+def patch_travel(span_id: int, payload: TravelPatch, db: Session = Depends(get_db)):
+    user = _user(db)
+    s = (
+        db.query(TravelSpan)
+        .filter(TravelSpan.id == span_id, TravelSpan.user_id == user.id)
+        .first()
+    )
+    if not s:
+        raise HTTPException(status_code=404, detail="Travel span not found")
+    if payload.confirmed is not None:
+        s.confirmed = payload.confirmed
+    if payload.ignored is not None:
+        s.ignored = payload.ignored
+    db.commit()
+    return _travel_out(s)
+
+
+class TravelAdd(BaseModel):
+    start_date: datetime.date
+    end_date: datetime.date
+    summary: str = "Manual"
+
+
+@router.post("/travel", response_model=TravelOut)
+def add_travel(payload: TravelAdd, db: Session = Depends(get_db)):
+    user = _user(db)
+    if payload.end_date < payload.start_date:
+        raise HTTPException(status_code=422, detail="end before start")
+    s = TravelSpan(
+        user_id=user.id,
+        feed_id=None,
+        uid=f"manual-{datetime.datetime.now().timestamp()}",
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        summary=payload.summary,
+        reason="manual",
+        confirmed=True,
+    )
+    db.add(s)
+    db.commit()
+    return _travel_out(s)
+
+
+@router.post("/tick")
+async def tick(force: bool = False, db: Session = Depends(get_db)):
+    """Run the daily scheduler now (calendar sync, cycle close-out, pushes)."""
+    return await food_scheduler.daily_tick(db, force=force)
