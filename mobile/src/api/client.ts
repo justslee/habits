@@ -897,7 +897,8 @@ export interface MerchantData {
   quality_tier: 'high' | 'standard'; minimum: number; delivery_fee: number; enabled: boolean; supervised: boolean;
   deal_text: string | null; deal_value: number; deal_min: number; deal_expires: string | null; deal_active: boolean;
 }
-export interface DiscoverResult { added: { id: number; title: string; source: string | null; rating: number | null; ingredients: number }[]; skipped: number; checked: number }
+export interface DiscoverLog { url: string; outcome: string; title?: string; detail?: string }
+export interface DiscoverResult { added: { id: number; title: string; source: string | null; rating: number | null; ingredients: number }[]; skipped: number; checked: number; log?: DiscoverLog[] }
 
 export function patchRecipe(id: number, p: { status?: 'candidate' | 'proven' | 'retired'; notes?: string; user_rating?: number }): Promise<FoodRecipe> {
   return request(`/api/v1/food/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(p) });

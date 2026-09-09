@@ -66,6 +66,9 @@ export default function FoodRecipesScreen() {
           <View style={s.card}>
             <Text style={typography.eyebrow}>LAST SEARCH · {last.checked} PAGES CHECKED · {last.skipped} SKIPPED</Text>
             {last.added.length ? last.added.map(a => <Text key={a.id} style={s.body}>+ {a.title} <Text style={s.sub}>· {a.source}{a.rating ? ` · ${a.rating.toFixed(1)}` : ''} · {a.ingredients} ingredients</Text></Text>) : <Text style={s.sub}>Nothing new that fits. Try again next week; the search follows your taste profile.</Text>}
+            {(last.log || []).filter(l => l.outcome !== 'added').slice(0, 8).map((l, i) => (
+              <Text key={i} style={s.sub}>{l.outcome} · {l.title || l.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 48)}{l.detail ? ` · ${l.detail}` : ''}</Text>
+            ))}
           </View>
         )}
 
