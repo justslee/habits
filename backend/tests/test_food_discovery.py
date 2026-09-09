@@ -138,6 +138,13 @@ def test_heuristic_normalise_marks_garnish_optional_and_parses_quantities():
     )
 
 
+def test_bot_wall_detection():
+    assert rd._looks_blocked(403, "") and rd._looks_blocked(
+        200, "<title>Just a moment...</title>"
+    )
+    assert not rd._looks_blocked(200, "<html>recipe</html>")
+
+
 def test_rank_urls_prefers_priority_sources():
     ranked = rd.rank_urls(
         [
@@ -191,6 +198,15 @@ async def test_discover_adds_candidates_dedupes_and_filters(db_session):
         assert all(ri.ingredient.package_sizes for ri in r.ingredients), (
             "new ingredients get a store and a pack estimate"
         )
+        from app.models.food import PantryItem
+
+        staples = [ri.ingredient for ri in r.ingredients if ri.ingredient.shelf_stable]
+        assert staples and all(
+            db_session.query(PantryItem)
+            .filter(PantryItem.ingredient_id == i.id)
+            .first()
+            for i in staples
+        ), "new shelf-stable staples land in the pantry check"
         # second pass: nothing new
         again = await rd.discover(
             db_session,
