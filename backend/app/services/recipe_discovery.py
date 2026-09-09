@@ -42,12 +42,12 @@ SOURCE_PRIORITY = [
 # Works without a search key: known batch-friendly, high-protein pages on the priority sources.
 CURATED_URLS = [
     "https://www.maangchi.com/recipe/dakgangjeong",
-    "https://www.maangchi.com/recipe/jeyuk-bokkeum",
+    "https://www.maangchi.com/recipe/jeyuk-deopbap",
     "https://www.maangchi.com/recipe/doenjang-jjigae",
     "https://www.maangchi.com/recipe/samgyetang",
     "https://www.maangchi.com/recipe/yukgaejang",
     "https://www.maangchi.com/recipe/tteokgalbi",
-    "https://www.maangchi.com/recipe/godeungeo-jorim",
+    "https://www.maangchi.com/recipe/godeungeo-gui",
     "https://www.maangchi.com/recipe/dakjjim",
     "https://www.justonecookbook.com/gyudon/",
     "https://www.justonecookbook.com/chicken-katsu/",
@@ -58,6 +58,25 @@ CURATED_URLS = [
     "https://www.justonecookbook.com/shogayaki/",
     "https://www.justonecookbook.com/butadon/",
 ]
+MAANGCHI_INDEX = "https://www.maangchi.com/recipes"
+INDEX_KEYWORDS = (
+    "dak",
+    "chicken",
+    "jeyuk",
+    "pork",
+    "bulgogi",
+    "beef",
+    "galbi",
+    "jjim",
+    "jjigae",
+    "tang",
+    "gui",
+    "bokkeum",
+    "deopbap",
+    "samgyeopsal",
+    "godeungeo",
+    "saengseon",
+)
 MAX_INGREDIENTS = 12
 MAX_MINUTES = 90
 GARNISH_WORDS = re.compile(
@@ -65,7 +84,7 @@ GARNISH_WORDS = re.compile(
     re.I,
 )
 QTY_RE = re.compile(
-    r"^\s*(\d+(?:[./]\d+)?|\d+\s+\d/\d|½|¼|¾|⅓|⅔)?\s*(tablespoons|tablespoon|tbsp|teaspoons|teaspoon|tsp|pounds|pound|lbs|lb|ounces|ounce|oz|cups|cup|cloves|clove|pieces|piece|packages|package|cans|can|slices|slice|bunch|head|inch|kg|g|ml|l)?\b\s*(?:of\s+)?(.*)$",
+    r"^\s*(?:plus\s+)?(\d+\s*[½¼¾⅓⅔]|\d+(?:[./]\d+)?|\d+\s+\d/\d|½|¼|¾|⅓|⅔)?\s*(tablespoons|tablespoon|tbsp|teaspoons|teaspoon|tsp|pounds|pound|lbs|lb|ounces|ounce|oz|cups|cup|cloves|clove|pieces|piece|packages|package|cans|can|slices|slice|bunch|head|inch|kg|g|ml|l)?\b\s*(?:of\s+)?(.*)$",
     re.I,
 )
 FRACTIONS = {"½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 0.33, "⅔": 0.67}
@@ -189,15 +208,125 @@ def rank_urls(urls: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-async def fetch_html(url: str) -> str:
+BOT_WALL_MARKERS = (
+    "Attention Required! | Cloudflare",
+    "Just a moment...",
+    "cf-challenge",
+    "captcha-delivery",
+)
+
+
+def _looks_blocked(status: int, text: str) -> bool:
+    return status in (403, 429, 503) or any(m in text[:6000] for m in BOT_WALL_MARKERS)
+
+
+class BrowserSession:
+    """One headed Chrome (the Habits profile) reused across a discovery run. Headless Chrome
+    does not clear Maangchi's Cloudflare check; headed does. Throttled to be a polite guest."""
+
+    def __init__(self, headless: bool = False, min_gap_s: float = 3.0):
+        self.headless = headless
+        self.min_gap_s = min_gap_s
+        self._pw = self._ctx = self._page = None
+        self._last = 0.0
+
+    def _open(self):
+        if self._page:
+            return self._page
+        from playwright.sync_api import sync_playwright
+
+        from app.services.store_adapters import PROFILE_DIR
+
+        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        self._pw = sync_playwright().start()
+        try:
+            self._ctx = self._pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), headless=self.headless, channel="chrome"
+            )
+        except Exception:  # noqa: BLE001 — no Google Chrome: bundled Chromium
+            self._ctx = self._pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), headless=self.headless
+            )
+        self._page = self._ctx.new_page()
+        return self._page
+
+    def get(self, url: str) -> str:
+        import time
+
+        page = self._open()
+        gap = self.min_gap_s - (time.time() - self._last)
+        if gap > 0:
+            time.sleep(gap)
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        for _ in range(15):  # give an interstitial a few seconds to clear
+            if not any(
+                m in page.title() for m in ("Attention Required", "Just a moment")
+            ):
+                break
+            time.sleep(1.5)
+        try:  # recipe cards are often lazy; wait for one, then let the page settle
+            page.wait_for_selector(
+                ".recipe-card-ingredients, .wprm-recipe-ingredients, .tasty-recipes-ingredients, [class*='ingredients'] li, script[type='application/ld+json']",
+                timeout=12000,
+            )
+            page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:  # noqa: BLE001 — take whatever rendered
+            pass
+        self._last = time.time()
+        html = page.content()
+        if any(m in page.title() for m in ("Attention Required", "Just a moment")):
+            raise RuntimeError("bot wall did not clear")
+        return html
+
+    def close(self) -> None:
+        try:
+            if self._ctx:
+                self._ctx.close()
+            if self._pw:
+                self._pw.stop()
+        finally:
+            self._pw = self._ctx = self._page = None
+
+
+def fetch_html_browser(url: str, headless: bool = False) -> str:
+    """One-off browser fetch (a run should prefer a shared BrowserSession)."""
+    sess = BrowserSession(headless=headless)
+    try:
+        return sess.get(url)
+    finally:
+        sess.close()
+
+
+def maangchi_index_urls(session: "BrowserSession") -> list[str]:
+    """Recipe links from Maangchi's index, filtered to protein-forward mains."""
+    html = session.get(MAANGCHI_INDEX)
+    links = sorted(
+        set(re.findall(r'href="(https://www\.maangchi\.com/recipe/[a-z0-9\-]+)"', html))
+    )
+    return [u for u in links if any(k in u for k in INDEX_KEYWORDS)]
+
+
+async def fetch_html(url: str, session: BrowserSession | None = None) -> str:
+    """Plain HTTP first; a real browser when the site blocks bots."""
+    import asyncio
+
     async with httpx.AsyncClient(
         timeout=20.0,
         follow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0 (Habits food planner)"},
     ) as client:
         r = await client.get(url)
-        r.raise_for_status()
-        return r.text
+        if not _looks_blocked(r.status_code, r.text):
+            r.raise_for_status()
+            return r.text
+    try:
+        if session is not None:
+            return await asyncio.to_thread(session.get, url)
+        return await asyncio.to_thread(fetch_html_browser, url)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"blocked by a bot wall and no browser available ({e.__class__.__name__})"
+        ) from e
 
 
 def _iso_minutes(v) -> int:
@@ -224,7 +353,95 @@ def _walk_jsonld(node):
                 yield from _walk_jsonld(node[k])
 
 
+def _strip(html: str) -> str:
+    return (
+        re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
+        .replace("&amp;", "&")
+        .replace("&#8217;", "'")
+        .replace("&nbsp;", " ")
+        .strip()
+    )
+
+
+NOISE = re.compile(r"<(script|iframe|style|noscript)\b.*?</\1>", re.S | re.I)
+AD_DIV = re.compile(
+    r"<div[^>]+class=\"[^\"]*adthrive[^\"]*\"[^>]*>.*?</div>", re.S | re.I
+)
+
+
+def _declutter(html: str) -> str:
+    """Drop scripts, iframes and ad containers so lists and headings sit next to each other."""
+    html = NOISE.sub(" ", html)
+    return AD_DIV.sub(" ", html)
+
+
+def extract_recipe_html(html: str, url: str) -> Found | None:
+    """Fallback for pages without schema.org Recipe (Maangchi): title from og:title, the first
+    list under an Ingredients heading, steps under Directions/Instructions, 'Serves N'."""
+    html = _declutter(html)
+    m = re.search(
+        r"class=\"[^\"]*(?:recipe-card-ingredients|wprm-recipe-ingredients|tasty-recipes-ingredients)[^\"]*\"[^>]*>(.{0,8000})",
+        html,
+        re.S | re.I,
+    ) or re.search(
+        r"<h[1-6][^>]*>\s*Ingredients[^<]*</h[1-6]>(.{0,6000})", html, re.S | re.I
+    )
+    if not m:
+        return None
+    items = [_strip(i) for i in re.findall(r"<li[^>]*>(.*?)</li>", m.group(1), re.S)]
+    items = [i for i in items if 2 < len(i) < 160][:24]
+    if len(items) < 3:
+        return None
+    t = re.search(r'property="og:title" content="([^"]+)"', html) or re.search(
+        r"<title>(.*?)</title>", html, re.S
+    )
+    title = (
+        _strip(t.group(1))
+        if t
+        else url.rstrip("/").split("/")[-1].replace("-", " ").title()
+    )
+    title = re.split(r"\s+[|\-–]\s+", title)[0][:120]
+    steps: list[str] = []
+    d = re.search(
+        r"class=\"[^\"]*(?:recipe-card-directions|wprm-recipe-instructions|tasty-recipes-instructions)[^\"]*\"[^>]*>(.{0,12000})",
+        html,
+        re.S | re.I,
+    ) or re.search(
+        r"<h[1-6][^>]*>\s*(?:Directions|Instructions|Method)[^<]*</h[1-6]>(.{0,12000})",
+        html,
+        re.S | re.I,
+    )
+    if d:
+        steps = [
+            _strip(x)
+            for x in re.findall(r"<(?:li|p)[^>]*>(.*?)</(?:li|p)>", d.group(1), re.S)
+        ]
+        steps = [x for x in steps if len(x) > 20][:30]
+    sv = re.search(r"Ingredients for ([0-9]+)", html, re.I) or re.search(
+        r"(?:Serves|Servings?)[:\s]*([0-9]+)", html, re.I
+    )
+    servings = int(sv.group(1)) if sv else 4
+    host = urlparse(url).netloc.replace("www.", "")
+    return Found(
+        url=url,
+        title=title,
+        rating=None,
+        review_count=None,
+        ingredients_raw=items,
+        steps=steps,
+        prep_minutes=0,
+        cook_minutes=0,
+        servings=servings,
+        cuisine="korean" if "maangchi" in host or "korean" in host else None,
+    )
+
+
 def extract_recipe(html: str, url: str) -> Found | None:
+    found = _extract_jsonld(html, url)
+    return found or extract_recipe_html(html, url)
+
+
+def _extract_jsonld(html: str, url: str) -> Found | None:
     for block in re.findall(
         r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
         html,
@@ -323,6 +540,8 @@ def _parse_ingredient(raw: str) -> dict:
         qty = qty.strip()
         if qty in FRACTIONS:
             q = FRACTIONS[qty]
+        elif qty[-1] in FRACTIONS:  # "3 ½"
+            q = float(qty[:-1].strip() or 0) + FRACTIONS[qty[-1]]
         elif " " in qty and "/" in qty:
             a, b = qty.split()
             n, d = b.split("/")
@@ -466,7 +685,7 @@ def heuristic_normalise(found: Found) -> dict:
         "prep_days": 4 if found.servings >= 4 and protein != "fish" else 2,
         "reheat": "oven" if "bake" in " ".join(found.steps).lower() else "pan",
         "batch_ok": found.servings >= 3,
-        "suitable": len(ings) <= MAX_INGREDIENTS
+        "suitable": sum(1 for i in ings if i["essential"]) <= MAX_INGREDIENTS
         and (total == 0 or total <= MAX_MINUTES)
         and found.servings >= 2,
         "why": "heuristic",
@@ -633,7 +852,8 @@ def upsert_candidate(
     db.add(recipe)
     db.flush()
     by_name = {i.name: i for i in db.query(Ingredient).all()}
-    for spec in norm["ingredients"][:MAX_INGREDIENTS]:
+    ordered = sorted(norm["ingredients"], key=lambda i: not i.get("essential", True))
+    for spec in ordered[:MAX_INGREDIENTS]:
         name = (spec.get("name") or "").strip().lower()
         if not name:
             continue
@@ -664,6 +884,10 @@ def upsert_candidate(
             db.add(ing)
             db.flush()
             by_name[name] = ing
+            if ing.shelf_stable:
+                from app.models.food import PantryItem
+
+                db.add(PantryItem(user_id=user_id, ingredient_id=ing.id, state="some"))
         db.add(
             RecipeIngredient(
                 recipe_id=recipe.id,
@@ -688,46 +912,79 @@ async def discover(
     normaliser=None,
 ) -> dict:
     """Run one discovery pass. Returns {added: [...], skipped: n, checked: n}."""
-    fetch = fetch or fetch_html
+    import asyncio
+
     normaliser = normaliser or normalise
-    if urls is None:
-        urls = await search_urls(queries_for(db, user_id))
-        urls = rank_urls(urls) + [u for u in CURATED_URLS if u not in urls]
-    known = {
-        r.source_url
-        for r in db.query(Recipe).filter(Recipe.user_id == user_id).all()
-        if r.source_url
-    }
-    added, skipped, checked = [], 0, 0
-    for url in urls:
-        if len(added) >= limit:
-            break
-        if url in known:
-            continue
-        checked += 1
-        try:
-            html = await fetch(url)
-        except Exception as e:  # noqa: BLE001
-            logger.info("fetch failed %s: %s", url, e)
-            skipped += 1
-            continue
-        found = extract_recipe(html, url)
-        if not found:
-            skipped += 1
-            continue
-        norm = await normaliser(found)
-        if not norm.get("suitable", True):
-            skipped += 1
-            continue
-        recipe = upsert_candidate(db, user_id, found, norm)
-        if recipe:
-            added.append(
-                {
-                    "id": recipe.id,
-                    "title": recipe.title,
-                    "source": recipe.source_site,
-                    "rating": recipe.rating,
-                    "ingredients": len(recipe.ingredients),
-                }
+    session: BrowserSession | None = None
+    own_fetch = fetch is None
+
+    async def _fetch(url: str) -> str:
+        nonlocal session
+        if not own_fetch:
+            return await fetch(url)
+        if session is None and _needs_browser(url):
+            session = BrowserSession()
+        return await fetch_html(url, session)
+
+    try:
+        if urls is None:
+            urls = rank_urls(await search_urls(queries_for(db, user_id)))
+            if not urls:  # no search key: curated pages + the Maangchi index
+                urls = list(CURATED_URLS)
+                try:
+                    session = session or BrowserSession()
+                    urls += [
+                        u
+                        for u in await asyncio.to_thread(maangchi_index_urls, session)
+                        if u not in urls
+                    ]
+                except Exception as e:  # noqa: BLE001
+                    logger.info("maangchi index unavailable: %s", e)
+        known = {
+            r.source_url
+            for r in db.query(Recipe).filter(Recipe.user_id == user_id).all()
+            if r.source_url
+        }
+        added, skipped, checked = [], 0, 0
+        for url in urls:
+            if len(added) >= limit:
+                break
+            if url in known:
+                continue
+            checked += 1
+            try:
+                html = await _fetch(url)
+            except Exception as e:  # noqa: BLE001
+                logger.info("fetch failed %s: %s", url, e)
+                skipped += 1
+                continue
+            found = extract_recipe(html, url)
+            if not found:
+                skipped += 1
+                continue
+            norm = await normaliser(found)
+            n_ess = sum(
+                1 for i in norm.get("ingredients", []) if i.get("essential", True)
             )
-    return {"added": added, "skipped": skipped, "checked": checked}
+            if not norm.get("suitable", True) or n_ess > MAX_INGREDIENTS or n_ess == 0:
+                skipped += 1
+                continue
+            recipe = upsert_candidate(db, user_id, found, norm)
+            if recipe:
+                added.append(
+                    {
+                        "id": recipe.id,
+                        "title": recipe.title,
+                        "source": recipe.source_site,
+                        "rating": recipe.rating,
+                        "ingredients": len(recipe.ingredients),
+                    }
+                )
+        return {"added": added, "skipped": skipped, "checked": checked}
+    finally:
+        if session is not None:
+            session.close()
+
+
+def _needs_browser(url: str) -> bool:
+    return "maangchi.com" in url

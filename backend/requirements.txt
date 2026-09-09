@@ -32,7 +32,7 @@ slowapi>=0.1.9
 python-multipart>=0.0.26
 
 # Browser cart builder (optional; FOOD_EXECUTOR=playwright): pip install playwright && playwright install chrome
-# playwright>=1.47
+playwright>=1.47
 
 # Dev tools
 ruff>=0.2.0
