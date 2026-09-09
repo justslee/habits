@@ -1,6 +1,6 @@
 # Plan — Food: two-week meal cycles, swipe-to-choose, bag building, guarded ordering
 
-> Written 2026-09-08, revised the same day (decisions: Google Calendar, six tabs, spend tracking). Builds on `PLAN-LOCAL-ASSISTANT.md` Phases 4 (memory, push, assistant) and 5
+> Written 2026-09-08, revised the same day (decisions: Google Calendar, six tabs, spend tracking; deck stop rule and learning hardened). Builds on `PLAN-LOCAL-ASSISTANT.md` Phases 4 (memory, push, assistant) and 5
 > (task queue, browser executor, approval gate). Owner decisions are marked **DECIDE**.
 
 ## 1. What the feature is, in one cycle
@@ -63,7 +63,18 @@ Existing Phase 4 `memories` gets entries the assistant can read in plain languag
 
 **Meal count.** 14 days minus travel days, minus a configurable number of eat-out days (default 2 per cycle), split into cook sessions of `prep_days` each. Lunch defaults to leftovers of the previous dinner.
 
-**Deck generation.** Score every eligible recipe: preference weight × recency penalty (skip anything cooked last cycle) × ingredient-overlap bonus with recipes already likely to be kept × protein bonus. Take the top 10 to 14 with the 70/30 proven/new mix. Order the deck so the strongest overlap pairs appear early.
+**Deck size and stop rule (hardened).** You never swipe the whole catalogue.
+
+- `eating_days = 14 − travel_days − eat_out_days` (eat-out default 2).
+- Deck length is at most `ceil(eating_days / 2) + 4` cards: the worst case of two-day recipes plus a few skips.
+- Cards are ordered by score, 70/30 proven/new.
+- The deck **stops as soon as the kept recipes' `prep_days` sum to `eating_days`**, and offers exactly one spare. With 9 eating days that is 3 or 4 recipes.
+- If the deck is exhausted short of coverage, the open days are shown and default to eat-out; you can reset or add.
+- A distinct-ingredient cap (default 24 per cycle) flags a keep that would blow past it.
+
+**Deck scoring.** `score = 1 + affinity + mean(feature_weights) − recency + overlap + protein − microwave`, where affinity is per recipe, features are cuisine / reheat / keeps bucket / time bucket / source / protein source, recency is −0.6 if cooked last cycle, overlap is +0.08 per essential ingredient shared with meals already kept, protein is +0.10 at 40 g or more, and microwave-only is −0.4. Overlap is recomputed after every keep, so the next card tends to share ingredients with what you just kept.
+
+**Learning (bounded).** Keep: +0.08 on each feature and +0.10 affinity. Skip: −0.05 and −0.08. "Cooked it 👍" after a cook day: +0.15 affinity and promotion to proven. "Skipped cooking": −0.10. Long dwell before a keep counts as a stronger keep (+0.02). All weights clamp to [−1, 1] and decay 2 % per cycle. New candidates start at affinity 0.10 and are searched as near neighbours of the top-weighted features. Cold start seeds the proven set at 0.5. Weights are stored in `preference_weights` and shown on Food home as a taste profile so the learning is visible and correctable.
 
 **Plan layout.** Greedy: place the highest-scoring kept recipe on the first free cook day, cover `prep_days`, continue. Perishable-heavy recipes go first in the cycle, shelf-stable ones last. You can drag meals on the strip.
 
