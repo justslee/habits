@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import math
@@ -37,7 +38,10 @@ STORE_NAMES = {
 DEFAULT_MERCHANTS = [
     dict(
         store="hmart",
-        name="H Mart",
+        name="H Mart · Manhattan",
+        location="38 W 32nd St, New York, NY (Koreatown)",
+        channel="site",
+        quality_tier="high",
         site_url="https://www.hmart.com",
         minimum=49.0,
         delivery_fee=5.99,
@@ -45,6 +49,9 @@ DEFAULT_MERCHANTS = [
     dict(
         store="wf",
         name="Whole Foods · Amazon",
+        location="Amazon.com Whole Foods delivery",
+        channel="amazon",
+        quality_tier="high",
         site_url="https://www.amazon.com/alm/storefront?almBrandId=VUZHIFdob2xlIEZvb2Rz",
         minimum=35.0,
         delivery_fee=0.0,
@@ -52,6 +59,9 @@ DEFAULT_MERCHANTS = [
     dict(
         store="weg",
         name="Wegmans · DoorDash",
+        location="DoorDash grocery",
+        channel="doordash",
+        quality_tier="high",
         site_url="https://www.doordash.com/store/wegmans",
         minimum=30.0,
         delivery_fee=3.99,
@@ -92,8 +102,26 @@ def ensure_merchants(db: Session, user_id: int) -> dict[str, MerchantAccount]:
             m = MerchantAccount(user_id=user_id, **spec)
             db.add(m)
             have[spec["store"]] = m
+        else:  # backfill descriptive fields added later; never touch minimums or toggles
+            m = have[spec["store"]]
+            for k in ("name", "location", "channel", "quality_tier", "site_url"):
+                if not getattr(m, k, None) or getattr(m, k) in ("site", "standard"):
+                    setattr(m, k, spec[k])
     db.commit()
     return have
+
+
+def deal_active(m: MerchantAccount, today: datetime.date | None = None) -> bool:
+    today = today or datetime.date.today()
+    return bool(m.deal_value and (m.deal_expires is None or m.deal_expires >= today))
+
+
+def effective_cost(m: MerchantAccount, goods: float) -> float:
+    """Goods + delivery fee − deal (when the bag clears the deal's minimum)."""
+    cost = goods + (m.delivery_fee or 0.0)
+    if deal_active(m) and goods >= (m.deal_min or 0.0):
+        cost -= m.deal_value
+    return round(max(0.0, cost), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -244,10 +272,16 @@ def build_bags(db: Session, user_id: int, cycle: MealCycle) -> list[ShoppingBag]
     for store in list(lines):
         m = merchants[store]
         if m.minimum and goods(store) < m.minimum * TINY_BAG_FRACTION:
-            for target in lines:
-                if target == store:
-                    continue
-                if all(target in i["alt_stores"] for i in lines[store]):
+            candidates = [
+                t
+                for t in lines
+                if t != store and all(t in i["alt_stores"] for i in lines[store])
+            ]
+            candidates.sort(
+                key=lambda t: effective_cost(merchants[t], goods(t) + goods(store))
+            )
+            for target in candidates:
+                if True:
                     for i in lines[store]:
                         i["moved_from"] = store
                         i["alt_stores"] = [
@@ -322,6 +356,29 @@ def build_bags(db: Session, user_id: int, cycle: MealCycle) -> list[ShoppingBag]
             status="proposed",
             bag_hash=_hash(items),
         )
+        if deal_active(m) and total >= (m.deal_min or 0):
+            bag.items = bag.items + [
+                {
+                    "ingredient_id": 0,
+                    "name": f"Deal · {m.deal_text or 'promo'}",
+                    "packs": 1,
+                    "pack_label": "",
+                    "unit_price": -round(m.deal_value, 2),
+                    "line_total": -round(m.deal_value, 2),
+                    "uses": 0,
+                    "recipes": [],
+                    "shelf_stable": True,
+                    "alt_stores": [],
+                    "waste_note": None,
+                    "projected_waste_value": 0.0,
+                    "moved_from": None,
+                    "is_deal": True,
+                }
+            ]
+            bag.goods_total = round(total - m.deal_value, 2)
+            bag.short = bool(m.minimum and bag.goods_total < m.minimum) and not (
+                total >= m.minimum
+            )
         db.add(bag)
         bags.append(bag)
     cycle.status = (

@@ -889,3 +889,34 @@ export function patchTravel(id: number, p: { confirmed?: boolean; ignored?: bool
 export function addTravel(p: { start_date: string; end_date: string; summary?: string }): Promise<TravelSpanData> {
   return request('/api/v1/food/travel', { method: 'POST', body: JSON.stringify(p) });
 }
+
+// --- Food recipes catalogue, discovery, stores ---
+
+export interface MerchantData {
+  store: string; name: string; site_url: string | null; location: string | null; channel: 'site' | 'doordash' | 'amazon';
+  quality_tier: 'high' | 'standard'; minimum: number; delivery_fee: number; enabled: boolean; supervised: boolean;
+  deal_text: string | null; deal_value: number; deal_min: number; deal_expires: string | null; deal_active: boolean;
+}
+export interface DiscoverResult { added: { id: number; title: string; source: string | null; rating: number | null; ingredients: number }[]; skipped: number; checked: number }
+
+export function patchRecipe(id: number, p: { status?: 'candidate' | 'proven' | 'retired'; notes?: string; user_rating?: number }): Promise<FoodRecipe> {
+  return request(`/api/v1/food/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(p) });
+}
+export function patchEssential(recipeId: number, riId: number, essential: boolean): Promise<FoodRecipe> {
+  return request(`/api/v1/food/recipes/${recipeId}/ingredients/${riId}`, { method: 'PATCH', body: JSON.stringify({ essential }) });
+}
+export function discoverRecipes(limit = 6): Promise<DiscoverResult> {
+  return request(`/api/v1/food/discover?limit=${limit}`, { method: 'POST', timeoutMs: 180_000 });
+}
+export function getMerchants(): Promise<MerchantData[]> {
+  return request('/api/v1/food/merchants');
+}
+export function patchMerchant(store: string, p: Partial<MerchantData>): Promise<MerchantData> {
+  return request(`/api/v1/food/merchants/${store}`, { method: 'PATCH', body: JSON.stringify(p) });
+}
+export function createMerchant(p: { store: string; name: string; channel?: string; location?: string; minimum?: number; delivery_fee?: number; deal_text?: string; deal_value?: number; deal_min?: number }): Promise<MerchantData> {
+  return request('/api/v1/food/merchants', { method: 'POST', body: JSON.stringify(p) });
+}
+export function scanDeals(): Promise<{ mode: string; deals: any[]; note?: string }> {
+  return request('/api/v1/food/merchants/scan-deals', { method: 'POST', timeoutMs: 120_000 });
+}
