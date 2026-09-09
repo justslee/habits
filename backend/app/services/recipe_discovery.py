@@ -78,6 +78,9 @@ INDEX_KEYWORDS = (
     "saengseon",
 )
 MAX_INGREDIENTS = 12
+MAX_BROWSER_PAGES_PER_HOST = (
+    3  # be a polite guest on bot-walled sites; the weekly run accumulates
+)
 MAX_MINUTES = 90
 GARNISH_WORDS = re.compile(
     r"\b(garnish|optional|to serve|for serving|sesame seeds|toasted sesame|sprinkle)\b",
@@ -224,13 +227,14 @@ class BrowserSession:
     """One headed Chrome (the Habits profile) reused across a discovery run. Headless Chrome
     does not clear Maangchi's Cloudflare check; headed does. Throttled to be a polite guest."""
 
-    def __init__(self, headless: bool = False, min_gap_s: float = 3.0):
+    def __init__(self, headless: bool = False, min_gap_s: float = 20.0):
         import concurrent.futures
 
         self.headless = headless
         self.min_gap_s = min_gap_s
         self._pw = self._ctx = self._page = None
         self._last = 0.0
+        self._warm: set[str] = set()
         # sync Playwright is greenlet-bound to the thread that started it: everything runs here
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="habits-browser"
@@ -292,6 +296,16 @@ class BrowserSession:
         import time
 
         page = self._open()
+        host = urlparse(url).netloc
+        if host not in self._warm:  # land on the home page first, like a person would
+            try:
+                page.goto(
+                    f"https://{host}/", wait_until="domcontentloaded", timeout=30000
+                )
+                time.sleep(2)
+            except Exception:  # noqa: BLE001
+                pass
+            self._warm.add(host)
         gap = self.min_gap_s - (time.time() - self._last)
         if gap > 0:
             time.sleep(gap)
@@ -982,22 +996,54 @@ async def discover(
             for r in db.query(Recipe).filter(Recipe.user_id == user_id).all()
             if r.source_url
         }
-        added, skipped, checked = [], 0, 0
+        added, skipped, checked, log = [], 0, 0, []
+        blocked_hosts: set[str] = set()
+        per_host: dict[str, int] = {}
         for url in urls:
             if len(added) >= limit:
                 break
             if url in known:
                 continue
+            host = urlparse(url).netloc
+            if host in blocked_hosts:
+                log.append(
+                    {
+                        "url": url,
+                        "outcome": "skipped",
+                        "detail": "host blocked us earlier in this run",
+                    }
+                )
+                continue
+            if (
+                _needs_browser(url)
+                and per_host.get(host, 0) >= MAX_BROWSER_PAGES_PER_HOST
+            ):
+                log.append(
+                    {
+                        "url": url,
+                        "outcome": "skipped",
+                        "detail": "per-run page cap for this site",
+                    }
+                )
+                continue
+            per_host[host] = per_host.get(host, 0) + 1
             checked += 1
             try:
                 html = await _fetch(url)
             except Exception as e:  # noqa: BLE001
                 logger.info("fetch failed %s: %s", url, e)
                 skipped += 1
+                detail = str(e)[:120]
+                if "bot wall" in detail:
+                    blocked_hosts.add(
+                        host
+                    )  # stop knocking; a later run gets a fresh window
+                log.append({"url": url, "outcome": "fetch failed", "detail": detail})
                 continue
             found = extract_recipe(html, url)
             if not found:
                 skipped += 1
+                log.append({"url": url, "outcome": "no recipe found on page"})
                 continue
             norm = await normaliser(found)
             n_ess = sum(
@@ -1005,6 +1051,14 @@ async def discover(
             )
             if not norm.get("suitable", True) or n_ess > MAX_INGREDIENTS or n_ess == 0:
                 skipped += 1
+                log.append(
+                    {
+                        "url": url,
+                        "outcome": "not a fit",
+                        "title": found.title,
+                        "detail": f"{n_ess} essential · {norm.get('why', '')}"[:160],
+                    }
+                )
                 continue
             recipe = upsert_candidate(db, user_id, found, norm)
             if recipe:
@@ -1017,7 +1071,10 @@ async def discover(
                         "ingredients": len(recipe.ingredients),
                     }
                 )
-        return {"added": added, "skipped": skipped, "checked": checked}
+                log.append({"url": url, "outcome": "added", "title": recipe.title})
+            else:
+                log.append({"url": url, "outcome": "duplicate", "title": found.title})
+        return {"added": added, "skipped": skipped, "checked": checked, "log": log}
     finally:
         if session is not None:
             await session.aclose()
