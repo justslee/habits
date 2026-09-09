@@ -21,6 +21,7 @@ from app.models.concept_touch import ConceptTouch
 from app.models.speaking import SpeakingSession, SpeakingEvaluation
 from app.models.coaching import CoachingObservation
 from app.models.device import PushDevice
+from app.models.food import CycleMeal, Ingredient, MealCycle, PantryItem, PreferenceWeight, Recipe, RecipeIngredient, Swipe
 
 __all__ = [
     "Base",
@@ -52,4 +53,12 @@ __all__ = [
     "SpeakingEvaluation",
     "CoachingObservation",
     "PushDevice",
+    "Ingredient",
+    "Recipe",
+    "RecipeIngredient",
+    "PantryItem",
+    "MealCycle",
+    "CycleMeal",
+    "Swipe",
+    "PreferenceWeight",
 ]

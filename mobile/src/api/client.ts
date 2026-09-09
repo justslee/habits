@@ -614,3 +614,132 @@ export function getCrossPillarLinks(): Promise<ConceptLinkData[]> {
   return request('/api/v1/concepts/cross-pillar');
 }
 
+
+// --- Food (two-week meal cycles) ---
+
+export interface FoodIngredient {
+  id: number;
+  name: string;
+  quantity: number | null;
+  unit: string | null;
+  essential: boolean;
+  essential_reason: string | null;
+  preferred_store: string | null;
+  shelf_stable: boolean;
+}
+
+export interface FoodRecipe {
+  id: number;
+  slug: string;
+  title: string;
+  source_site: string | null;
+  source_url: string | null;
+  rating: number | null;
+  cuisine: string | null;
+  protein_source: string | null;
+  prep_minutes: number;
+  cook_minutes: number;
+  total_minutes: number;
+  servings: number;
+  protein_g_per_serving: number | null;
+  prep_days: number;
+  reheat: string;
+  status: 'candidate' | 'proven' | 'retired';
+  affinity: number;
+  times_cooked: number;
+  last_cooked: string | null;
+  user_rating: number | null;
+  notes: string | null;
+  hue: number | null;
+  ingredients: FoodIngredient[];
+}
+
+export interface FoodCycle {
+  id: number;
+  start_date: string;
+  end_date: string;
+  shop_date: string | null;
+  status: string;
+  travel_days: string[];
+  eat_out_days: number;
+  eating_days: number;
+  deck_size: number;
+}
+
+export interface FoodDeck {
+  cycle_id: number;
+  eating_days: number;
+  coverage: number;
+  enough: boolean;
+  exhausted: boolean;
+  remaining_count: number;
+  distinct_ingredients: number;
+  ingredient_cap: number;
+  kept: FoodRecipe[];
+  cards: FoodRecipe[];
+  learned: string[];
+}
+
+export interface FoodMeal {
+  id: number;
+  recipe: FoodRecipe;
+  cook_date: string | null;
+  days_covered: string[];
+  servings: number;
+  status: 'planned' | 'cooked' | 'skipped';
+  rating: number | null;
+}
+
+export interface FoodPlan {
+  cycle: FoodCycle;
+  meals: FoodMeal[];
+  covered_days: number;
+  open_days: number;
+}
+
+export interface PantryEntry {
+  ingredient_id: number;
+  name: string;
+  state: 'gone' | 'some' | 'plenty';
+  shelf_stable: boolean;
+  last_confirmed: string | null;
+}
+
+export interface TasteEntry { feature: string; label: string; weight: number }
+
+export function getFoodRecipes(): Promise<FoodRecipe[]> {
+  return request('/api/v1/food/recipes');
+}
+export function getPantry(): Promise<PantryEntry[]> {
+  return request('/api/v1/food/pantry');
+}
+export function putPantry(items: { ingredient_id: number; state: PantryEntry['state'] }[]): Promise<PantryEntry[]> {
+  return request('/api/v1/food/pantry', { method: 'PUT', body: JSON.stringify({ items }) });
+}
+export function getCurrentCycle(): Promise<FoodCycle | null> {
+  return request('/api/v1/food/cycles/current');
+}
+export function createCycle(input: { start_date?: string; travel_days?: string[]; eat_out_days?: number }): Promise<FoodCycle> {
+  return request('/api/v1/food/cycles', { method: 'POST', body: JSON.stringify(input) });
+}
+export function getDeck(cycleId: number, spare = false): Promise<FoodDeck> {
+  return request(`/api/v1/food/cycles/${cycleId}/deck${spare ? '?spare=1' : ''}`);
+}
+export function swipeCard(cycleId: number, input: { recipe_id: number; decision: 'keep' | 'skip'; dwell_ms?: number; spare?: boolean }): Promise<FoodDeck> {
+  return request(`/api/v1/food/cycles/${cycleId}/swipe`, { method: 'POST', body: JSON.stringify(input) });
+}
+export function buildPlan(cycleId: number): Promise<FoodPlan> {
+  return request(`/api/v1/food/cycles/${cycleId}/plan`, { method: 'POST' });
+}
+export function getPlan(cycleId: number): Promise<FoodPlan> {
+  return request(`/api/v1/food/cycles/${cycleId}/plan`);
+}
+export function markCooked(cycleId: number, mealId: number, input: { cooked: boolean; rating?: number }): Promise<FoodPlan> {
+  return request(`/api/v1/food/cycles/${cycleId}/meals/${mealId}/cooked`, { method: 'POST', body: JSON.stringify(input) });
+}
+export function completeCycle(cycleId: number): Promise<FoodCycle> {
+  return request(`/api/v1/food/cycles/${cycleId}/complete`, { method: 'POST' });
+}
+export function getTaste(): Promise<{ profile: TasteEntry[] }> {
+  return request('/api/v1/food/taste');
+}

@@ -28,6 +28,10 @@ import PillarDetailScreen from './src/screens/PillarDetailScreen';
 import WeeklyReviewScreen from './src/screens/WeeklyReviewScreen';
 import SpeakingScreen from './src/screens/SpeakingScreen';
 import MeScreen from './src/screens/MeScreen';
+import FoodHomeScreen from './src/screens/food/FoodHomeScreen';
+import FoodPantryScreen from './src/screens/food/FoodPantryScreen';
+import FoodDeckScreen from './src/screens/food/FoodDeckScreen';
+import FoodPlanScreen from './src/screens/food/FoodPlanScreen';
 import CustomTabBar from './src/components/CustomTabBar';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
@@ -35,6 +39,28 @@ import { colors } from './src/theme';
 const Tab = createBottomTabNavigator();
 const TrainStack = createStackNavigator();
 const NorthStarStack = createStackNavigator();
+const FoodStack = createStackNavigator();
+
+function FoodStackScreen() {
+  return (
+    <ErrorBoundary name="FoodStack">
+      <FoodStack.Navigator
+        screenOptions={{
+          headerStyle: HEADER_STYLE,
+          headerTitleStyle: HEADER_TITLE_STYLE,
+          headerTintColor: colors.accent,
+          headerBackTitle: '',
+          cardStyle: { backgroundColor: colors.bg },
+        }}
+      >
+        <FoodStack.Screen name="FoodHome" component={FoodHomeScreen} options={{ headerShown: false }} />
+        <FoodStack.Screen name="FoodPantry" component={FoodPantryScreen} options={{ title: 'Pantry' }} />
+        <FoodStack.Screen name="FoodDeck" component={FoodDeckScreen} options={{ title: 'Pick meals' }} />
+        <FoodStack.Screen name="FoodPlan" component={FoodPlanScreen} options={{ title: 'Plan' }} />
+      </FoodStack.Navigator>
+    </ErrorBoundary>
+  );
+}
 
 const navigationRef = createNavigationContainerRef<any>();
 
@@ -152,6 +178,7 @@ export default function App() {
           <Tab.Screen name="Train" component={TrainStackScreen} options={{ tabBarLabel: 'Train' }} />
           <Tab.Screen name="Speak" component={SpeakingScreen} options={{ tabBarLabel: 'Speak' }} />
           <Tab.Screen name="NorthStar" component={NorthStarStackScreen} options={{ tabBarLabel: 'North Star' }} />
+          <Tab.Screen name="Food" component={FoodStackScreen} options={{ tabBarLabel: 'Food' }} />
           <Tab.Screen name="Me" component={MeScreen} options={{ tabBarLabel: 'Me' }} />
         </Tab.Navigator>
         <StatusBar style="light" />

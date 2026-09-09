@@ -63,11 +63,20 @@ function MeIcon({ color, size = 18 }: IconProps) {
   );
 }
 
+function BowlIcon({ color, size = 18 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 11h18a9 9 0 0 1-18 0zM8 11c0-3 1.5-5 4-6M14 5l3-2" />
+    </Svg>
+  );
+}
+
 const ICONS: Record<string, (p: IconProps) => React.ReactElement> = {
   Daily:     props => <HomeIcon {...props} />,
   Train:     props => <RunIcon {...props} />,
   Speak:     props => <MicIcon {...props} />,
   NorthStar: props => <StarIcon {...props} />,
+  Food:      props => <BowlIcon {...props} />,
   Me:        props => <MeIcon {...props} />,
 };
 
