@@ -225,28 +225,66 @@ class BrowserSession:
     does not clear Maangchi's Cloudflare check; headed does. Throttled to be a polite guest."""
 
     def __init__(self, headless: bool = False, min_gap_s: float = 3.0):
+        import concurrent.futures
+
         self.headless = headless
         self.min_gap_s = min_gap_s
         self._pw = self._ctx = self._page = None
         self._last = 0.0
+        # sync Playwright is greenlet-bound to the thread that started it: everything runs here
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="habits-browser"
+        )
+
+    async def run(self, fn, *args):
+        import asyncio
+
+        return await asyncio.get_running_loop().run_in_executor(
+            self._executor, fn, *args
+        )
+
+    async def aget(self, url: str) -> str:
+        return await self.run(self.get, url)
+
+    async def aclose(self) -> None:
+        try:
+            await self.run(self.close)
+        finally:
+            self._executor.shutdown(wait=False)
 
     def _open(self):
         if self._page:
             return self._page
+        import tempfile
+
         from playwright.sync_api import sync_playwright
 
         from app.services.store_adapters import PROFILE_DIR
 
-        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        profile = (
+            PROFILE_DIR.parent / "chrome-profile-discovery"
+        )  # separate from the cart profile
+        profile.mkdir(parents=True, exist_ok=True)
         self._pw = sync_playwright().start()
-        try:
-            self._ctx = self._pw.chromium.launch_persistent_context(
-                str(PROFILE_DIR), headless=self.headless, channel="chrome"
-            )
-        except Exception:  # noqa: BLE001 — no Google Chrome: bundled Chromium
-            self._ctx = self._pw.chromium.launch_persistent_context(
-                str(PROFILE_DIR), headless=self.headless
-            )
+        for attempt, pdir in enumerate(
+            (profile, tempfile.mkdtemp(prefix="habits-discovery-"))
+        ):
+            try:
+                try:
+                    self._ctx = self._pw.chromium.launch_persistent_context(
+                        str(pdir), headless=self.headless, channel="chrome"
+                    )
+                except Exception:  # noqa: BLE001 — no Google Chrome: bundled Chromium
+                    self._ctx = self._pw.chromium.launch_persistent_context(
+                        str(pdir), headless=self.headless
+                    )
+                break
+            except Exception as e:  # noqa: BLE001 — a stale lock from a crashed run: fall back to a scratch profile
+                if attempt == 1:
+                    raise
+                logger.warning(
+                    "discovery profile busy (%s); using a scratch profile", str(e)[:80]
+                )
         self._page = self._ctx.new_page()
         return self._page
 
@@ -321,7 +359,7 @@ async def fetch_html(url: str, session: BrowserSession | None = None) -> str:
             return r.text
     try:
         if session is not None:
-            return await asyncio.to_thread(session.get, url)
+            return await session.aget(url)
         return await asyncio.to_thread(fetch_html_browser, url)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(
@@ -912,7 +950,6 @@ async def discover(
     normaliser=None,
 ) -> dict:
     """Run one discovery pass. Returns {added: [...], skipped: n, checked: n}."""
-    import asyncio
 
     normaliser = normaliser or normalise
     session: BrowserSession | None = None
@@ -935,7 +972,7 @@ async def discover(
                     session = session or BrowserSession()
                     urls += [
                         u
-                        for u in await asyncio.to_thread(maangchi_index_urls, session)
+                        for u in await session.run(maangchi_index_urls, session)
                         if u not in urls
                     ]
                 except Exception as e:  # noqa: BLE001
@@ -983,7 +1020,7 @@ async def discover(
         return {"added": added, "skipped": skipped, "checked": checked}
     finally:
         if session is not None:
-            session.close()
+            await session.aclose()
 
 
 def _needs_browser(url: str) -> bool:
