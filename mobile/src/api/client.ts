@@ -1018,6 +1018,9 @@ export function completeTodo(id: number): Promise<TodoData> {
 export function createTodo(p: { text: string; estimated_minutes?: number | null; pillar_id?: number | null }): Promise<TodoData> {
   return request('/api/v1/daily/todos', { method: 'POST', body: JSON.stringify(p) });
 }
+export function updateTodo(id: number, p: { text?: string; estimated_minutes?: number | null; pillar_id?: number | null }): Promise<TodoData> {
+  return request(`/api/v1/daily/todos/${id}`, { method: 'PUT', body: JSON.stringify(p) });
+}
 export function deleteTodo(id: number): Promise<unknown> { return request(`/api/v1/daily/todos/${id}`, { method: 'DELETE' }); }
 export function deleteHabit(id: number): Promise<unknown> { return request(`/api/v1/daily/habits/${id}`, { method: 'DELETE' }); }
 

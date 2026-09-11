@@ -75,7 +75,11 @@ export const INK: Palette = {
 
 export const palettes: Record<Look, Palette> = { pearl: PEARL, ink: INK };
 
-/** The North Star hero is the same dark sky in both appearances. */
+/**
+ * North Star's header has a key per appearance: the aurora at night for Ink, and first light —
+ * the hour before dawn, when the guiding star is the last one out — for Pearl. Same subject,
+ * opposite key, so the header belongs to the page it sits on.
+ */
 export const AURORA = {
   bg: '#0a1922',
   fg: '#f6f3e9',
@@ -89,6 +93,21 @@ export const AURORA = {
   statusBg: '#091820',
   statusFg: '#f3f4ef',
   statusMuted: '#adbebc',
+};
+
+export const AURORA_PEARL: typeof AURORA = {
+  bg: '#eae6dd',
+  fg: '#25272b',
+  eyebrow: '#5d6570',
+  em: '#2f6f60',
+  caption: '#6a6f75',
+  wordmarkStar: '#a8823a',
+  actionBg: 'rgba(255,253,248,0.82)',
+  actionLine: '#c9cfd8',
+  actionFg: '#3a4149',
+  statusBg: '#dfe3e9',
+  statusFg: '#25272b',
+  statusMuted: '#6a6f75',
 };
 
 export const fonts = {

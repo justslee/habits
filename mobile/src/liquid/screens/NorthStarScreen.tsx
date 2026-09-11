@@ -18,7 +18,7 @@ import {
   getDailySummary, getDashboardStats, getHeatmap, getPillarConcepts, getRecentEntries, getVision,
 } from '../../api/client';
 import { useTheme } from '../theme';
-import { fonts, gesture, radius } from '../tokens';
+import { AURORA, AURORA_PEARL, fonts, gesture, radius } from '../tokens';
 import { T, m } from '../motion';
 import { feel } from '../haptics';
 import { Unit, buildGrowth, formatIndex, rebase, scenario } from '../growth';
@@ -55,7 +55,7 @@ interface PillarView {
 }
 
 export default function NorthStarScreen({ navigation }: any) {
-  const { c, moves } = useTheme();
+  const { c, moves, look } = useTheme();
   const sheet = useSheet();
 
   const [view, setView] = useState<View3>('compound');
@@ -175,13 +175,15 @@ export default function NorthStarScreen({ navigation }: any) {
 
   const refresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
+  // The title's accent belongs to the sky behind it, not to the page palette.
+  const skyEm = look === 'pearl' ? AURORA_PEARL.em : AURORA.em;
   const heroTitle = view === 'vision'
     ? (vision?.vision_text
       ? <>{vision.vision_text}</>
-      : <>Become someone who has compounded for so long that <Em style={{ color: '#b9e5d0' }}>ten years from today</Em> the difference is undeniable.</>)
+      : <>Become someone who has compounded for so long that <Em style={{ color: skyEm }}>ten years from today</Em> the difference is undeniable.</>)
     : view === 'compound'
-      ? <>Time, working{'\n'}<Em style={{ color: '#b9e5d0' }}>in your favor.</Em></>
-      : <>Keep showing up.{'\n'}<Em style={{ color: '#b9e5d0' }}>It adds up.</Em></>;
+      ? <>Time, working{'\n'}<Em style={{ color: skyEm }}>in your favor.</Em></>
+      : <>Keep showing up.{'\n'}<Em style={{ color: skyEm }}>It adds up.</Em></>;
 
   return (
     <Screen contextKey={`north-${view}`} edgeToEdge onRefresh={refresh} refreshing={refreshing} style={{ paddingTop: 0 }}>
