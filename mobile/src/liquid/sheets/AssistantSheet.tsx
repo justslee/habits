@@ -24,6 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { coachChat } from '../../api/client';
+import { useVoiceCoach } from '../voice';
 import { useTheme } from '../theme';
 import { fonts, radius } from '../tokens';
 import { T, m } from '../motion';
@@ -32,6 +33,7 @@ import { Body, Small } from '../ui/Text';
 import { Button } from '../ui/Button';
 import { Orb } from '../ui/Sculpture';
 import { useSheet } from '../ui/Sheet';
+import { useToast } from '../ui/Toast';
 
 const LEAD: Record<string, string> = {
   Train: 'Your coach, right where you need it.',
@@ -63,6 +65,24 @@ export function AssistantSheet({ tab, onChanged }: { tab: string; onChanged?: ()
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const input = useRef<TextInput>(null);
+  const toast = useToast();
+
+  const addTurn = useCallback((t: Turn) => setTurns(prev => [...prev, t]), []);
+
+  // Spoken turns land in the same thread as typed ones, so the conversation reads as one.
+  const voice = useVoiceCoach({
+    onYou: text => addTurn({ from: 'me', text }),
+    onCoach: text => addTurn({ from: 'coach', text }),
+    onChanged: changes => { feel.light(); onChanged?.(); addTurn({ from: 'coach', text: '', changes }); },
+    onError: message => toast.show(message),
+  });
+  const live = voice.state === 'live' || voice.state === 'connecting';
+
+  const toggleVoice = useCallback(() => {
+    feel.soft();
+    if (live) voice.stop();
+    else voice.start();
+  }, [live, voice]);
 
   const ask = useCallback(async (text: string) => {
     const message = text.trim();
@@ -107,11 +127,14 @@ export function AssistantSheet({ tab, onChanged }: { tab: string; onChanged?: ()
         </View>
       ) : null}
 
+      {live ? <Live state={voice.state} speaking={voice.speaking} moves={moves} onStop={toggleVoice} /> : null}
+
       <View style={[s.bar, { backgroundColor: c.bg, borderColor: c.line }]}>
+        <Mic live={live} onPress={toggleVoice} />
         <TextInput
           ref={input}
           style={[s.input, { color: c.fg }]}
-          placeholder={started ? 'Say more…' : 'What’s on your mind?'}
+          placeholder={live ? 'Listening — or type instead' : started ? 'Say more…' : 'What’s on your mind?'}
           placeholderTextColor={c.muted}
           value={draft}
           onChangeText={setDraft}
@@ -123,7 +146,13 @@ export function AssistantSheet({ tab, onChanged }: { tab: string; onChanged?: ()
       </View>
 
       {started ? (
-        <Button full kind="quiet" label="Close" onPress={sheet.close} style={{ marginTop: 6 }} />
+        <Button
+          full
+          kind="quiet"
+          label="Close"
+          onPress={() => { voice.stop(); sheet.close(); }}
+          style={{ marginTop: 6 }}
+        />
       ) : null}
     </View>
   );
@@ -149,6 +178,7 @@ function Bubble({ turn, index, moves }: { turn: Turn; index: number; moves: bool
         </View>
       ) : null}
       <View style={{ flex: 1, alignItems: mine ? 'flex-end' : 'flex-start' }}>
+        {turn.text ? (
         <View
           style={[
             s.bubble,
@@ -159,6 +189,7 @@ function Bubble({ turn, index, moves }: { turn: Turn; index: number; moves: bool
         >
           <Body style={{ color: c.fg }}>{turn.text}</Body>
         </View>
+        ) : null}
         {changes.length ? (
           <View style={s.changes}>
             <Ionicons name="swap-horizontal" size={13} color={c.accent} />
@@ -238,6 +269,84 @@ function Dot({ index, moves }: { index: number; moves: boolean }) {
   return <Animated.View style={[s.dot, { backgroundColor: c.muted }, style]} />;
 }
 
+/**
+ * The live bar. While the coach is speaking the orb swells; while it is your turn it settles,
+ * so you can tell who holds the floor without reading anything.
+ */
+function Live({
+  state, speaking, moves, onStop,
+}: {
+  state: string;
+  speaking: boolean;
+  moves: boolean;
+  onStop: () => void;
+}) {
+  const { c } = useTheme();
+  const pulse = useSharedValue(0);
+
+  useEffect(() => {
+    if (!moves) return;
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: speaking ? 420 : 1100, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: speaking ? 420 : 1100, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+    return () => { pulse.value = 0; };
+  }, [moves, speaking, pulse]);
+
+  const orb = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + pulse.value * (speaking ? 0.3 : 0.12) }],
+  }));
+
+  return (
+    <Animated.View
+      entering={moves ? FadeIn.duration(200) : undefined}
+      style={[s.live, { backgroundColor: c.soft }]}
+    >
+      <Animated.View style={orb}>
+        <Orb size={20} />
+      </Animated.View>
+      <Small style={{ flex: 1, color: c.fg }}>
+        {state === 'connecting' ? 'Connecting…' : speaking ? 'Your coach is talking' : 'Listening'}
+      </Small>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Stop talking"
+        onPress={onStop}
+        style={[s.hangUp, { backgroundColor: c.panel }]}
+      >
+        <Small style={{ color: c.fg }}>Stop</Small>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** The microphone. Filled while a call is up, quiet otherwise. */
+function Mic({ live, onPress }: { live: boolean; onPress: () => void }) {
+  const { c, moves } = useTheme();
+  const press = useSharedValue(0);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.08 }] }));
+
+  return (
+    <Animated.View style={style}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={live ? 'Stop talking' : 'Talk to your coach'}
+        accessibilityState={{ selected: live }}
+        onPressIn={() => { press.value = withTiming(1, m(moves, T.press)); }}
+        onPressOut={() => { press.value = withTiming(0, m(moves, T.press)); }}
+        onPress={onPress}
+        style={[s.mic, live && { backgroundColor: c.accent }]}
+      >
+        <Ionicons name={live ? 'stop' : 'mic-outline'} size={19} color={live ? c.bg : c.muted} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 /** A suggestion. Soft, and it gives a little under the finger. */
 function Chip({ label, onPress }: { label: string; onPress: () => void }) {
   const { c, moves } = useTheme();
@@ -305,22 +414,38 @@ const s = StyleSheet.create({
   prompts: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 18 },
   chip: { borderWidth: 1, borderRadius: radius.chip, paddingHorizontal: 13, paddingVertical: 9, minHeight: 38, justifyContent: 'center' },
 
+  live: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 21,
+    paddingLeft: 14,
+    paddingRight: 6,
+    paddingVertical: 6,
+    minHeight: 46,
+    marginTop: 16,
+  },
+  hangUp: { borderRadius: 15, paddingHorizontal: 14, minHeight: 32, alignItems: 'center', justifyContent: 'center' },
+  mic: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', marginBottom: 0 },
+
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
     borderWidth: 1,
     borderRadius: 25,
-    paddingLeft: 16,
+    paddingLeft: 6,
     paddingRight: 6,
     paddingVertical: 6,
-    marginTop: 18,
+    marginTop: 14,
   },
   input: {
     flex: 1,
-    minHeight: 36,
+    // Matches the mic and the send bead, so a single line sits level with both.
+    minHeight: 38,
     maxHeight: 108,
-    paddingVertical: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 4,
     fontFamily: fonts.regular,
     fontSize: 16,
   },

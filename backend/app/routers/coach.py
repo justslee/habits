@@ -34,8 +34,12 @@ from app.services.llm import FAST, structured_output
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
 
-REALTIME_MODEL = os.getenv("HABITS_REALTIME_MODEL", "gpt-realtime")
+REALTIME_MODEL = os.getenv("HABITS_REALTIME_MODEL", "gpt-realtime-2.1")
 REALTIME_VOICE = os.getenv("HABITS_REALTIME_VOICE", "marin")
+# What turns the athlete's speech into text on the way in. OpenAI's current low-latency
+# choice; the client is told which to use rather than deciding for itself, so moving to the
+# next one is a server change and does not need a new build.
+TRANSCRIBE_MODEL = os.getenv("HABITS_TRANSCRIBE_MODEL", "gpt-live-transcribe")
 CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
 CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 
@@ -151,6 +155,7 @@ class SessionOut(BaseModel):
     voice: str
     calls_url: str
     context_chars: int
+    transcribe_model: str
 
 
 @router.post("/realtime/session", response_model=SessionOut)
@@ -199,6 +204,7 @@ async def realtime_session(db: Session = Depends(get_db)):
         voice=REALTIME_VOICE,
         calls_url=CALLS_URL,
         context_chars=len(context),
+        transcribe_model=TRANSCRIBE_MODEL,
     )
 
 
