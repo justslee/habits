@@ -17,9 +17,11 @@
       "appleTeamId": "X3F694PQ8B",
       "infoPlist": {
         "UIBackgroundModes": [
-          "remote-notification"
+          "remote-notification",
+          "audio"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Habits uses the microphone so you can talk to your coach."
       }
     },
     "plugins": [
@@ -30,7 +32,8 @@
           "color": "#2563eb"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "@config-plugins/react-native-webrtc"
     ],
     "platforms": [
       "ios",

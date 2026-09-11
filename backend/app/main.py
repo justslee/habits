@@ -34,6 +34,7 @@ from slowapi.util import get_remote_address
 
 from app.routers import (
     calendar,
+    coach,
     train,
     concepts,
     daily,
@@ -158,6 +159,7 @@ app.include_router(devices.router)
 app.include_router(food.router)
 app.include_router(calendar.router)
 app.include_router(train.router)
+app.include_router(coach.router)
 app.include_router(concepts.router)
 app.include_router(concepts.link_router)
 

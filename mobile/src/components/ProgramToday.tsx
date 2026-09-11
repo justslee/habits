@@ -143,6 +143,7 @@ export default function ProgramToday({ navigation, onAsk }: { navigation: any; o
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
         <TouchableOpacity style={s.ghost} onPress={shareLog}><Text style={s.link}>Weekly log</Text></TouchableOpacity>
         {onAsk && <TouchableOpacity style={s.ghost} onPress={onAsk}><Text style={s.link}>Ask the coach</Text></TouchableOpacity>}
+        <TouchableOpacity style={s.ghost} onPress={() => { haptic.medium(); navigation?.navigate?.('CoachVoice'); }}><Text style={s.link}>🎙 Talk live</Text></TouchableOpacity>
       </View>
     </View>
   );

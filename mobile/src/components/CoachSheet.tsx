@@ -18,7 +18,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
-import { chatWithCoach } from '../api/client';
+import { chatWithCoach, coachChat } from '../api/client';
+import { useNavigation } from '@react-navigation/native';
 import { colors, fonts } from '../theme';
 
 interface Message {
@@ -36,10 +37,10 @@ interface Props {
 }
 
 const SUGGESTIONS = [
-  "Adjust today's plan",
-  'Why am I plateauing on bench?',
-  'Race day pacing strategy',
-  'Should I rest tomorrow?',
+  'What load for the trap bar today?',
+  'I only have 50 minutes',
+  'Back feels tight, adjust?',
+  'How does travel change this week?',
 ];
 
 const FALLBACK_REPLIES: Record<string, string> = {
@@ -63,6 +64,8 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
   );
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
+  const navigation = useNavigation<any>();
+  const goLive = () => { onClose(); setTimeout(() => navigation.navigate('CoachVoice'), 250); };
 
   const send = async (text: string) => {
     const trimmed = text.trim();
@@ -79,8 +82,9 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
              ?? (res as { message?: string }).message
              ?? fallbackFor(trimmed);
       } else {
-        await new Promise(r => setTimeout(r, 700));
-        reply = fallbackFor(trimmed);
+        const history = messages.filter((_, i) => i > 0).map(m => ({ from: m.from as 'me' | 'coach', text: m.text }));
+        const res = await coachChat(trimmed, history);
+        reply = res.reply || fallbackFor(trimmed);
       }
       setMessages(m => [...m, { from: 'coach', text: reply }]);
     } catch {
@@ -99,9 +103,13 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
           <Text style={styles.heading}>Coach</Text>
           <View style={styles.statusRow}>
             <View style={styles.statusDot} />
-            <Text style={styles.statusText}>ONLINE · KNOWS YOUR DATA</Text>
+            <Text style={styles.statusText}>ONLINE · KNOWS YOUR PROGRAM</Text>
           </View>
         </View>
+        <TouchableOpacity onPress={goLive} style={styles.liveBtn} activeOpacity={0.85}>
+          <Ionicons name="mic" size={14} color={colors.bg} />
+          <Text style={styles.liveBtnText}>Talk live</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Conversation */}
@@ -163,6 +171,8 @@ export default function CoachSheet({ visible, onClose, seed, workoutSessionId }:
 }
 
 const styles = StyleSheet.create({
+  liveBtn: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.accent, borderRadius: 999, paddingVertical: 7, paddingHorizontal: 12 },
+  liveBtnText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.bg },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   avatar: {
     width: 36, height: 36, borderRadius: 18,
