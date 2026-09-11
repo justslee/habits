@@ -1223,11 +1223,14 @@ async def discover(
 
 @router.get("/discover/queries")
 def discover_queries(db: Session = Depends(get_db)):
+    """What the next search will be told (brief + taste + sources)."""
     user = _user(db)
     _ensure_seeded(db, user)
+    system, prompt = recipe_discovery.build_prompt(db, user.id, limit=6)
     return {
-        "queries": recipe_discovery.queries_for(db, user.id),
         "sources": recipe_discovery.SOURCE_PRIORITY,
+        "prompt": prompt,
+        "system": system,
     }
 
 

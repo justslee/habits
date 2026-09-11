@@ -146,6 +146,26 @@ def _parse_json_reply(text: str) -> dict[str, Any]:
         return json.loads(t[start : end + 1])
 
 
+async def _repair_json(broken: str, schema_hint: str) -> dict[str, Any]:
+    """Ask the fast tier to turn a broken/truncated JSON reply into a valid object (drops
+    any trailing partial item rather than inventing data)."""
+    payload = {
+        "model": FAST,
+        "instructions": (
+            "You repair JSON. Return ONLY a valid JSON object conforming to this schema. If the input is "
+            "truncated, drop the incomplete trailing item; never invent content.\n"
+            + schema_hint
+        ),
+        "input": f"Repair this into valid json:\n{broken[:60000]}",
+        "max_output_tokens": 16000,
+        "reasoning": {"effort": "none"},
+        "text": {"format": {"type": "json_object"}},
+    }
+    body = await _post(payload, max_retries=1, timeout=180.0)
+    _log_usage(body, FAST, "repair_json")
+    return json.loads(_extract_output_text(body))
+
+
 async def structured_output(
     *,
     system: str,
@@ -215,6 +235,13 @@ async def structured_output(
                 attempt + 1,
                 text,
             )
+            if (
+                tools and text
+            ):  # a long tool-assisted reply that broke or truncated: cheap repair pass
+                try:
+                    return await _repair_json(text, schema_hint)
+                except Exception as re_err:  # noqa: BLE001
+                    logger.warning("JSON repair failed: %s", re_err)
             if attempt < max_retries:
                 await asyncio.sleep(1)
                 continue
