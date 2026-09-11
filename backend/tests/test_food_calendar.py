@@ -136,7 +136,9 @@ async def test_sync_upserts_spans_and_cycles_subtract_them(db_session):
 @pytest.mark.asyncio
 async def test_put_feed_validates_and_manual_travel_is_confirmed(db_session):
     async with _client() as client:
-        r = await client.put("/api/v1/food/calendar", json={"url": "http://not-secure"})
+        r = await client.put(
+            "/api/v1/calendar/feeds", json={"url": "http://not-secure"}
+        )
         assert r.status_code == 422
         r = await client.post(
             "/api/v1/food/travel",
@@ -237,3 +239,39 @@ async def test_refresh_travel_updates_an_open_cycle(db_session):
             "travel_refreshed" not in tick
             or cycle["id"] not in tick["travel_refreshed"]
         ), "already current"
+
+
+@pytest.mark.asyncio
+async def test_app_wide_calendar_events_and_today(db_session):
+    async with _client() as client:
+        await client.get("/api/v1/food/recipes")
+        feed = CalendarFeed(
+            user_id=1,
+            url="https://calendar.google.com/calendar/ical/x/private-abc/basic.ics",
+        )
+        db_session.add(feed)
+        db_session.commit()
+        await calendar_sync.sync_feed(db_session, feed, text=ICS, use_llm=False)
+        feeds = (await client.get("/api/v1/calendar/feeds")).json()
+        assert feeds[0]["events"] == 5 and feeds[0]["travel_spans"] == 3
+        end = (TODAY + datetime.timedelta(days=45)).isoformat()
+        events = (
+            await client.get(
+                f"/api/v1/calendar/events?start={TODAY.isoformat()}&end={end}"
+            )
+        ).json()
+        kinds = {e["summary"]: e["kind"] for e in events}
+        assert (
+            kinds["SF trip"] == "travel"
+            and kinds["Dentist"] == "meeting"
+            and kinds["Travel team standup"] == "meeting"
+        )
+        dentist = next(e for e in events if e["summary"] == "Dentist")
+        assert dentist["all_day"] is False and dentist["start_at"] is not None, (
+            "timed events keep their local time"
+        )
+        today = (await client.get("/api/v1/calendar/today")).json()
+        assert today["connected"] is True and today["travelling"] is False
+        assert (await client.delete("/api/v1/calendar/feeds")).json()["deleted"] is True
+        assert (await client.get("/api/v1/calendar/today")).json()["connected"] is False
+        assert (await client.get("/api/v1/food/travel")).json() == []

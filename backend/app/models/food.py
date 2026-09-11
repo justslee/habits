@@ -455,3 +455,35 @@ class TravelSpan(Base, TimestampMixin):
     reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     ignored: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class CalendarEvent(Base, TimestampMixin):
+    """Every event from a connected calendar within the sync horizon. App-wide: Food derives
+    travel from it, Daily shows today's agenda, Train can avoid busy days."""
+
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        UniqueConstraint("feed_id", "uid", name="uq_calendar_event_feed_uid"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    feed_id: Mapped[int] = mapped_column(
+        ForeignKey("calendar_feeds.id"), nullable=False
+    )
+    uid: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    start_date: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)
+    end_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)  # inclusive
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    start_at: Mapped[datetime.datetime | None] = mapped_column(
+        nullable=True
+    )  # local wall time for timed events
+    end_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    kind: Mapped[str] = mapped_column(
+        String(20), default="other"
+    )  # travel | workout | meeting | other
+    recurring: Mapped[bool] = mapped_column(Boolean, default=False)

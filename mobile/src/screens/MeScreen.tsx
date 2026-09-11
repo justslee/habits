@@ -14,12 +14,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radius, spacing } from '../theme';
 import {
   getDashboardStats, DashboardStats,
-  getApiUrl,
+  getApiUrl, getCalendarFeeds,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
 import ScreenBackground from '../components/ScreenBackground';
 import Topbar from '../components/Topbar';
 import ServerSettingsSheet from '../components/ServerSettingsSheet';
+import CalendarSheet from '../components/CalendarSheet';
 import { useServerStatus } from '../hooks/useServerStatus';
 import { serverHost } from '../services/settings';
 
@@ -41,6 +42,9 @@ export default function MeScreen() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [serverSheet, setServerSheet] = useState(false);
+  const [calendarSheet, setCalendarSheet] = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null);
+  const loadCalendar = useCallback(() => { getCalendarFeeds().then(f => setCalendarConnected(f.length > 0 && !f[0].last_error)).catch(() => setCalendarConnected(null)); }, []);
   const [serverUrl, setServerUrl] = useState(getApiUrl());
   const server = useServerStatus();
 
@@ -55,7 +59,7 @@ export default function MeScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => { fetchStats(); loadCalendar(); }, [fetchStats, loadCalendar]);
 
   // Stats — pulled from real dashboard data with sensible fallbacks
   const longestStreak = stats?.streaks?.length
@@ -94,6 +98,14 @@ export default function MeScreen() {
           onPress: server.retry,
         },
         { k: serverHost(serverUrl), v: 'Change', kind: 'link', onPress: () => { haptic.light(); setServerSheet(true); } },
+      ],
+    },
+    {
+      h: 'Connections',
+      items: [
+        calendarConnected
+          ? { k: 'Google Calendar', v: 'Connected · tap to manage', kind: 'status', good: true, onPress: () => { haptic.light(); setCalendarSheet(true); } }
+          : { k: 'Google Calendar', v: calendarConnected === null ? '—' : 'Connect', kind: 'link', onPress: () => { haptic.light(); setCalendarSheet(true); } },
       ],
     },
     {
@@ -189,6 +201,7 @@ export default function MeScreen() {
 
         <View style={{ height: 80 }} />
       </ScrollView>
+      <CalendarSheet visible={calendarSheet} onClose={() => setCalendarSheet(false)} onChanged={loadCalendar} />
       <ServerSettingsSheet
         visible={serverSheet}
         onClose={() => setServerSheet(false)}
