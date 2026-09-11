@@ -975,3 +975,11 @@ export function getGolfEvents(): Promise<GolfEventData[]> { return request('/api
 export function addGolfEvent(p: { event_date: string; name: string; kind?: string; end_date?: string }): Promise<{ id: number }> { return request('/api/v1/train/events', { method: 'POST', body: JSON.stringify(p) }); }
 export function deleteGolfEvent(id: number): Promise<{ deleted: boolean }> { return request(`/api/v1/train/events/${id}`, { method: 'DELETE' }); }
 export function patchTrainSettings(p: { first_event_date?: string; five_sessions?: boolean }): Promise<any> { return request('/api/v1/train/settings', { method: 'PATCH', body: JSON.stringify(p) }); }
+
+// ---- Coach (program-aware text + OpenAI Realtime voice) ----
+export interface RealtimeSession { client_secret: string; expires_at: number | null; model: string; voice: string; calls_url: string; context_chars: number }
+export function getRealtimeSession(): Promise<RealtimeSession> { return request('/api/v1/coach/realtime/session', { method: 'POST' }); }
+export function getCoachContext(): Promise<{ context: string }> { return request('/api/v1/coach/context'); }
+export function coachChat(message: string, history: { from: 'me' | 'coach'; text: string }[] = []): Promise<{ reply: string; model: string }> {
+  return request('/api/v1/coach/chat', { method: 'POST', body: JSON.stringify({ message, history }) });
+}

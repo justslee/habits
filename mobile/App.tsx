@@ -38,6 +38,7 @@ import FoodSpendScreen from './src/screens/food/FoodSpendScreen';
 import FoodCalendarScreen from './src/screens/food/FoodCalendarScreen';
 import FoodRecipesScreen from './src/screens/food/FoodRecipesScreen';
 import FoodStoresScreen from './src/screens/food/FoodStoresScreen';
+import CoachVoiceScreen from './src/screens/CoachVoiceScreen';
 import CustomTabBar from './src/components/CustomTabBar';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
@@ -107,6 +108,7 @@ function TrainStackScreen() {
         <TrainStack.Screen name="LogRun" component={LogRunScreen} options={{ title: 'Log a Run' }} />
         <TrainStack.Screen name="RunHistory" component={RunHistoryScreen} options={{ title: 'Run History' }} />
         <TrainStack.Screen name="TrainingCalendar" component={TrainingCalendarScreen} options={{ title: 'Calendar' }} />
+        <TrainStack.Screen name="CoachVoice" component={CoachVoiceScreen} options={{ title: 'Live coach' }} />
       </TrainStack.Navigator>
     </ErrorBoundary>
   );
