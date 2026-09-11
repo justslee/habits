@@ -934,3 +934,44 @@ export function createMerchant(p: { store: string; name: string; channel?: strin
 export function scanDeals(): Promise<{ mode: string; deals: any[]; note?: string }> {
   return request('/api/v1/food/merchants/scan-deals', { method: 'POST', timeoutMs: 120_000 });
 }
+
+// --- Train: the golf performance program ---
+
+export interface TrainExercise {
+  name: string; sets: number; reps: string; kind: 'main' | 'accessory' | 'core' | 'power' | 'carry';
+  per_side: boolean; rest: string | null; notes: string | null; superset: string | null; pair: string | null;
+  omit_first: boolean; rpe?: string; load: number | null; load_note: string | null;
+}
+export interface TrainBlock { name: string; minutes: number; exercises: TrainExercise[] }
+export interface TrainPrescription {
+  session: string; title: string; phase: string; phase_name: string; phase_notes?: string; week_kind: 'normal' | 'lighter' | 'tournament' | 'travel';
+  rotation: 'A' | 'B'; target_minutes: [number, number]; budget: string; warmup: string[]; blocks: TrainBlock[];
+  run: { minutes: number; structure: string; intervals: number } | null; mobility: [string, string][]; rules: string[];
+}
+export interface TrainDay {
+  date: string; weekday: string; session: string | null; label: string; travel: boolean; note: string | null; status: string | null; session_id: number | null;
+}
+export interface TrainWeek { week_start: string; week_kind: string; rotation: string; phase: string; days: TrainDay[] }
+export interface TrainProgram {
+  start: string; first_event: string; five_sessions: boolean;
+  phase: { key: string; name: string; start: string; end: string; strength: string; running: string; rpe: string };
+  phases: { key: string; name: string; start: string; end: string }[];
+  week_kind: string; rotation: string; lighter_weeks: string[]; next_lighter_week: string | null;
+  sessions: Record<string, { title: string; target_minutes: [number, number]; budget: string }>;
+  mobility: { movement: string; dose: string }[]; banned: string[]; spec_ok: boolean;
+}
+export interface TrainToday { date: string; day: TrainDay | null; prescription: TrainPrescription | null; session_id: number | null; status: string | null }
+export interface GolfEventData { id: number; event_date: string; end_date: string | null; name: string; kind: string; notes: string | null }
+
+export function getTrainProgram(): Promise<TrainProgram> { return request('/api/v1/train/program'); }
+export function getTrainWeek(start?: string): Promise<TrainWeek> { return request(`/api/v1/train/week${start ? `?start=${start}` : ''}`); }
+export function getTrainToday(): Promise<TrainToday> { return request('/api/v1/train/today'); }
+export function startTrainToday(): Promise<{ session_id: number; status: string; created: boolean }> { return request('/api/v1/train/today/start', { method: 'POST' }); }
+export function completeTrainSession(id: number, p: { overall_rpe?: number; minutes?: number; notes?: string }): Promise<{ session_id: number; status: string; progression: { exercise: string; weight?: number; note: string }[] }> {
+  return request(`/api/v1/train/sessions/${id}/complete`, { method: 'POST', body: JSON.stringify(p) });
+}
+export function getTrainLog(start?: string): Promise<{ week_start: string; text: string }> { return request(`/api/v1/train/log${start ? `?start=${start}` : ''}`); }
+export function getGolfEvents(): Promise<GolfEventData[]> { return request('/api/v1/train/events'); }
+export function addGolfEvent(p: { event_date: string; name: string; kind?: string; end_date?: string }): Promise<{ id: number }> { return request('/api/v1/train/events', { method: 'POST', body: JSON.stringify(p) }); }
+export function deleteGolfEvent(id: number): Promise<{ deleted: boolean }> { return request(`/api/v1/train/events/${id}`, { method: 'DELETE' }); }
+export function patchTrainSettings(p: { first_event_date?: string; five_sessions?: boolean }): Promise<any> { return request('/api/v1/train/settings', { method: 'PATCH', body: JSON.stringify(p) }); }

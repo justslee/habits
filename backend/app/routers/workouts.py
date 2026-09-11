@@ -24,7 +24,6 @@ from app.schemas.workout import (
 )
 from app.services.progressive_overload import update_profile_after_session
 from app.services.workout_chat import process_chat_message
-from app.services.workout_generator import generate_workout_plan, get_day_type_for_date
 
 router = APIRouter(prefix="/api/v1/workouts", tags=["workouts"])
 
@@ -137,7 +136,6 @@ async def get_today_plan(db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No user found")
 
     today = date.today()
-    day_type = get_day_type_for_date(today)
 
     # Check for existing session (return first non-deleted one; clean up any dupes)
     existing = (
@@ -173,14 +171,19 @@ async def get_today_plan(db: Session = Depends(get_db)):
         else:
             return _session_to_response(session)
 
-    plan = await generate_workout_plan(user.id, day_type, db)
+    # The golf program decides today's session (docs/TRAINING-GOLF.md); rest days return None.
+    from app.routers.train import _flatten_for_logger, _prescription_for
 
+    p = _prescription_for(db, user, today)
+    if not p:
+        return None
+    plan = {**p, "exercises": _flatten_for_logger(p)}
     session = WorkoutSession(
         user_id=user.id,
         session_date=today,
-        day_type=day_type,
+        day_type=p["session"],
         ai_plan=json.dumps(plan),
-        coach_notes=plan.get("coach_notes"),
+        coach_notes=f"{p['title']} · {p['phase_name']} · {p['week_kind']} week · target {p['target_minutes'][0]}–{p['target_minutes'][1]} min",
         status="planned",
     )
     db.add(session)
@@ -193,10 +196,14 @@ async def get_today_plan(db: Session = Depends(get_db)):
 @router.get("/{session_id}", response_model=WorkoutSessionResponse)
 def get_workout_session(session_id: int, db: Session = Depends(get_db)):
     """Get a single workout session with all exercises."""
-    session = db.query(WorkoutSession).filter(
-        WorkoutSession.id == session_id,
-        WorkoutSession.deleted_at.is_(None),
-    ).first()
+    session = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.id == session_id,
+            WorkoutSession.deleted_at.is_(None),
+        )
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return _session_to_response(session)
@@ -209,16 +216,22 @@ def add_exercise_log(
     db: Session = Depends(get_db),
 ):
     """Log an individual set to an existing session."""
-    session = db.query(WorkoutSession).filter(
-        WorkoutSession.id == session_id,
-        WorkoutSession.deleted_at.is_(None),
-    ).first()
+    session = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.id == session_id,
+            WorkoutSession.deleted_at.is_(None),
+        )
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get next exercise order
     max_order = max((e.exercise_order for e in session.exercises), default=-1)
-    same_exercise = [e for e in session.exercises if e.exercise_name == payload.exercise_name]
+    same_exercise = [
+        e for e in session.exercises if e.exercise_name == payload.exercise_name
+    ]
     order = same_exercise[0].exercise_order if same_exercise else max_order + 1
 
     log = ExerciseLog(
@@ -261,10 +274,14 @@ async def chat_with_coach(
     db: Session = Depends(get_db),
 ):
     """Send a message during a live workout and get coach feedback."""
-    session = db.query(WorkoutSession).filter(
-        WorkoutSession.id == session_id,
-        WorkoutSession.deleted_at.is_(None),
-    ).first()
+    session = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.id == session_id,
+            WorkoutSession.deleted_at.is_(None),
+        )
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -289,6 +306,7 @@ async def chat_with_coach(
 
 # Exercise profiles
 
+
 @router.get("/exercises/profiles", response_model=list[ExerciseProfileResponse])
 def list_exercise_profiles(db: Session = Depends(get_db)):
     """List all exercise profiles. Auto-seeds if none exist for the user."""
@@ -304,6 +322,7 @@ def list_exercise_profiles(db: Session = Depends(get_db)):
     # Auto-seed exercise profiles if none exist
     if not profiles:
         from app.db.seed_exercises import seed_exercise_profiles
+
         seed_exercise_profiles(user.id, db)
         profiles = (
             db.query(ExerciseProfile)
@@ -349,12 +368,14 @@ def get_exercise_history(
         d = session_date.isoformat()
         if d not in sessions:
             sessions[d] = {"date": d, "sets": [], "total_volume": 0, "best_e1rm": 0}
-        sessions[d]["sets"].append({
-            "set_number": log.set_number,
-            "weight": log.weight,
-            "reps": log.reps,
-            "rpe": log.rpe,
-        })
+        sessions[d]["sets"].append(
+            {
+                "set_number": log.set_number,
+                "weight": log.weight,
+                "reps": log.reps,
+                "rpe": log.rpe,
+            }
+        )
         sessions[d]["total_volume"] += log.volume_load
         e1rm = estimate_1rm(log.weight or 0, log.reps or 0)
         if e1rm > sessions[d]["best_e1rm"]:
@@ -371,6 +392,7 @@ def get_volume_summary(db: Session = Depends(get_db)):
         return []
 
     from app.services.progressive_overload import get_weekly_volume
+
     groups = ["push", "pull", "legs"]
     return [get_weekly_volume(user.id, g, db) for g in groups]
 
@@ -378,10 +400,14 @@ def get_volume_summary(db: Session = Depends(get_db)):
 @router.delete("/{session_id}", status_code=200)
 def soft_delete_workout(session_id: int, db: Session = Depends(get_db)):
     """Soft-delete a workout session and cascade to exercise logs (D-019, P5-5)."""
-    session = db.query(WorkoutSession).filter(
-        WorkoutSession.id == session_id,
-        WorkoutSession.deleted_at.is_(None),
-    ).first()
+    session = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.id == session_id,
+            WorkoutSession.deleted_at.is_(None),
+        )
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -399,10 +425,14 @@ def soft_delete_workout(session_id: int, db: Session = Depends(get_db)):
 @router.post("/{session_id}/restore", response_model=WorkoutSessionResponse)
 def restore_workout(session_id: int, db: Session = Depends(get_db)):
     """Restore a soft-deleted workout session and its exercise logs."""
-    session = db.query(WorkoutSession).filter(
-        WorkoutSession.id == session_id,
-        WorkoutSession.deleted_at.isnot(None),
-    ).first()
+    session = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.id == session_id,
+            WorkoutSession.deleted_at.isnot(None),
+        )
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Deleted session not found")
 
@@ -416,6 +446,7 @@ def restore_workout(session_id: int, db: Session = Depends(get_db)):
 
 
 # --- Unified Training Hub Endpoints ---
+
 
 @router.get("/training/recent")
 def get_recent_training(
@@ -456,37 +487,45 @@ def get_recent_training(
 
     items = []
     for w in workouts:
-        exercise_count = len(set(e.exercise_name for e in w.exercises if not e.is_warmup))
+        exercise_count = len(
+            set(e.exercise_name for e in w.exercises if not e.is_warmup)
+        )
         total_volume = sum(e.volume_load for e in w.exercises if not e.is_warmup)
         total_sets = len([e for e in w.exercises if not e.is_warmup])
-        items.append({
-            "id": w.id,
-            "type": "workout",
-            "date": w.session_date.isoformat(),
-            "label": w.day_type.replace("_", " ").title(),
-            "detail": f"{total_sets} sets • {total_volume:,.0f} lb vol" if total_volume else f"{exercise_count} exercises",
-            "status": w.status,
-            "rpe": w.overall_rpe,
-            "day_type": w.day_type,
-            "exercise_count": exercise_count,
-            "total_volume": round(total_volume),
-        })
+        items.append(
+            {
+                "id": w.id,
+                "type": "workout",
+                "date": w.session_date.isoformat(),
+                "label": w.day_type.replace("_", " ").title(),
+                "detail": f"{total_sets} sets • {total_volume:,.0f} lb vol"
+                if total_volume
+                else f"{exercise_count} exercises",
+                "status": w.status,
+                "rpe": w.overall_rpe,
+                "day_type": w.day_type,
+                "exercise_count": exercise_count,
+                "total_volume": round(total_volume),
+            }
+        )
 
     for r in runs:
-        items.append({
-            "id": r.id,
-            "type": "run",
-            "date": r.run_date.isoformat(),
-            "label": (r.run_type or "run").title(),
-            "detail": f"{r.distance_miles:.1f} mi • {r.avg_pace_formatted}/mi",
-            "status": r.status,
-            "rpe": r.rpe,
-            "run_type": r.run_type,
-            "distance_miles": r.distance_miles,
-            "pace_formatted": r.avg_pace_formatted,
-            "duration_seconds": r.duration_seconds,
-            "is_pr": r.is_pr,
-        })
+        items.append(
+            {
+                "id": r.id,
+                "type": "run",
+                "date": r.run_date.isoformat(),
+                "label": (r.run_type or "run").title(),
+                "detail": f"{r.distance_miles:.1f} mi • {r.avg_pace_formatted}/mi",
+                "status": r.status,
+                "rpe": r.rpe,
+                "run_type": r.run_type,
+                "distance_miles": r.distance_miles,
+                "pace_formatted": r.avg_pace_formatted,
+                "duration_seconds": r.duration_seconds,
+                "is_pr": r.is_pr,
+            }
+        )
 
     items.sort(key=lambda x: x["date"], reverse=True)
     return items
@@ -529,7 +568,9 @@ def get_week_summary(db: Session = Depends(get_db)):
     run_hours = sum(r.duration_seconds for r in runs) / 3600.0
     total_hours = round(workout_hours + run_hours, 1)
 
-    rpe_values = [w.overall_rpe for w in workouts if w.overall_rpe] + [r.rpe for r in runs if r.rpe]
+    rpe_values = [w.overall_rpe for w in workouts if w.overall_rpe] + [
+        r.rpe for r in runs if r.rpe
+    ]
     avg_rpe = round(sum(rpe_values) / len(rpe_values), 1) if rpe_values else 0
 
     run_miles = round(sum(r.distance_miles for r in runs), 1)
