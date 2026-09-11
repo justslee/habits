@@ -108,7 +108,10 @@ async def _post(
                     await asyncio.sleep(wait)
                     continue
                 raise last_error
-            resp.raise_for_status()
+            if (
+                resp.status_code >= 400
+            ):  # surface the API's own message; raise_for_status hides it
+                raise RuntimeError(f"OpenAI {resp.status_code}: {resp.text[:400]}")
             return resp.json()
         except (httpx.TimeoutException, httpx.TransportError) as e:
             last_error = e
@@ -126,6 +129,21 @@ async def _post(
     raise RuntimeError(
         f"OpenAI request failed after {max_retries + 1} attempts: {last_error}"
     )
+
+
+def _parse_json_reply(text: str) -> dict[str, Any]:
+    """Parse a JSON object from a reply that may carry code fences or prose around it."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        t = t[4:] if t.lower().startswith("json") else t
+    try:
+        return json.loads(t)
+    except json.JSONDecodeError:
+        start, end = t.find("{"), t.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(t[start : end + 1])
 
 
 async def structured_output(
@@ -176,7 +194,10 @@ async def structured_output(
         "text": {"format": {"type": "json_object"}},
     }
     if tools:
+        # "Web Search cannot be used with JSON mode": with built-in tools we rely on the
+        # instructions for JSON and parse the reply tolerantly instead.
         payload["tools"] = tools
+        payload.pop("text", None)
 
     last_error: Optional[Exception] = None
     for attempt in range(max_retries + 1):
@@ -186,8 +207,8 @@ async def structured_output(
         _log_usage(body, model, tool_name)
         text = _extract_output_text(body)
         try:
-            return json.loads(text)
-        except (json.JSONDecodeError, TypeError) as e:
+            return _parse_json_reply(text)
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
             last_error = e
             logger.warning(
                 "structured_output non-JSON reply (attempt %d): %.200s",
