@@ -1,0 +1,48 @@
+/* A refinement of the approved direction, using the existing product palette. */
+#habits-liquid{--craft-ease:cubic-bezier(.22,1,.36,1);--craft-settle:cubic-bezier(.32,.72,0,1)}
+#habits-liquid .h-enter{animation:none}
+#habits-liquid .h-nav{background:var(--h-panel);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--h-fg) 8%,transparent),0 5px 16px var(--h-shadow)}
+#habits-liquid .h-nav-selection{transition:transform 240ms var(--craft-settle);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--h-fg) 7%,transparent)}
+#habits-liquid .ns-nav{margin-bottom:19px}
+#habits-liquid .ns-nav-well{transition:none;pointer-events:none}
+#habits-liquid .tp-nav{position:relative;isolation:isolate}
+#habits-liquid .tp-nav button{position:relative;z-index:1}
+#habits-liquid .tp-nav button[aria-pressed=true]{background:transparent}
+#habits-liquid .craft-tp-well{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px) / 4);border-radius:13px;background:var(--h-soft);pointer-events:none}
+#habits-liquid .h-primary,#habits-liquid .h-secondary,#habits-liquid .h-icon,#habits-liquid .ns-pillar,#habits-liquid .tp-session{transition:transform 150ms var(--craft-ease),background-color 150ms}
+#habits-liquid .h-primary:active:not(:disabled),#habits-liquid .h-secondary:active:not(:disabled),#habits-liquid .h-icon:active,#habits-liquid .ns-pillar:active,#habits-liquid .tp-session:active{transform:scale(.975)}
+#habits-liquid .h-sheet{animation:craft-sheet-in 260ms var(--craft-settle);border-radius:29px 29px 35px 35px}
+@keyframes craft-sheet-in{from{transform:translateY(28px) scale(.985)}to{transform:translateY(0) scale(1)}}
+#habits-liquid .h-sheet-handle{height:30px;padding:12px 8px;min-width:72px}
+#habits-liquid .h-sheet-head{margin-bottom:18px}
+#habits-liquid .h-sheet h2{font-size:31px;line-height:1.12;text-wrap:balance}
+#habits-liquid .craft-sheet-ghost{pointer-events:none!important;overflow:hidden}
+#habits-liquid .ns-hero.compact{min-height:173px}
+#habits-liquid .ns-hero.compact .ns-mantra{margin-top:22px}
+#habits-liquid .ns-composite-summary{margin:12px 0 13px;align-items:center}
+#habits-liquid .ns-curve-value{font-size:44px;line-height:1.05;margin-top:4px}
+#habits-liquid .ns-chart-tools{margin:4px 0 8px}
+#habits-liquid .ns-ranges{gap:6px}
+#habits-liquid .craft-chart-controls{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin:8px 0 3px;padding-top:5px;border-top:1px solid var(--h-line)}
+#habits-liquid .craft-chart-controls .ns-modes{border:0;margin:0;gap:16px}
+#habits-liquid .craft-chart-controls .ns-unit-label{gap:7px}
+#habits-liquid .ns-chart-readout{padding-top:7px;font-variant-numeric:tabular-nums}
+#habits-liquid .ns-chart-slider{height:30px;min-height:30px;margin:0;accent-color:var(--h-accent)}
+#habits-liquid .ns-plot-legend{column-gap:15px;margin-top:3px}
+#habits-liquid .ns-chart-stats{margin-top:21px}
+#habits-liquid .tp-now{padding:20px;margin:18px 0 23px}
+#habits-liquid .tp-now h2{font-size:30px}
+#habits-liquid .tp-phase summary{min-height:69px}
+#habits-liquid .tp-phase{overflow:visible}
+#habits-liquid .craft-switch-control{position:relative;display:grid;place-items:center;width:48px;min-width:48px;height:44px}
+#habits-liquid .craft-switch-control input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:1}
+#habits-liquid .craft-switch-track{display:block;width:42px;height:25px;border-radius:20px;background:var(--h-panel2);position:relative;transition:background-color 160ms}
+#habits-liquid .craft-switch-track:after{content:'';position:absolute;left:3px;top:3px;width:19px;height:19px;border-radius:50%;background:var(--h-muted);transition:transform 200ms var(--craft-settle),background-color 160ms}
+#habits-liquid .craft-switch-control input:checked + .craft-switch-track{background:var(--h-accent)}
+#habits-liquid .craft-switch-control input:checked + .craft-switch-track:after{background:var(--h-bg);transform:translateX(17px)}
+#habits-liquid .craft-switch-control input:focus-visible + .craft-switch-track{outline:2px solid var(--h-fg);outline-offset:4px}
+#habits-liquid[data-input=keyboard] .h-nav-selection{transition:none}
+#habits-liquid[data-input=keyboard] .h-sheet{animation:none}
+@media(pointer:coarse){#habits-liquid .ns-chart-slider{min-height:44px}#habits-liquid .h-sheet-handle{height:44px;padding:19px 8px}}
+@media(prefers-reduced-motion:reduce){#habits-liquid .h-primary:active,#habits-liquid .h-secondary:active,#habits-liquid .h-icon:active,#habits-liquid .ns-pillar:active,#habits-liquid .tp-session:active{transform:none}}
+#habits-liquid[data-motion=quiet] .h-primary:active,#habits-liquid[data-motion=quiet] .h-secondary:active,#habits-liquid[data-motion=quiet] .h-icon:active,#habits-liquid[data-motion=quiet] .ns-pillar:active,#habits-liquid[data-motion=quiet] .tp-session:active{transform:none}

@@ -13,7 +13,8 @@ import { registerDevice, serverReady } from './src/api/client';
 import { useServerStatus } from './src/hooks/useServerStatus';
 import ConnectionBanner from './src/components/ConnectionBanner';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
-import { InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif';
+import { InstrumentSerif_400Regular, InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif';
+import { DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { JetBrainsMono_400Regular, JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import DailyScreen from './src/screens/DailyScreen';
 import TrainHomeScreen from './src/screens/TrainHomeScreen';
@@ -42,6 +43,9 @@ import CoachVoiceScreen from './src/screens/CoachVoiceScreen';
 import CustomTabBar from './src/components/CustomTabBar';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { colors } from './src/theme';
+import LiquidApp from './src/liquid/LiquidApp';
+import { DesignVersion, getDesignVersion } from './src/liquid/version';
+import { useState as useVersionState } from 'react';
 
 const Tab = createBottomTabNavigator();
 const TrainStack = createStackNavigator();
@@ -135,17 +139,7 @@ function NorthStarStackScreen() {
 }
 
 
-export default function App() {
-  const [fontsLoaded] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    InstrumentSerif_400Regular_Italic,
-    JetBrainsMono_400Regular,
-    JetBrainsMono_500Medium,
-  });
-
+function ClassicApp() {
   const server = useServerStatus();
 
   useEffect(() => {
@@ -177,8 +171,6 @@ export default function App() {
     return () => subscription.remove();
   }, []);
 
-  if (!fontsLoaded) return null;
-
   return (
     <SafeAreaProvider>
       <View style={{ flex: 1 }}>
@@ -198,6 +190,48 @@ export default function App() {
         <StatusBar style="light" />
       </NavigationContainer>
       </View>
+    </SafeAreaProvider>
+  );
+}
+
+
+/** Both frontends share the same faces: Instrument Serif and DM Sans for liquid, Inter and
+ * JetBrains Mono for the previous design. Nothing renders until they are ready. */
+function useAppFonts(): boolean {
+  const [loaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    InstrumentSerif_400Regular,
+    InstrumentSerif_400Regular_Italic,
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMSans_600SemiBold,
+    DMSans_700Bold,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_500Medium,
+  });
+  return loaded;
+}
+
+/**
+ * The frontend switch. `liquid` is the design the app ships; `classic` is the previous
+ * frontend, kept whole so a rollback is a toggle rather than a rebuild.
+ */
+export default function App() {
+  const [version, setVersion] = useVersionState<DesignVersion | null>(null);
+  const fontsLoaded = useAppFonts();
+
+  useEffect(() => {
+    getDesignVersion().then(setVersion);
+  }, []);
+
+  if (version === null || !fontsLoaded) return null;
+  if (version === 'classic') return <ClassicApp />;
+  return (
+    <SafeAreaProvider>
+      <LiquidApp navigationRef={navigationRef} />
     </SafeAreaProvider>
   );
 }

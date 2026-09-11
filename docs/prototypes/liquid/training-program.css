@@ -1,0 +1,38 @@
+#habits-liquid .tp-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:4px;background:var(--h-panel);border-radius:17px;margin:0 0 24px;gap:2px}
+#habits-liquid .tp-nav button{background:transparent;color:var(--h-muted);border:0;border-radius:13px;min-height:44px;font-size:12px;padding:10px 3px}
+#habits-liquid .tp-nav button[aria-pressed=true]{background:var(--h-soft);color:var(--h-fg)}
+#habits-liquid .tp-intro{margin:10px 0 24px}#habits-liquid .tp-intro p{margin-top:12px}
+#habits-liquid .tp-now{background:var(--h-panel);padding:22px;border-radius:23px;margin:18px 0 25px;position:relative;overflow:hidden}
+#habits-liquid .tp-now h2{font-family:'Instrument Serif',Georgia,serif;font-size:32px;line-height:1.1;font-weight:400;letter-spacing:-.6px;margin:13px 0}
+#habits-liquid .tp-now .h-row{margin-top:17px;gap:10px;flex-wrap:wrap}
+#habits-liquid .tp-journey{margin:5px 0 25px}
+#habits-liquid .tp-phase{padding:0 0 0 26px;position:relative;border-left:1px solid var(--h-line);margin-left:7px}
+#habits-liquid .tp-phase:last-child{border-left-color:transparent}
+#habits-liquid .tp-phase:before{content:'';position:absolute;left:-5px;top:20px;width:9px;height:9px;border-radius:50%;background:var(--h-muted);box-shadow:0 0 0 5px var(--h-bg)}
+#habits-liquid .tp-phase[open]:before{background:var(--h-accent)}
+#habits-liquid .tp-phase summary{display:flex;align-items:center;justify-content:space-between;min-height:70px;gap:14px;padding:12px 0;cursor:pointer;list-style:none}
+#habits-liquid .tp-phase summary::-webkit-details-marker{display:none}
+#habits-liquid .tp-phase summary strong{font-size:13px;font-weight:500;display:block;line-height:1.45}
+#habits-liquid .tp-phase summary small{font-size:11px;color:var(--h-muted);display:block;margin-top:5px;line-height:1.4}
+#habits-liquid .tp-phase summary svg{width:15px;height:15px;flex-shrink:0;color:var(--h-muted)}
+#habits-liquid .tp-phase[open] summary svg{transform:rotate(45deg)}
+#habits-liquid .tp-phase p{font-size:12px;line-height:1.6;color:var(--h-muted);padding:0 0 14px}
+#habits-liquid .tp-phase p b{color:var(--h-fg);font-weight:500;display:block;margin-bottom:4px}
+#habits-liquid .tp-section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:24px 0 12px}
+#habits-liquid .tp-section-title h2{font-family:'Instrument Serif',Georgia,serif;font-size:27px;font-weight:400;letter-spacing:-.5px}
+#habits-liquid .tp-dates{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+#habits-liquid .tp-dates span{font-size:11px;background:var(--h-panel);border-radius:10px;padding:9px 11px;color:var(--h-muted)}
+#habits-liquid .tp-dates .tp-next-date{color:var(--h-accent);background:var(--h-soft)}
+#habits-liquid .tp-session{display:flex;align-items:center;width:100%;text-align:left;border:0;border-top:1px solid var(--h-line);background:none;padding:16px 0;gap:13px}
+#habits-liquid .tp-session>span:first-child{font-family:'Instrument Serif',Georgia,serif;font-size:25px;color:var(--h-accent);flex-shrink:0;width:27px}
+#habits-liquid .tp-session>span:nth-child(2){flex:1;min-width:0;font-size:13px;line-height:1.45}
+#habits-liquid .tp-session small{display:block;color:var(--h-muted);font-size:11px;margin-top:4px}
+#habits-liquid .tp-switch{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:54px;margin:12px 0;font-size:13px}
+#habits-liquid .tp-switch input{width:21px;height:21px;accent-color:var(--h-accent);flex-shrink:0}
+#habits-liquid .tp-note{font-size:11px;line-height:1.6;color:var(--h-muted);margin:12px 0}
+#habits-liquid .tp-week-row{display:flex;align-items:center;gap:15px;padding:16px 0;border-bottom:1px solid var(--h-line);font-size:13px}
+#habits-liquid .tp-week-row time{width:35px;color:var(--h-muted);font-size:11px;flex-shrink:0}
+#habits-liquid .tp-week-row>div{flex:1;line-height:1.5;min-width:0}
+#habits-liquid .tp-week-row small{display:block;font-size:11px;color:var(--h-muted)}
+#habits-liquid .tp-week-row button{flex-shrink:0;min-height:44px}
+#habits-liquid .tp-log{white-space:pre-wrap;font-family:inherit;font-size:12px;line-height:1.8;padding:18px;background:var(--h-bg);border-radius:16px;color:var(--h-fg)}

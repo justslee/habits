@@ -540,7 +540,7 @@ SESSIONS: dict[str, dict] = {
         "blocks": [],
         "run": {
             "minutes": 35,
-            "structure": "30–45 min conversational; bike, elliptical or incline walk when impact would interfere with golf",
+            "structure": "Conversational throughout; bike, elliptical or an incline walk when impact would interfere with golf",
             "intervals": 0,
         },
         "mobility_extra": S5_EXTRA_MOBILITY,

@@ -994,3 +994,43 @@ export interface AdjustInput { date?: string; text?: string; kind?: AdjustKind; 
 export function adjustTraining(p: AdjustInput): Promise<AdjustResult> { return request('/api/v1/train/adjust', { method: 'POST', body: JSON.stringify(p) }); }
 export function getTrainAdjustments(start?: string): Promise<TrainAdjustment[]> { return request(`/api/v1/train/adjustments${start ? `?start=${start}` : ''}`); }
 export function revertTrainAdjustment(id: number): Promise<AdjustResult> { return request(`/api/v1/train/adjustments/${id}`, { method: 'DELETE' }); }
+
+// ---- Daily: rituals and the one thing that matters ----
+export interface TodoData {
+  id: number; text: string; todo_date: string; pillar_id: number | null; pillar_name: string | null;
+  pillar_confidence: number | null; completed: boolean; estimated_minutes: number | null; sort_order: number;
+}
+export interface HabitData {
+  id: number; name: string; icon: string | null; color: string | null; is_active: boolean;
+  current_streak: number; longest_streak: number; total_completions: number; completed_today: boolean; sort_order: number;
+}
+export interface DailySummaryData {
+  quote: string; quote_author: string; todos: TodoData[]; habits: HabitData[];
+  workout_preview: string | null; workout_day_type: string | null;
+}
+export function getDailySummary(): Promise<DailySummaryData> { return request('/api/v1/daily/summary'); }
+export function toggleHabitToday(id: number): Promise<{ completed: boolean; current_streak?: number }> {
+  return request(`/api/v1/daily/habits/${id}/toggle`, { method: 'POST' });
+}
+export function completeTodo(id: number): Promise<TodoData> {
+  return request(`/api/v1/daily/todos/${id}/complete`, { method: 'POST' });
+}
+export function createTodo(p: { text: string; estimated_minutes?: number | null; pillar_id?: number | null }): Promise<TodoData> {
+  return request('/api/v1/daily/todos', { method: 'POST', body: JSON.stringify(p) });
+}
+export function deleteTodo(id: number): Promise<unknown> { return request(`/api/v1/daily/todos/${id}`, { method: 'DELETE' }); }
+export function deleteHabit(id: number): Promise<unknown> { return request(`/api/v1/daily/habits/${id}`, { method: 'DELETE' }); }
+
+// ---- Speak ----
+export interface SpeakingSessionData {
+  id: number; created_at: string; topic: string | null; audience: string | null;
+  duration_seconds: number | null; overall_score: number | null; transcript: string | null;
+}
+export interface SpeakingStatsData {
+  total_sessions: number; total_minutes: number; avg_scores: Record<string, number> | null;
+  recent_trend: { recent_avg: number; early_avg: number; delta: number; improving: boolean } | null;
+}
+export function getSpeakingSessions(limit = 20): Promise<SpeakingSessionData[]> {
+  return request(`/api/v1/speaking/sessions?limit=${limit}`);
+}
+export function getSpeakingStats(): Promise<SpeakingStatsData> { return request('/api/v1/speaking/stats'); }
