@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import re
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models.food import CalendarFeed, TravelSpan
+from app.models.food import CalendarEvent, CalendarFeed, TravelSpan
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +46,41 @@ def _unfold(text: str) -> list[str]:
     return lines
 
 
-def _parse_dt(value: str, params: str) -> tuple[datetime.date, bool]:
-    """→ (date, all_day). Times are reduced to their calendar day (TZID ignored on purpose:
-    travel is a day-level concept for meal planning)."""
+LOCAL_TZ = ZoneInfo(os.getenv("TZ", "America/New_York"))
+WORKOUT_WORDS = re.compile(
+    r"\b(gym|lift|lifting|workout|run|running|basketball|hoops|yoga|swim|climb|tennis|physio)\b",
+    re.I,
+)
+
+
+def _parse_dt(
+    value: str, params: str
+) -> tuple[datetime.date, bool, datetime.datetime | None]:
+    """→ (date, all_day, local_datetime_or_None). Zulu times are converted to the local
+    zone; TZID times are converted from their zone; floating times are taken as local."""
     v = value.strip()
     if "VALUE=DATE" in params or (len(v) == 8 and v.isdigit()):
-        return datetime.date(int(v[:4]), int(v[4:6]), int(v[6:8])), True
-    m = re.match(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})", v)
+        return datetime.date(int(v[:4]), int(v[4:6]), int(v[6:8])), True, None
+    m = re.match(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?", v)
     if not m:
         raise ValueError(f"bad datetime {value}")
-    return datetime.date(int(m[1]), int(m[2]), int(m[3])), False
+    dt = datetime.datetime(
+        int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6] or 0)
+    )
+    if m[7] == "Z":
+        dt = dt.replace(tzinfo=datetime.UTC).astimezone(LOCAL_TZ).replace(tzinfo=None)
+    else:
+        tz = re.search(r"TZID=([^;:]+)", params)
+        if tz:
+            try:
+                dt = (
+                    dt.replace(tzinfo=ZoneInfo(tz.group(1)))
+                    .astimezone(LOCAL_TZ)
+                    .replace(tzinfo=None)
+                )
+            except Exception:  # noqa: BLE001 — unknown zone: keep wall time
+                pass
+    return dt.date(), False, dt
 
 
 def parse_ics(text: str) -> list[dict]:
@@ -82,9 +109,9 @@ def parse_ics(text: str) -> list[dict]:
         name = name.upper()
         try:
             if name == "DTSTART":
-                cur["start"], cur["all_day"] = _parse_dt(value, params)
+                cur["start"], cur["all_day"], cur["start_at"] = _parse_dt(value, params)
             elif name == "DTEND":
-                cur["end"], _ = _parse_dt(value, params)
+                cur["end"], _, cur["end_at"] = _parse_dt(value, params)
             elif name == "SUMMARY":
                 cur["summary"] = value.replace("\\,", ",").strip()
             elif name == "LOCATION":
@@ -101,6 +128,17 @@ def parse_ics(text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
+
+
+def event_kind(ev: dict) -> str:
+    if looks_like_travel(ev)[0]:
+        return "travel"
+    text = f"{ev.get('summary', '')} {ev.get('location', '')}"
+    if WORKOUT_WORDS.search(text):
+        return "workout"
+    if not ev.get("all_day") and ev.get("start_at"):
+        return "meeting"
+    return "other"
 
 
 def looks_like_travel(ev: dict) -> tuple[bool, str]:
@@ -223,6 +261,39 @@ async def sync_feed(
     )
     spans = spans_from_events(events, votes)
 
+    # 1. every event in the horizon → calendar_events (app-wide)
+    have = {
+        e.uid: e
+        for e in db.query(CalendarEvent).filter(CalendarEvent.feed_id == feed.id).all()
+    }
+    seen_ev: set[str] = set()
+    for i, ev in enumerate(events):
+        uid = str(ev.get("uid", i))
+        seen_ev.add(uid)
+        end_incl = (
+            ev["end"] - datetime.timedelta(days=1) if ev.get("all_day") else ev["end"]
+        )
+        if end_incl < ev["start"]:
+            end_incl = ev["start"]
+        row = have.get(uid)
+        if row is None:
+            row = CalendarEvent(user_id=feed.user_id, feed_id=feed.id, uid=uid)
+            db.add(row)
+            have[uid] = row
+        row.summary = (ev.get("summary") or "")[:200] or None
+        row.location = (ev.get("location") or "")[:200] or None
+        row.start_date, row.end_date, row.all_day = (
+            ev["start"],
+            end_incl,
+            bool(ev.get("all_day")),
+        )
+        row.start_at, row.end_at = ev.get("start_at"), ev.get("end_at")
+        row.kind, row.recurring = event_kind(ev), bool(ev.get("recurring"))
+    for uid, row in list(have.items()):
+        if uid not in seen_ev and row.end_date >= today:
+            db.delete(row)
+
+    # 2. travel spans (what Food consumes)
     existing = {
         s.uid: s
         for s in db.query(TravelSpan).filter(TravelSpan.feed_id == feed.id).all()

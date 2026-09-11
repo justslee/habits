@@ -862,25 +862,36 @@ export function getSpend(): Promise<SpendSummary> {
   return request('/api/v1/food/spend');
 }
 
-// --- Food calendar & travel (F6) ---
+// --- Calendar (app-wide, Google Calendar via secret iCal address) ---
 
 export interface CalendarFeedData {
-  id: number; label: string; url_host: string; enabled: boolean; last_synced_at: string | null; last_error: string | null; spans: number;
+  id: number; label: string; url_host: string; enabled: boolean; last_synced_at: string | null; last_error: string | null; events: number; travel_spans: number;
 }
+export interface CalendarEventData {
+  id: number; summary: string | null; location: string | null; start_date: string; end_date: string; all_day: boolean;
+  start_at: string | null; end_at: string | null; kind: 'travel' | 'workout' | 'meeting' | 'other'; recurring: boolean;
+}
+export interface CalendarToday { date: string; connected: boolean; travelling: boolean; travel: string | null; events: CalendarEventData[] }
 export interface TravelSpanData {
   id: number; start_date: string; end_date: string; days: number; summary: string | null; reason: string | null; confirmed: boolean; ignored: boolean;
 }
 export function getCalendarFeeds(): Promise<CalendarFeedData[]> {
-  return request('/api/v1/food/calendar');
+  return request('/api/v1/calendar/feeds');
 }
 export function putCalendarFeed(url: string): Promise<CalendarFeedData> {
-  return request('/api/v1/food/calendar', { method: 'PUT', body: JSON.stringify({ url }) });
+  return request('/api/v1/calendar/feeds', { method: 'PUT', body: JSON.stringify({ url }), timeoutMs: 90_000 });
 }
 export function syncCalendar(): Promise<CalendarFeedData[]> {
-  return request('/api/v1/food/calendar/sync', { method: 'POST' });
+  return request('/api/v1/calendar/sync', { method: 'POST', timeoutMs: 90_000 });
 }
 export function deleteCalendarFeed(): Promise<{ deleted: boolean }> {
-  return request('/api/v1/food/calendar', { method: 'DELETE' });
+  return request('/api/v1/calendar/feeds', { method: 'DELETE' });
+}
+export function getCalendarToday(): Promise<CalendarToday> {
+  return request('/api/v1/calendar/today');
+}
+export function getCalendarEvents(start: string, end: string): Promise<CalendarEventData[]> {
+  return request(`/api/v1/calendar/events?start=${start}&end=${end}`);
 }
 export function getTravel(): Promise<TravelSpanData[]> {
   return request('/api/v1/food/travel');

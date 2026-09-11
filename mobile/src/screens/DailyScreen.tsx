@@ -28,6 +28,7 @@ import CompoundingHero from '../components/CompoundingHero';
 import DailyQuoteCard from '../components/DailyQuoteCard';
 import DailyReviewIsland from '../components/DailyReviewIsland';
 import Topbar from '../components/Topbar';
+import TodayAgenda from '../components/TodayAgenda';
 
 const TIME_ESTIMATES = [15, 30, 60, 90, 120, 180, 240];
 
@@ -415,6 +416,9 @@ export default function DailyScreen() {
                 caption={summary?.workout_preview?.toUpperCase()}
               />
             </View>
+
+            {/* ── Today's calendar (only once Google Calendar is connected) ── */}
+            <TodayAgenda />
 
             {/* ── Daily review island (shows after 9pm, before check-in) ── */}
             {!showCheckIn && new Date().getHours() >= 21 && totalComplete > 0 && (

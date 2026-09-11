@@ -122,7 +122,7 @@ export default function FoodHomeScreen({ navigation }: any) {
           {travel.length ? travel.slice(0, 3).map(t => (
             <Text key={t.id} style={s.body}>{t.summary || 'Away'} · {t.start_date.slice(5)} → {t.end_date.slice(5)} · {t.days}d{t.confirmed ? '' : ' · unconfirmed'}</Text>
           )) : <Text style={s.body}>No upcoming travel on file</Text>}
-          <Text style={s.help}>Tap to connect your calendar or add travel by hand</Text>
+          <Text style={s.help}>From Google Calendar · tap to review or add travel</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => navigation.navigate('FoodPantry', { cycleId: cycle?.id })}>

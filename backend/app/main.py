@@ -33,6 +33,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.routers import (
+    calendar,
     concepts,
     daily,
     dashboard,
@@ -154,6 +155,7 @@ app.include_router(speaking.router)
 app.include_router(vision.router)
 app.include_router(devices.router)
 app.include_router(food.router)
+app.include_router(calendar.router)
 app.include_router(concepts.router)
 app.include_router(concepts.link_router)
 
@@ -228,7 +230,10 @@ async def root():
 # --- Web app (Expo web export) served by the same process, so the app works in a browser on
 # any device on the tailnet. Built by ops/mac/build-web.sh into HABITS_WEB_DIR. Mounted last so
 # API routes win; html=True serves index.html for unknown paths (client-side routing).
-_web_dir = os.getenv("HABITS_WEB_DIR", str(_Path.home() / "Library" / "Application Support" / "Habits" / "web"))
+_web_dir = os.getenv(
+    "HABITS_WEB_DIR",
+    str(_Path.home() / "Library" / "Application Support" / "Habits" / "web"),
+)
 if os.path.isdir(_web_dir) and os.path.isfile(os.path.join(_web_dir, "index.html")):
     from fastapi.staticfiles import StaticFiles
 
