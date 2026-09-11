@@ -40,9 +40,10 @@ LOCATION:Main St
 END:VEVENT
 BEGIN:VEVENT
 UID:standup
-DTSTART:{_d(1)}T090000Z
-DTEND:{_d(1)}T091500Z
+DTSTART:{_d(-20)}T140000Z
+DTEND:{_d(-20)}T141500Z
 RRULE:FREQ=WEEKLY
+EXDATE:{_d(1)}T140000Z
 SUMMARY:Travel team standup
 END:VEVENT
 BEGIN:VEVENT
@@ -253,7 +254,26 @@ async def test_app_wide_calendar_events_and_today(db_session):
         db_session.commit()
         await calendar_sync.sync_feed(db_session, feed, text=ICS, use_llm=False)
         feeds = (await client.get("/api/v1/calendar/feeds")).json()
-        assert feeds[0]["events"] == 5 and feeds[0]["travel_spans"] == 3
+        assert feeds[0]["travel_spans"] == 3
+        standups = [
+            e
+            for e in (
+                await client.get(
+                    f"/api/v1/calendar/events?start={TODAY.isoformat()}&end={(TODAY + datetime.timedelta(days=60)).isoformat()}"
+                )
+            ).json()
+            if e["summary"] == "Travel team standup"
+        ]
+        assert 7 <= len(standups) <= 10, "a weekly rule is expanded into the window"
+        assert all(e["recurring"] and e["kind"] == "meeting" for e in standups)
+        assert (
+            not any(
+                e["start_date"] == (TODAY + datetime.timedelta(days=1)).isoformat()
+                for e in standups
+            )
+            or (TODAY - datetime.timedelta(days=20)).weekday()
+            != (TODAY + datetime.timedelta(days=1)).weekday()
+        ), "EXDATE removes that instance"
         end = (TODAY + datetime.timedelta(days=45)).isoformat()
         events = (
             await client.get(
