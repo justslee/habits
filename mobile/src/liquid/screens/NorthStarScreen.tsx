@@ -46,6 +46,7 @@ interface PillarView {
   hours: number;
   entries: number;
   mastered: number;
+  inProgress: number;
   total: number;
   pct: number;
   level: number;
@@ -113,16 +114,24 @@ export default function NorthStarScreen({ navigation }: any) {
       const tree = trees.get(p.pillar_id);
       const total = tree?.total ?? 0;
       const mastered = tree?.mastered ?? 0;
+      const inProgress = tree?.in_progress ?? 0;
+      // The deepest tier touched, mastered or under way — 0 means nothing started.
       const level = tree
-        ? Math.max(0, ...tree.tiers.filter(t => t.concepts.some(x => x.status === 'mastered')).map(t => t.tier))
+        ? Math.max(
+          0,
+          ...tree.tiers
+            .filter(t => t.concepts.some(x => x.status === 'mastered' || x.status === 'in_progress'))
+            .map(t => t.tier),
+        )
         : 0;
       return {
         id: p.pillar_id,
         name: p.pillar_name,
-        short: p.pillar_name.length > 11 ? `${p.pillar_name.slice(0, 10)}…` : p.pillar_name,
+        short: p.pillar_name,
         hours: p.total_hours,
         entries: p.entry_count,
         mastered,
+        inProgress,
         total,
         pct: total ? Math.round((mastered / total) * 100) : 0,
         level,
@@ -517,9 +526,9 @@ function Vision({
   const openPillar = useCallback((p: PillarView) => {
     sheet.open(p.name, () => (
       <View>
-        <Eyebrow>{p.total ? `${p.mastered} of ${p.total} concepts` : 'No concept tree yet'}</Eyebrow>
+        <Eyebrow>{p.total ? `${p.mastered} of ${p.total} concepts mastered` : 'No concept tree yet'}</Eyebrow>
         <StatStrip items={[
-          { label: 'Level', value: String(p.level), sub: 'Deepest tier reached' },
+          { label: 'Tier', value: p.level ? String(p.level) : '—', sub: 'Deepest tier touched' },
           { label: 'Progress', value: String(p.pct), unit: '%', sub: 'Concepts mastered' },
           { label: 'Deep work', value: p.hours.toFixed(0), unit: 'h', sub: `${p.entries} entries` },
         ]} />
@@ -547,7 +556,10 @@ function Vision({
         { label: 'Deep work', value: (stats?.hours.all_time ?? 0).toFixed(0), unit: 'h', sub: 'Lifetime hours' },
       ]} />
 
-      <Section title="Five ways to grow." trailing={<Small>Real records</Small>} />
+      <Section
+        title={`${['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'][pillars.length] ?? pillars.length} ways to grow.`}
+        trailing={<Small>Real records</Small>}
+      />
       <View style={s.pillarGrid}>
         {pillars.map((p: PillarView, i: number) => (
           <Pressable
@@ -560,16 +572,26 @@ function Vision({
             style={[s.pillar, { backgroundColor: c.panel }, i === pillars.length - 1 && { width: '100%' }]}
           >
             <View style={s.pillarTop}>
-              <Animated.Text style={[s.pillarName, { color: c.fg }]} numberOfLines={1}>{p.short}</Animated.Text>
-              <Animated.Text style={[s.pillarLevel, { color: p.color }]}>L{p.level}</Animated.Text>
+              <Animated.Text style={[s.pillarName, { color: c.fg }]} numberOfLines={2}>{p.short}</Animated.Text>
+              {p.level > 0 ? <Animated.Text style={[s.pillarLevel, { color: p.color }]}>Tier {p.level}</Animated.Text> : null}
             </View>
             <Animated.Text style={[s.pillarValue, { color: c.fg }]}>
               {p.pct}<Animated.Text style={[s.pillarPct, { color: c.muted }]}>%</Animated.Text>
             </Animated.Text>
             <View style={[s.track, { backgroundColor: c.panel2 }]}>
+              {/* Mastered is solid; what is under way shows faintly behind it. */}
+              <View
+                style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 4,
+                  width: `${p.total ? Math.round(((p.mastered + p.inProgress) / p.total) * 100) : 0}%`,
+                  backgroundColor: p.color, opacity: 0.35,
+                }}
+              />
               <View style={{ width: `${p.pct}%`, height: '100%', borderRadius: 4, backgroundColor: p.color }} />
             </View>
-            <Small>{p.hours.toFixed(0)}h · {p.entries} entries</Small>
+            <Small numberOfLines={1}>
+              {p.hours.toFixed(0)}h · {p.inProgress ? `${p.inProgress} under way` : `${p.entries} entries`}
+            </Small>
           </Pressable>
         ))}
       </View>
@@ -591,7 +613,11 @@ function Vision({
               >
                 <View style={{ flex: 1 }}>
                   <Animated.Text style={[s.detailLabel, { color: c.fg }]}>{p.name}</Animated.Text>
-                  <Small style={{ marginTop: 3 }}>{p.total ? `${p.mastered}/${p.total} concepts` : 'No tree yet'}</Small>
+                  <Small style={{ marginTop: 3 }}>
+                    {p.total
+                      ? `${p.mastered} mastered · ${p.inProgress} under way · ${p.total} concepts`
+                      : 'No concept tree yet'}
+                  </Small>
                 </View>
                 <Ionicons name="add" size={16} color={c.muted} style={{ transform: [{ rotate: open ? '45deg' : '0deg' }] }} />
               </Pressable>
@@ -759,12 +785,12 @@ const s = StyleSheet.create({
 
   pillarGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   pillar: { width: '48%', borderRadius: radius.card, paddingVertical: 17, paddingHorizontal: 16, overflow: 'hidden' },
-  pillarTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
-  pillarName: { fontFamily: fonts.medium, fontSize: 12, flex: 1 },
+  pillarTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, minHeight: 30 },
+  pillarName: { fontFamily: fonts.medium, fontSize: 12, flex: 1, lineHeight: 15 },
   pillarLevel: { fontFamily: fonts.regular, fontSize: 11 },
   pillarValue: { fontFamily: fonts.serif, fontSize: 34, letterSpacing: -0.6, lineHeight: 34 * 1.3, marginTop: 11 },
   pillarPct: { fontFamily: fonts.serif, fontSize: 18 },
-  track: { height: 3, borderRadius: 4, marginTop: 7, marginBottom: 10, overflow: 'hidden' },
+  track: { height: 3, borderRadius: 4, marginTop: 7, marginBottom: 10, overflow: 'hidden', position: 'relative' },
 
   targetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 50, paddingVertical: 12 },
   detailLabel: { fontFamily: fonts.regular, fontSize: 13 },
