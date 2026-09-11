@@ -201,14 +201,7 @@ async def test_train_api_week_today_start_complete_and_log(db_session):
             started = (await client.post("/api/v1/train/today/start")).json()
             assert started["created"] is True
             sid = started["session_id"]
-            main = next(
-                (
-                    e
-                    for e in t["prescription"]["blocks"][0]["exercises"]
-                    if e["kind"] == "power"
-                ),
-                None,
-            )
+            # Some sessions (the optional fifth) are a run and mobility with no lifting blocks.
             first_lift = next(
                 (
                     e

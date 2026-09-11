@@ -90,7 +90,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
@@ -111,6 +111,9 @@ def _is_public_path(path: str) -> bool:
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     """Require API key for all non-public endpoints. Fail closed if no key configured."""
+    # A CORS preflight carries no credentials by design; answering it is not access to data.
+    if request.method == "OPTIONS":
+        return await call_next(request)
     if _testing or _is_public_path(request.url.path):
         return await call_next(request)
     if not _api_key:
