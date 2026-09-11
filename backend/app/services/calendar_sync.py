@@ -120,6 +120,14 @@ def parse_ics(text: str) -> list[dict]:
                 cur["uid"] = value.strip()
             elif name == "RRULE":
                 cur["recurring"] = True
+                cur["rrule"] = value.strip()
+            elif name == "EXDATE":
+                for part in value.split(","):
+                    try:
+                        d, _, _ = _parse_dt(part, params)
+                        cur.setdefault("exdates", set()).add(d)
+                    except ValueError:
+                        continue
         except ValueError:
             continue
     return events
@@ -128,6 +136,52 @@ def parse_ics(text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
+
+
+MAX_OCCURRENCES = 200
+
+
+def expand_recurring(
+    ev: dict, window_start: datetime.date, window_end: datetime.date
+) -> list[dict]:
+    """Instances of a recurring event inside the window (dateutil rrule; EXDATEs honoured).
+    Each instance is its own event with uid '<uid>#<yyyymmdd>'."""
+    from dateutil.rrule import rrulestr
+
+    base = ev.get("start_at") or datetime.datetime.combine(ev["start"], datetime.time())
+    duration_days = max(0, (ev["end"] - ev["start"]).days)
+    duration = (
+        (ev["end_at"] - ev["start_at"])
+        if ev.get("start_at") and ev.get("end_at")
+        else datetime.timedelta(0)
+    )
+    try:
+        rule = rrulestr(ev["rrule"], dtstart=base)
+    except Exception as e:  # noqa: BLE001 — unparseable rule: keep the master only
+        logger.info("rrule skipped for %s: %s", ev.get("uid"), e)
+        return []
+    lo = datetime.datetime.combine(window_start, datetime.time())
+    hi = datetime.datetime.combine(window_end, datetime.time(23, 59))
+    out = []
+    for occ in rule.between(lo, hi, inc=True):
+        if len(out) >= MAX_OCCURRENCES:
+            break
+        d = occ.date()
+        if d in (ev.get("exdates") or set()):
+            continue
+        inst = dict(ev)
+        inst["uid"] = f"{ev.get('uid', '')}#{d:%Y%m%d}"
+        inst["start"] = d
+        inst["end"] = (
+            d + datetime.timedelta(days=duration_days)
+            if ev.get("all_day")
+            else (occ + duration).date()
+        )
+        inst["start_at"] = None if ev.get("all_day") else occ
+        inst["end_at"] = None if ev.get("all_day") else occ + duration
+        inst["recurring"] = True
+        out.append(inst)
+    return out
 
 
 def event_kind(ev: dict) -> str:
@@ -249,11 +303,14 @@ async def sync_feed(
         raise
     today = datetime.date.today()
     horizon = today + datetime.timedelta(days=120)
-    events = [
-        e
-        for e in parse_ics(raw)
-        if e["end"] >= today - datetime.timedelta(days=7) and e["start"] <= horizon
-    ]
+    window_start = today - datetime.timedelta(days=7)
+    parsed = parse_ics(raw)
+    events = []
+    for e in parsed:
+        if e.get("rrule"):
+            events += expand_recurring(e, window_start, horizon)
+        elif e["end"] >= window_start and e["start"] <= horizon:
+            events.append(e)
     votes = (
         await classify_with_llm([e for e in events if not looks_like_travel(e)[0]])
         if use_llm
