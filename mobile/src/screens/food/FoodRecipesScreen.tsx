@@ -4,9 +4,9 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors, fonts, radius, spacing, typography } from '../../theme';
-import { DiscoverResult, FoodRecipe, discoverRecipes, getFoodRecipes, patchEssential, patchRecipe } from '../../api/client';
+import { DiscoverResult, FoodRecipe, discoverRecipes, getFoodRecipes, getFoodSettings, patchEssential, patchFoodSettings, patchRecipe } from '../../api/client';
 import { haptic } from '../../utils/haptics';
 import ScreenBackground from '../../components/ScreenBackground';
 
@@ -17,9 +17,15 @@ export default function FoodRecipesScreen() {
   const [open, setOpen] = useState<number | null>(null);
   const [finding, setFinding] = useState(false);
   const [last, setLast] = useState<DiscoverResult | null>(null);
+  const [brief, setBrief] = useState('');
+  const [briefSaved, setBriefSaved] = useState('');
 
   const load = useCallback(() => { getFoodRecipes().then(setRecipes).catch(err => console.warn('recipes', err)); }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); getFoodSettings().then(s => { setBrief(s.discovery_prompt || ''); setBriefSaved(s.discovery_prompt || ''); }).catch(() => {}); }, [load]);
+
+  const saveBrief = useCallback(async () => {
+    try { const s = await patchFoodSettings({ discovery_prompt: brief }); setBriefSaved(s.discovery_prompt || ''); haptic.success(); } catch (err) { console.warn(err); }
+  }, [brief]);
 
   const find = useCallback(async () => {
     haptic.medium();
@@ -58,10 +64,22 @@ export default function FoodRecipesScreen() {
         <Text style={typography.eyebrow}>{recipes.length} RECIPES · MAANGCHI AND JUST ONE COOKBOOK FIRST</Text>
         <Text style={s.title}>Recipes</Text>
 
+        <View style={s.card}>
+          <Text style={typography.eyebrow}>WHAT TO LOOK FOR · YOUR STANDING BRIEF</Text>
+          <TextInput
+            value={brief}
+            onChangeText={setBrief}
+            multiline
+            placeholder="e.g. more Japanese this month, dishes like the ones at Cote, no seafood, one-pot only…"
+            placeholderTextColor={colors.textTertiary}
+            style={s.input}
+          />
+          {brief !== briefSaved && <TouchableOpacity style={s.ghostBtn} onPress={saveBrief}><Text style={s.ghostBtnT}>Save brief</Text></TouchableOpacity>}
+        </View>
         <TouchableOpacity style={s.btn} onPress={find} disabled={finding} activeOpacity={0.9}>
           <Text style={s.btnText}>{finding ? 'Searching the web…' : 'Find new recipes'}</Text>
         </TouchableOpacity>
-        <Text style={s.help}>Top-rated pages, read from their recipe data, normalised, and filtered to ≤ 12 ingredients and ≤ 90 minutes. New ones join the deck at 30 %.</Text>
+        <Text style={s.help}>The model searches the web with your brief and taste profile, reads the pages, and returns recipes normalised for the planner: ≤ 12 essential ingredients, ≤ 90 minutes, batchable. New ones join the deck at 30 %.</Text>
         {last && (
           <View style={s.card}>
             <Text style={typography.eyebrow}>LAST SEARCH · {last.checked} PAGES CHECKED · {last.skipped} SKIPPED</Text>
@@ -128,6 +146,7 @@ const s = StyleSheet.create({
   chip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.line },
   chipEss: { borderColor: colors.borderFocus },
   chipText: { fontFamily: fonts.regular, fontSize: 11, color: colors.textSecondary },
+  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, color: colors.text, fontFamily: fonts.regular, fontSize: 13, minHeight: 70, marginTop: 8, textAlignVertical: 'top' },
   btn: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center' },
   btnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.bg },
   ghostBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: colors.accentMuted },

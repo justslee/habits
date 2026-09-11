@@ -78,19 +78,33 @@ def _log_usage(body: dict[str, Any], model: str, call_type: str) -> None:
     )
 
 
-async def _post(payload: dict[str, Any], *, max_retries: int, timeout: float) -> dict[str, Any]:
+async def _post(
+    payload: dict[str, Any], *, max_retries: int, timeout: float
+) -> dict[str, Any]:
     """POST to the Responses API with retry/backoff on 429 / 5xx / transport errors."""
-    headers = {"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {_api_key()}",
+        "Content-Type": "application/json",
+    }
     last_error: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(OPENAI_RESPONSES_URL, headers=headers, json=payload)
+                resp = await client.post(
+                    OPENAI_RESPONSES_URL, headers=headers, json=payload
+                )
             if resp.status_code == 429 or resp.status_code >= 500:
-                last_error = RuntimeError(f"OpenAI {resp.status_code}: {resp.text[:300]}")
+                last_error = RuntimeError(
+                    f"OpenAI {resp.status_code}: {resp.text[:300]}"
+                )
                 if attempt < max_retries:
                     wait = 2 ** (attempt + 1)
-                    logger.warning("OpenAI %d (attempt %d), retrying in %ds", resp.status_code, attempt + 1, wait)
+                    logger.warning(
+                        "OpenAI %d (attempt %d), retrying in %ds",
+                        resp.status_code,
+                        attempt + 1,
+                        wait,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 raise last_error
@@ -100,11 +114,18 @@ async def _post(payload: dict[str, Any], *, max_retries: int, timeout: float) ->
             last_error = e
             if attempt < max_retries:
                 wait = 2 ** (attempt + 1)
-                logger.warning("OpenAI transport error (attempt %d), retrying in %ds: %s", attempt + 1, wait, e)
+                logger.warning(
+                    "OpenAI transport error (attempt %d), retrying in %ds: %s",
+                    attempt + 1,
+                    wait,
+                    e,
+                )
                 await asyncio.sleep(wait)
                 continue
             raise
-    raise RuntimeError(f"OpenAI request failed after {max_retries + 1} attempts: {last_error}")
+    raise RuntimeError(
+        f"OpenAI request failed after {max_retries + 1} attempts: {last_error}"
+    )
 
 
 async def structured_output(
@@ -118,8 +139,15 @@ async def structured_output(
     temperature: float = 0.3,
     max_tokens: int = 4096,
     max_retries: int = 2,
+    tools: Optional[list[dict[str, Any]]] = None,
+    reasoning_effort: Optional[str] = None,
+    timeout: Optional[float] = None,
 ) -> dict[str, Any]:
     """Call the model and get structured JSON output conforming to `output_schema`.
+
+    `tools` may include built-in tools such as `{"type": "web_search"}`, in which case the
+    model browses before answering (used by recipe discovery). `reasoning_effort` overrides
+    the tier default; `timeout` the request timeout (web search runs long).
 
     Uses the Responses API in JSON mode with the schema embedded in the
     instructions — JSON validity is guaranteed by the API; schema adherence is
@@ -144,24 +172,34 @@ async def structured_output(
         "instructions": instructions,
         "input": f"{user_prompt}\n\nRespond with a single valid JSON object.",
         "max_output_tokens": max_tokens,
-        "reasoning": {"effort": _reasoning_effort(model)},
+        "reasoning": {"effort": reasoning_effort or _reasoning_effort(model)},
         "text": {"format": {"type": "json_object"}},
     }
+    if tools:
+        payload["tools"] = tools
 
     last_error: Optional[Exception] = None
     for attempt in range(max_retries + 1):
-        body = await _post(payload, max_retries=max_retries, timeout=_DEFAULT_TIMEOUT)
+        body = await _post(
+            payload, max_retries=max_retries, timeout=timeout or _DEFAULT_TIMEOUT
+        )
         _log_usage(body, model, tool_name)
         text = _extract_output_text(body)
         try:
             return json.loads(text)
         except (json.JSONDecodeError, TypeError) as e:
             last_error = e
-            logger.warning("structured_output non-JSON reply (attempt %d): %.200s", attempt + 1, text)
+            logger.warning(
+                "structured_output non-JSON reply (attempt %d): %.200s",
+                attempt + 1,
+                text,
+            )
             if attempt < max_retries:
                 await asyncio.sleep(1)
                 continue
-    raise RuntimeError(f"structured_output could not parse JSON after {max_retries + 1} attempts: {last_error}")
+    raise RuntimeError(
+        f"structured_output could not parse JSON after {max_retries + 1} attempts: {last_error}"
+    )
 
 
 async def generate_text(

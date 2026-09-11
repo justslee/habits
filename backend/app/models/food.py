@@ -269,6 +269,9 @@ class FoodSettings(Base, TimestampMixin):
     last_pantry_push: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     last_cook_push: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     last_discovery: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    discovery_prompt: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # owner's standing brief for the search
     total_tolerance: Mapped[float] = mapped_column(
         Float, default=3.0
     )  # $ drift allowed between approval and placement
