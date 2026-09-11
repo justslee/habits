@@ -1226,3 +1226,13 @@ def discover_queries(db: Session = Depends(get_db)):
         "queries": recipe_discovery.queries_for(db, user.id),
         "sources": recipe_discovery.SOURCE_PRIORITY,
     }
+
+
+@router.post("/cycles/{cycle_id}/refresh-travel", response_model=CycleOut)
+def refresh_cycle_travel(cycle_id: int, db: Session = Depends(get_db)):
+    """Pull travel days for this cycle from the calendar spans on file (re-lays an untouched plan)."""
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    food_scheduler.refresh_travel(db, user.id, cycle)
+    db.refresh(cycle)
+    return _cycle_out(cycle)

@@ -205,3 +205,35 @@ async def test_daily_tick_closes_finished_cycles_and_pushes(db_session, monkeypa
         out2 = await food_scheduler.daily_tick(db_session, force=True)
         assert out2.get("cook_push") == recipes[1]["title"]
         assert db_session.query(TravelSpan).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_travel_updates_an_open_cycle(db_session):
+    async with _client() as client:
+        await client.get("/api/v1/food/recipes")
+        cycle = (
+            await client.post(
+                "/api/v1/food/cycles", json={"start_date": TODAY.isoformat()}
+            )
+        ).json()
+        assert cycle["travel_days"] == []
+        feed = CalendarFeed(
+            user_id=1,
+            url="https://calendar.google.com/calendar/ical/x/private-abc/basic.ics",
+        )
+        db_session.add(feed)
+        db_session.commit()
+        await calendar_sync.sync_feed(db_session, feed, text=ICS, use_llm=False)
+        out = (
+            await client.post(f"/api/v1/food/cycles/{cycle['id']}/refresh-travel")
+        ).json()
+        assert out["travel_days"] == [
+            (TODAY + datetime.timedelta(days=d)).isoformat() for d in (5, 6, 7)
+        ]
+        assert out["eating_days"] == 14 - 3 - 2
+        # the daily tick does the same for open cycles
+        tick = await food_scheduler.daily_tick(db_session, force=True)
+        assert (
+            "travel_refreshed" not in tick
+            or cycle["id"] not in tick["travel_refreshed"]
+        ), "already current"
