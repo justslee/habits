@@ -8,6 +8,14 @@
 # The deploy clone (~/srv/habits) is disposable — never develop in it.
 set -uo pipefail
 
+# Run from a private copy: this script lives in the deploy clone and `git reset --hard`
+# below would rewrite it mid-run (bash reads scripts incrementally).
+if [ "${HABITS_DEPLOY_COPY:-}" != "1" ]; then
+  _copy="$(mktemp -t habits-deploy)"
+  cp "$0" "$_copy"
+  HABITS_DEPLOY_COPY=1 exec bash "$_copy" "$@"
+fi
+
 HABITS_HOME="${HABITS_HOME:-$HOME/Library/Application Support/Habits}"
 HABITS_SRV="${HABITS_SRV:-$HOME/srv/habits}"
 LOG_DIR="$HOME/Library/Logs/habits"
