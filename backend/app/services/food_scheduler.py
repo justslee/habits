@@ -40,6 +40,24 @@ async def _push(
         logger.info("push skipped: %s", e)
 
 
+def refresh_travel(db: Session, user_id: int, cycle: MealCycle) -> bool:
+    """Recompute a cycle's travel days from the calendar. Re-lays the plan when nothing has
+    been cooked yet. Returns True if the days changed."""
+    fresh = [
+        d.isoformat()
+        for d in calendar_sync.travel_days_between(
+            db, user_id, cycle.start_date, cycle.end_date
+        )
+    ]
+    if fresh == list(cycle.travel_days or []):
+        return False
+    cycle.travel_days = fresh
+    db.commit()
+    if cycle.status == "planned" and all(m.status == "planned" for m in cycle.meals):
+        fp.layout_plan(db, cycle)
+    return True
+
+
 def next_cycle_start(db: Session, user_id: int, today: datetime.date) -> datetime.date:
     last = (
         db.query(MealCycle)
@@ -91,6 +109,15 @@ async def daily_tick(
             did[f"feed:{feed.id}"] = await calendar_sync.sync_feed(db, feed)
         except Exception as e:  # noqa: BLE001
             did[f"feed:{feed.id}"] = f"error: {e}"
+
+    # 1b. keep open cycles' travel days in step with the calendar
+    for cycle in (
+        db.query(MealCycle)
+        .filter(MealCycle.user_id == user.id, MealCycle.status.in_(("deck", "planned")))
+        .all()
+    ):
+        if refresh_travel(db, user.id, cycle):
+            did.setdefault("travel_refreshed", []).append(cycle.id)
 
     # 2. close finished cycles
     for cycle in (
