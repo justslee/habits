@@ -1034,3 +1034,46 @@ export function getSpeakingSessions(limit = 20): Promise<SpeakingSessionData[]> 
   return request(`/api/v1/speaking/sessions?limit=${limit}`);
 }
 export function getSpeakingStats(): Promise<SpeakingStatsData> { return request('/api/v1/speaking/stats'); }
+
+// ---- Speaking: explain a concept to an audience, then read the evaluation ----
+export interface SpeakingEvaluation {
+  clarity_score: number; accuracy_score: number; structure_score: number;
+  conciseness_score: number; confidence_score: number; overall_score: number;
+  filler_words: Record<string, number>; filler_count: number;
+  specific_feedback: Array<{ quote: string; feedback: string; type: string }>;
+  pause_assessment: string; commentary: string;
+}
+export interface SpeakingSessionFull {
+  id: number; topic: string; audience: string; actual_seconds: number;
+  transcript: string; session_date: string; evaluation: SpeakingEvaluation | null;
+}
+export interface TopicSuggestion { topic: string; source: string; concept_id: number | null }
+
+export function getTopicSuggestions(): Promise<TopicSuggestion[]> {
+  return request('/api/v1/speaking/topics/suggest');
+}
+export function getSpeakingSession(id: number): Promise<SpeakingSessionFull> {
+  return request(`/api/v1/speaking/sessions/${id}`);
+}
+export function getSpeakingHistory(limit = 20): Promise<SpeakingSessionFull[]> {
+  return request(`/api/v1/speaking/sessions?limit=${limit}`);
+}
+
+/** Upload a recording for transcription and evaluation. Multipart, so it bypasses `request`. */
+export async function submitSpeakingSession(input: {
+  uri: string; topic: string; audience: string; targetSeconds: number; actualSeconds: number;
+}): Promise<SpeakingSessionFull> {
+  const form = new FormData();
+  form.append('audio', { uri: input.uri, type: 'audio/m4a', name: 'recording.m4a' } as never);
+  form.append('topic', input.topic);
+  form.append('audience', input.audience);
+  form.append('target_seconds', String(input.targetSeconds));
+  form.append('actual_seconds', String(input.actualSeconds));
+  const res = await fetch(`${API_URL}/api/v1/speaking/sessions`, {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: form,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}

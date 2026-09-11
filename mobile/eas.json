@@ -19,12 +19,18 @@
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://justins-macbook-pro-2.tail2c4851.ts.net"
+      }
     },
     "production": {
       "ios": {
         "buildConfiguration": "Release",
         "autoIncrement": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://justins-macbook-pro-2.tail2c4851.ts.net"
       }
     }
   },

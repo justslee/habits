@@ -12,7 +12,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import {
   CalendarFeedData, DashboardStats, FoodSettingsData,
-  getCalendarFeeds, getDashboardStats, getFoodSettings,
+  getCalendarFeeds, getDashboardStats, getFoodSettings, getTrainProgram,
 } from '../../api/client';
 import { API_URL, checkHealth, setRuntimeServer } from '../../api/client';
 import { loadServerSettings, saveServerSettings, normalizeServerUrl } from '../../services/settings';
@@ -36,6 +36,7 @@ export default function MeScreen({ navigation }: any) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [feeds, setFeeds] = useState<CalendarFeedData[]>([]);
   const [food, setFood] = useState<FoodSettingsData | null>(null);
+  const [server, setServer] = useState<'checking' | 'ok' | 'stale' | 'unreachable'>('checking');
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -43,6 +44,14 @@ export default function MeScreen({ navigation }: any) {
     if (s.status === 'fulfilled') setStats(s.value);
     if (f.status === 'fulfilled') setFeeds(f.value);
     if (fo.status === 'fulfilled') setFood(fo.value);
+
+    // A reachable server that 404s a current endpoint is an old deployment, not a network fault.
+    try {
+      await getTrainProgram();
+      setServer('ok');
+    } catch (err: any) {
+      setServer(/API 404/.test(String(err?.message ?? '')) ? 'stale' : 'unreachable');
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -117,7 +126,24 @@ export default function MeScreen({ navigation }: any) {
       />
       <GoalRow icon="chevron-forward" title="Appearance" subtitle={APPEARANCE_LABEL[appearance]} onPress={appearanceSheet} />
       <GoalRow icon="chevron-forward" title="Design" subtitle="Liquid, or the previous frontend" onPress={designSheet} />
-      <GoalRow icon="chevron-forward" title="Server" subtitle={API_URL.replace(/^https?:\/\//, '')} onPress={serverSheet} />
+      <GoalRow
+        icon="chevron-forward"
+        title="Server"
+        subtitle={
+          server === 'stale'
+            ? `${API_URL.replace(/^https?:\/\//, '')} · out of date, repoint this`
+            : server === 'unreachable'
+              ? `${API_URL.replace(/^https?:\/\//, '')} · not responding`
+              : API_URL.replace(/^https?:\/\//, '')
+        }
+        onPress={serverSheet}
+      />
+      {server === 'stale' ? (
+        <Notice icon="warning-outline">
+          This server answers, but it does not have Training, Food or the coach. It is an older
+          deployment. Open Server above and point the app at your Mac.
+        </Notice>
+      ) : null}
 
       <Notice icon="laptop-outline">
         Runs on your own Mac over Tailscale. Build {Constants.expoConfig?.version ?? '—'}
