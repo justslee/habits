@@ -1,5 +1,5 @@
 /**
- * API client for Mastery Tracker backend.
+ * API client for the Rituals backend.
  * API_URL / API_KEY resolution order:
  * 1. Settings saved on the device (Me → Server) — changeable without a rebuild
  * 2. Runtime /config.json (web only)

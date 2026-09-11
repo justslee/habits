@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Mastery Tracker",
+    "name": "Rituals",
     "slug": "mastery-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0E0E14"
+      "backgroundColor": "#11121a"
     },
     "ios": {
       "supportsTablet": true,
@@ -21,7 +21,8 @@
           "audio"
         ],
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "Habits uses the microphone so you can talk to your coach."
+        "NSMicrophoneUsageDescription": "Habits uses the microphone so you can talk to your coach.",
+        "CFBundleDisplayName": "Rituals"
       }
     },
     "plugins": [
@@ -42,11 +43,11 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "backgroundColor": "#0E0E14",
-      "themeColor": "#9B8AE8",
-      "name": "Mastery Tracker",
-      "shortName": "Mastery",
-      "description": "Daily mastery, fitness, and run tracking",
+      "backgroundColor": "#11121a",
+      "themeColor": "#bdafe1",
+      "name": "Rituals",
+      "shortName": "Rituals",
+      "description": "Daily rituals, training, food and the long view \u2014 on your own Mac.",
       "display": "standalone",
       "orientation": "portrait"
     },
