@@ -37,12 +37,16 @@ class WorkoutSession(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="planned")
 
     # Soft delete (D-019)
-    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     # Relationships
     exercises: Mapped[list["ExerciseLog"]] = relationship(
-        "ExerciseLog", back_populates="session", cascade="all, delete-orphan",
-        order_by="ExerciseLog.exercise_order, ExerciseLog.set_number"
+        "ExerciseLog",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ExerciseLog.exercise_order, ExerciseLog.set_number",
     )
 
     def __repr__(self) -> str:
@@ -73,10 +77,14 @@ class ExerciseLog(Base, TimestampMixin):
     distance_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Soft delete (D-019) — cascaded from session
-    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     # Relationships
-    session: Mapped["WorkoutSession"] = relationship("WorkoutSession", back_populates="exercises")
+    session: Mapped["WorkoutSession"] = relationship(
+        "WorkoutSession", back_populates="exercises"
+    )
 
     def __repr__(self) -> str:
         return f"<ExerciseLog({self.exercise_name} set {self.set_number}: {self.weight}x{self.reps})>"
@@ -96,10 +104,14 @@ class ExerciseProfile(Base, TimestampMixin):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     exercise_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    muscle_group: Mapped[str] = mapped_column(String(50), nullable=False)  # push, pull, legs, cardio
+    muscle_group: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # push, pull, legs, cardio
 
     # Current programming
-    current_working_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    current_working_weight: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
     current_rep_target: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     current_set_target: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
@@ -110,7 +122,9 @@ class ExerciseProfile(Base, TimestampMixin):
     progression_status: Mapped[str] = mapped_column(
         String(20), default="progressing"
     )  # progressing, maintaining, stalled, deloading, regressing
-    last_progression_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
+    last_progression_date: Mapped[Optional[datetime.date]] = mapped_column(
+        Date, nullable=True
+    )
     stall_count: Mapped[int] = mapped_column(Integer, default=0)
     sessions_at_current_weight: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -123,3 +137,38 @@ class ExerciseProfile(Base, TimestampMixin):
     def __repr__(self) -> str:
         return f"<ExerciseProfile({self.exercise_name}: {self.current_working_weight}lbs, {self.progression_status})>"
 
+
+class GolfEvent(Base, TimestampMixin):
+    """Tournaments and important rounds. Tournament weeks switch the plan to the taper template."""
+
+    __tablename__ = "golf_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    event_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[Optional[datetime.date]] = mapped_column(
+        Date, nullable=True
+    )  # multi-day events
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(
+        String(20), default="tournament"
+    )  # tournament | round | practice
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class TrainingSettings(Base, TimestampMixin):
+    """Single-row knobs for the golf program."""
+
+    __tablename__ = "training_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, unique=True
+    )
+    first_event_date: Mapped[Optional[datetime.date]] = mapped_column(
+        Date, nullable=True
+    )
+    five_sessions: Mapped[bool] = mapped_column(default=True)
+    extra_lighter_weeks: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # comma-separated week-start dates

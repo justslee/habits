@@ -36,6 +36,7 @@ import CoachSheet from '../components/CoachSheet';
 import Topbar from '../components/Topbar';
 import WorkoutStartCard from '../components/WorkoutStartCard';
 import SessionListCard from '../components/SessionListCard';
+import ProgramToday from '../components/ProgramToday';
 
 type Segment = 'today' | 'run' | 'lift' | 'plan';
 
@@ -551,11 +552,7 @@ export default function TrainHomeScreen({ navigation }: any) {
         {/* Topbar with brand mark */}
         <Topbar
           title="Train"
-          caption={
-            activePlan
-              ? `WK ${activePlan.current_week ?? '?'} · ${(activePlan.goal_type || 'BLOCK').toUpperCase()}`
-              : undefined
-          }
+          caption="GOLF PERFORMANCE · SEP 2026 → SPRING 2027"
         />
 
         {/* Segmented switch */}
@@ -569,65 +566,7 @@ export default function TrainHomeScreen({ navigation }: any) {
 
         {/* Segment Content — each segment provides its own CoachHero */}
         {segment === 'today' && (
-          <>
-            <View style={{ paddingHorizontal: spacing.md }}>
-              <CoachHero
-                pill={todayWorkout && todayRun?.planned_run ? 'TODAY · DOUBLE DAY' : 'TODAY'}
-                ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
-                line={
-                  todayWorkout && todayRun?.planned_run
-                    ? <>Run this morning, {(DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type).toLowerCase()} this evening. <Text style={{ color: colors.accent }}>Stack the easy work first</Text>.</>
-                    : todayWorkout
-                      ? <>{DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day. Top set is the lift that matters — <Text style={{ color: colors.accent }}>everything else is volume</Text>.</>
-                      : todayRun?.planned_run
-                        ? <>{todayRun.planned_run.run_type === 'easy' ? 'Aerobic deposit' : 'Run'} today. {todayRun.planned_run.description || 'Stay easy.'}</>
-                        : <>Mobility, walk, sleep — those are the work today.</>
-                }
-                onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
-              />
-            </View>
-            {todayRun?.planned_run && (
-              <WorkoutStartCard
-                kind="run"
-                time={(todayRun.planned_run as any).planned_time || 'TODAY'}
-                title={`${todayRun.planned_run.run_type === 'easy' ? 'Easy run' : todayRun.planned_run.run_type === 'tempo' ? 'Tempo run' : 'Run'}${todayRun.planned_run.run_type ? ` · ${todayRun.planned_run.run_type.charAt(0).toUpperCase() + todayRun.planned_run.run_type.slice(1)}` : ''}`}
-                metrics={[
-                  { v: String(todayRun.planned_run.target_distance_miles ?? '—'), u: 'mi' },
-                  { v: todayRun.planned_run.target_pace_seconds ? formatPace(todayRun.planned_run.target_pace_seconds) : '—', u: '/mi' },
-                  { v: String(todayRun.planned_run.target_duration_minutes ?? '—'), u: 'min' },
-                ]}
-                note={todayRun.planned_run.description || undefined}
-                onStart={() => { haptic.medium(); navigation?.navigate?.('LogRun'); }}
-                ctaLabel="＋ LOG RUN"
-              />
-            )}
-            {todayWorkout && (
-              <WorkoutStartCard
-                kind="lift"
-                time={todayWorkout.status === 'completed' ? 'DONE' : 'TODAY'}
-                title={`${DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day`}
-                metrics={[
-                  { v: String(todayWorkout.exercises?.length ?? 0), u: 'lifts' },
-                  { v: String(todayWorkout.exercises?.reduce((acc, e) => acc + 1, 0) ?? 0), u: 'sets' },
-                  { v: '~45', u: 'min' },
-                ]}
-                note={todayWorkout.coach_notes || undefined}
-                onStart={() =>
-                  todayWorkout.status === 'completed'
-                    ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
-                    : navigation?.navigate?.('TodayWorkout')
-                }
-                ctaLabel={todayWorkout.status === 'completed' ? '▶ VIEW WORKOUT' : '▶ START LIFT'}
-              />
-            )}
-            {!todayWorkout && !todayRun?.planned_run && (
-              <View style={{ marginHorizontal: spacing.md, marginVertical: spacing.lg, alignItems: 'center' }}>
-                <Text style={{ ...typography.body, color: colors.textTertiary }}>
-                  No planned sessions today.
-                </Text>
-              </View>
-            )}
-          </>
+          <ProgramToday navigation={navigation} onAsk={() => { haptic.medium(); setCoachOpen(true); }} />
         )}
         {segment === 'lift' && renderLiftSegment()}
         {segment === 'run' && renderRunSegment()}

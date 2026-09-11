@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet,
-  Platform, KeyboardAvoidingView, RefreshControl,
-} from 'react-native';
+  Platform, KeyboardAvoidingView, RefreshControl, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getTodayWorkout, chatWithCoach, WorkoutSession } from '../api/client';
+import { getTodayWorkout, chatWithCoach, completeTrainSession, WorkoutSession } from '../api/client';
 import { colors, spacing, typography, radius, fonts, cardStyle } from '../theme';
 import ScreenBackground from '../components/ScreenBackground';
 import { Skeleton } from '../components/Skeleton';
@@ -136,8 +135,11 @@ export default function WorkoutScreen() {
             )}
             {plan.exercises.map((ex: any, i: number) => (
               <View key={i} style={[s.exerciseRow, i === plan.exercises.length - 1 && { borderBottomWidth: 0 }]}>
-                <Text style={s.exerciseName}>{ex.name}</Text>
-                <Text style={s.exerciseDetail}>{ex.sets}x{ex.reps}{ex.weight ? ` · ${ex.weight}lb` : ''}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.exerciseName}>{ex.name}</Text>
+                  {(ex.block || ex.rest || ex.notes) ? <Text style={{ ...typography.micro, color: colors.textTertiary, marginTop: 2 }} numberOfLines={2}>{[ex.block, ex.rest ? `rest ${ex.rest}` : null, ex.superset ? `with ${ex.superset}` : null, ex.notes].filter(Boolean).join(' · ')}</Text> : null}
+                </View>
+                <Text style={s.exerciseDetail}>{ex.sets}×{ex.reps}{ex.weight ? ` · ${ex.weight}lb` : ''}</Text>
               </View>
             ))}
             {plan.estimated_duration_minutes > 0 && (
@@ -362,6 +364,31 @@ export default function WorkoutScreen() {
       </ScrollView>
 
       {/* Completion banner or Input — floats above the tab bar */}
+      {!sessionComplete && session && (
+        <TouchableOpacity
+          style={{ position: 'absolute', right: spacing.md, bottom: Math.max(insets.bottom, 8) + 170, backgroundColor: colors.accent, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 }}
+          onPress={() => {
+            haptic.medium();
+            const finish = (rpe?: number) => {
+              const done = async (minutes?: number) => {
+                try {
+                  const r = await completeTrainSession(session.id, { overall_rpe: rpe, minutes });
+                  setSessionComplete(true);
+                  const lines = r.progression.map(pr => `${pr.exercise}: ${pr.note}`);
+                  if (lines.length) Alert.alert('Next time', lines.join('\n'));
+                  fetchWorkout();
+                } catch (err) { console.warn('complete', err); }
+              };
+              if (Alert.prompt) Alert.prompt('Minutes', 'Total session time (the cap is 70).', (m) => done(m ? Number(m) : undefined), 'plain-text', '', 'number-pad');
+              else done(undefined);
+            };
+            if (Alert.prompt) Alert.prompt('How hard?', 'Session RPE 1–10 (strength sets should have felt like 7–8).', (v) => finish(v ? Number(v) : undefined), 'plain-text', '', 'number-pad');
+            else finish(undefined);
+          }}
+        >
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.bg }}>Finish session</Text>
+        </TouchableOpacity>
+      )}
       {sessionComplete ? (
         <View style={[s.completeBanner, { paddingBottom: Math.max(insets.bottom, 0) + 100 }]}>
           <Ionicons name="checkmark-circle" size={20} color={colors.success} />
