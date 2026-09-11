@@ -990,6 +990,11 @@ export function patchTrainSettings(p: { first_event_date?: string; five_sessions
 // ---- Coach (program-aware text + OpenAI Realtime voice) ----
 export interface RealtimeSession { client_secret: string; expires_at: number | null; model: string; voice: string; calls_url: string; context_chars: number; transcribe_model: string }
 export function getRealtimeSession(): Promise<RealtimeSession> { return request('/api/v1/coach/realtime/session', { method: 'POST' }); }
+export interface LiveSession { sdp: string; session_id: string | null; model: string; backend_model: string; context_chars: number }
+/** Hand GPT-Live our WebRTC offer and get its answer. The Mac holds the key; we never see it. */
+export function createLiveSession(sdp: string): Promise<LiveSession> {
+  return request('/api/v1/coach/live/session', { method: 'POST', body: JSON.stringify({ sdp }), timeoutMs: 45_000 });
+}
 export function getCoachContext(): Promise<{ context: string }> { return request('/api/v1/coach/context'); }
 export function coachChat(message: string, history: { from: 'me' | 'coach'; text: string }[] = []): Promise<{ reply: string; model: string; changes: string[]; adjustment_id: number | null }> {
   return request('/api/v1/coach/chat', { method: 'POST', body: JSON.stringify({ message, history }) });

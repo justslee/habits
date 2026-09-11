@@ -20,6 +20,24 @@ async def test_coach_context_and_token_without_key(db_session, monkeypatch):
         )
         r = await client.post("/api/v1/coach/realtime/session")
         assert r.status_code == 503
+        # GPT-Live has no ephemeral secret, so the Mac exchanges the handshake itself and
+        # must refuse just as firmly when it has no key to do it with.
+        live = await client.post("/api/v1/coach/live/session", json={"sdp": "v=0"})
+        assert live.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_live_session_requires_an_offer(db_session, monkeypatch):
+    """An empty offer is rejected here rather than spending a round trip to OpenAI."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/api/v1/coach/live/session", json={"sdp": "   "})
+        assert r.status_code == 400
+        assert (
+            await client.post("/api/v1/coach/live/session", json={})
+        ).status_code == 422
 
 
 @pytest.mark.asyncio

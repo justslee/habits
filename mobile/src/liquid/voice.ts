@@ -1,26 +1,34 @@
 /**
- * Talking to the coach out loud, over OpenAI's Realtime API.
+ * Talking to the coach out loud, on OpenAI's GPT-Live.
  *
- * The Mac mints a short-lived client secret with today's programme already in it, then audio
- * goes straight between the phone and OpenAI over WebRTC. Nothing spoken passes through our
- * server, and the secret is single-use and lives about a minute.
+ * GPT-Live is full duplex: it can listen while it speaks, so it takes an interruption without
+ * having to be stopped first. It holds the conversation and hands the thinking and the tools to
+ * a backend model, which is where `adjust_training` runs — against the same endpoint the typed
+ * chat uses, so changing a day out loud changes it everywhere.
  *
- * Both halves are transcribed so the conversation reads the same whether it was typed or
- * spoken, and the coach's `adjust_training` tool runs against the same endpoint the text chat
- * uses, so changing a day by voice changes it everywhere.
+ * Unlike the Realtime API it mints no ephemeral secret: the WebRTC offer is part of creating the
+ * session and must carry the project key. So the phone sends its offer to the Mac, the Mac
+ * creates the session and returns only the answer. The key never reaches the device, and the
+ * audio path is still negotiated straight to OpenAI — only the handshake goes through us.
+ *
+ * Transcripts arrive as fragments with no turn-completed event, so turns are grouped here: a
+ * speaker's fragments are joined until they fall quiet or the other speaker starts.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { adjustTraining, getRealtimeSession } from '../api/client';
+import { adjustTraining, createLiveSession } from '../api/client';
 import { rtc } from '../lib/rtc';
 
 export type VoiceState = 'idle' | 'connecting' | 'live' | 'error';
 
+/** How long a speaker may pause before their fragments are treated as a finished turn. */
+const TURN_GAP_MS = 1100;
+
 export interface VoiceHandlers {
-  /** A finished sentence from you. */
+  /** A finished run of speech from you. */
   onYou: (text: string) => void;
-  /** A finished sentence from the coach. */
+  /** A finished run of speech from the coach. */
   onCoach: (text: string) => void;
   /** The coach changed the plan. The strings are what moved. */
   onChanged?: (changes: string[]) => void;
@@ -28,31 +36,79 @@ export interface VoiceHandlers {
   onError?: (message: string) => void;
 }
 
+type Who = 'you' | 'coach';
+
 export function useVoiceCoach(handlers: VoiceHandlers) {
   const [state, setState] = useState<VoiceState>('idle');
   const [speaking, setSpeaking] = useState(false);
   const pc = useRef<any>(null);
   const mic = useRef<any>(null);
   const dc = useRef<any>(null);
-  const partial = useRef('');
-  // Handlers change identity every render; the data channel closure must not go stale.
   const h = useRef(handlers);
   h.current = handlers;
 
+  // Fragments waiting to become a turn, and the timer that closes them.
+  const buffer = useRef<{ who: Who; text: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Function calls seen on this response, so a result is submitted exactly once.
+  const calls = useRef(new Map<string, { name: string; args: string }>());
+
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    const held = buffer.current;
+    buffer.current = null;
+    if (!held?.text.trim()) return;
+    if (held.who === 'you') h.current.onYou(held.text.trim());
+    else h.current.onCoach(held.text.trim());
+  }, []);
+
+  /** Add a fragment, closing the previous speaker's turn if the floor changed. */
+  const fragment = useCallback((who: Who, text: string) => {
+    if (!text) return;
+    if (buffer.current && buffer.current.who !== who) flush();
+    buffer.current = { who, text: (buffer.current?.text ?? '') + text };
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, TURN_GAP_MS);
+  }, [flush]);
+
   const stop = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    flush();
     try { dc.current?.close?.(); } catch {}
     try { pc.current?.close?.(); } catch {}
     try { mic.current?.getTracks?.().forEach((t: any) => t.stop()); } catch {}
     dc.current = null;
     pc.current = null;
     mic.current = null;
-    partial.current = '';
+    calls.current.clear();
     setSpeaking(false);
     setState('idle');
-  }, []);
+  }, [flush]);
 
   // Hanging up when the sheet closes matters: the microphone stays open otherwise.
   useEffect(() => () => { stop(); }, [stop]);
+
+  /** Run a tool the backend asked for, hand the result back, and let the coach continue. */
+  const runCall = useCallback(async (channel: any, callId: string, name: string, args: string) => {
+    if (name !== 'adjust_training') return;
+    let output: string;
+    try {
+      const r = await adjustTraining(JSON.parse(args || '{}'));
+      output = JSON.stringify({ ok: true, changes: r.changes, note: r.note });
+      h.current.onChanged?.(r.changes);
+    } catch (err: any) {
+      const why = String(err?.message ?? err).slice(0, 200);
+      output = JSON.stringify({ ok: false, error: why });
+      h.current.onError?.(`That change did not save. ${why}`);
+    }
+    try {
+      channel.send(JSON.stringify({
+        type: 'response.item.create',
+        item: { type: 'function_call_output', call_id: callId, output },
+      }));
+      channel.send(JSON.stringify({ type: 'response.create' }));
+    } catch {}
+  }, []);
 
   const start = useCallback(async () => {
     setState('connecting');
@@ -61,7 +117,6 @@ export function useVoiceCoach(handlers: VoiceHandlers) {
       if (!RTCPeerConnection || !mediaDevices) throw new Error('Voice needs a build with WebRTC in it.');
       registerGlobals?.();
 
-      const session = await getRealtimeSession();
       const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pc.current = peer;
 
@@ -79,6 +134,7 @@ export function useVoiceCoach(handlers: VoiceHandlers) {
         }
       };
 
+      // The channel and its listeners must exist before the offer is made.
       const channel = peer.createDataChannel('oai-events');
       dc.current = channel;
 
@@ -86,47 +142,50 @@ export function useVoiceCoach(handlers: VoiceHandlers) {
         let ev: any;
         try { ev = JSON.parse(m.data); } catch { return; }
 
+        // Backend work arrives wrapped; the Responses event is nested under `event`.
+        const inner = ev?.event;
+        if (inner?.type === 'response.output_item.done' && inner.item?.type === 'function_call') {
+          const { call_id: id, name, arguments: args } = inner.item;
+          if (id && !calls.current.has(id)) {
+            calls.current.set(id, { name, args });
+            runCall(channel, id, name, args);
+          }
+          return;
+        }
+
         switch (ev.type) {
-          case 'response.output_audio_transcript.delta':
-          case 'response.audio_transcript.delta':
-            partial.current += ev.delta || '';
+          case 'session.started':
+            setState('live');
+            // GPT-Live waits to be spoken to. Ask it to open, so pressing the microphone is
+            // answered by a voice rather than by silence.
+            try {
+              channel.send(JSON.stringify({
+                type: 'session.instructions.append',
+                delegation_id: null,
+                content:
+                  'Greet the athlete immediately in English, without waiting for them to speak. ' +
+                  'One short sentence naming what today holds, then stop and listen.',
+              }));
+            } catch {}
+            break;
+
+          case 'session.input_transcript.delta':
+            fragment('you', ev.delta ?? '');
+            break;
+
+          case 'session.output_transcript.delta':
+            fragment('coach', ev.delta ?? '');
             setSpeaking(true);
             break;
 
-          case 'response.output_audio_transcript.done':
-          case 'response.audio_transcript.done':
-            if (partial.current.trim()) h.current.onCoach(partial.current.trim());
-            partial.current = '';
+          case 'session.output_audio.done':
+          case 'response.completed':
             setSpeaking(false);
             break;
 
-          case 'conversation.item.input_audio_transcription.completed':
-            if (ev.transcript?.trim()) h.current.onYou(ev.transcript.trim());
-            break;
-
-          case 'response.function_call_arguments.done':
-            if (ev.name !== 'adjust_training') break;
-            // The coach decided to move something. Apply it here, hand the result back, and
-            // let the coach say out loud what happened.
-            (async () => {
-              let output: string;
-              try {
-                const r = await adjustTraining(JSON.parse(ev.arguments || '{}'));
-                output = JSON.stringify({ ok: true, changes: r.changes, note: r.note });
-                h.current.onChanged?.(r.changes);
-              } catch (err: any) {
-                const why = String(err?.message ?? err).slice(0, 200);
-                output = JSON.stringify({ ok: false, error: why });
-                h.current.onError?.(`That change did not save. ${why}`);
-              }
-              try {
-                channel.send(JSON.stringify({
-                  type: 'conversation.item.create',
-                  item: { type: 'function_call_output', call_id: ev.call_id, output },
-                }));
-                channel.send(JSON.stringify({ type: 'response.create' }));
-              } catch {}
-            })();
+          case 'session.closed':
+            flush();
+            setState('idle');
             break;
 
           case 'error':
@@ -135,32 +194,18 @@ export function useVoiceCoach(handlers: VoiceHandlers) {
         }
       };
 
-      channel.onopen = () => {
-        // The server chooses the transcription model, so moving to the next one needs no build.
-        // An older server does not name one; fall back rather than send an undefined model.
-        const transcribe = session.transcribe_model || 'gpt-live-transcribe';
-        channel.send(JSON.stringify({
-          type: 'session.update',
-          session: { audio: { input: { transcription: { model: transcribe } } } },
-        }));
-        setState('live');
-      };
-
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      const resp = await fetch(session.calls_url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.client_secret}`, 'Content-Type': 'application/sdp' },
-        body: offer.sdp,
-      });
-      if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${(await resp.text()).slice(0, 160)}`);
-      await peer.setRemoteDescription({ type: 'answer', sdp: await resp.text() });
+      // The Mac creates the session with our key and hands back only the answer.
+      const session = await createLiveSession(offer.sdp);
+      await peer.setRemoteDescription({ type: 'answer', sdp: session.sdp });
+      // The HTTP request started the session; never send session.start on the channel.
     } catch (err: any) {
       h.current.onError?.(String(err?.message ?? err).replace(/^API \d+: /, '').slice(0, 160));
       setState('error');
       stop();
     }
-  }, [stop]);
+  }, [stop, fragment, flush, runCall]);
 
   return { state, speaking, start, stop };
 }

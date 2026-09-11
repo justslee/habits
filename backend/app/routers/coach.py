@@ -43,6 +43,15 @@ TRANSCRIBE_MODEL = os.getenv("HABITS_TRANSCRIBE_MODEL", "gpt-live-transcribe")
 CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
 CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 
+# GPT-Live. Unlike Realtime it mints no ephemeral secret: the SDP offer is part of session
+# creation and must carry the project key, so the Mac exchanges the handshake on the phone's
+# behalf. Only signalling passes through here — the audio path is negotiated straight to
+# OpenAI, exactly as before.
+LIVE_URL = "https://api.openai.com/v1/live/sessions"
+LIVE_MODEL = os.getenv("HABITS_LIVE_MODEL", "gpt-live-1")
+# GPT-Live holds the conversation and hands thinking and tools to a backend model.
+LIVE_BACKEND_MODEL = os.getenv("HABITS_LIVE_BACKEND_MODEL", "gpt-5.5")
+
 
 def build_context(db: Session) -> str:
     user = _user(db)
@@ -205,6 +214,84 @@ async def realtime_session(db: Session = Depends(get_db)):
         calls_url=CALLS_URL,
         context_chars=len(context),
         transcribe_model=TRANSCRIBE_MODEL,
+    )
+
+
+class LiveIn(BaseModel):
+    sdp: str
+
+
+class LiveOut(BaseModel):
+    sdp: str
+    session_id: str | None = None
+    model: str
+    backend_model: str
+    context_chars: int
+
+
+@router.post("/live/session", response_model=LiveOut)
+async def live_session(payload: LiveIn, db: Session = Depends(get_db)):
+    """Exchange the phone's WebRTC offer for GPT-Live's answer, with the programme as context.
+
+    The phone never sees the API key. It sends its offer here, we create the session, and it
+    gets back only the answer SDP.
+    """
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(
+            status_code=503, detail="OPENAI_API_KEY is not configured on the Mac"
+        )
+    if not payload.sdp.strip():
+        raise HTTPException(status_code=400, detail="An SDP offer is required")
+
+    context = build_context(db)
+    body = {
+        "session": {
+            "model": LIVE_MODEL,
+            "instructions": COACH_STYLE + "\n\nCURRENT CONTEXT:\n" + context,
+            "delegation": {
+                "type": "responses",
+                "responses": {
+                    "model": LIVE_BACKEND_MODEL,
+                    "instructions": (
+                        "You are the same coach, doing the thinking behind the conversation. "
+                        "Answer for speech: short, concrete, no lists. When the athlete is changing "
+                        "a day, call adjust_training so the week re-plans around it."
+                    ),
+                    "tools": [ADJUST_TOOL],
+                    "tool_choice": "auto",
+                },
+            },
+        },
+        "transport": {"type": "webrtc", "sdp": payload.sdp},
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(
+            LIVE_URL,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+    if r.status_code >= 400:
+        raise HTTPException(
+            status_code=502, detail=f"OpenAI {r.status_code}: {r.text[:300]}"
+        )
+    out = r.json()
+    answer = (out.get("transport") or {}).get("sdp")
+    if not answer:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No SDP answer in the response: {json.dumps(out)[:200]}",
+        )
+    return LiveOut(
+        sdp=answer,
+        session_id=(out.get("session") or {}).get("id"),
+        model=LIVE_MODEL,
+        backend_model=LIVE_BACKEND_MODEL,
+        context_chars=len(context),
     )
 
 
