@@ -24,7 +24,7 @@ async def test_root():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.get("/")
+        response = await client.get("/api")
     
     assert response.status_code == 200
     data = response.json()

@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, RefreshControl } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, radius, spacing, typography } from '../../theme';
 import {
@@ -49,14 +49,20 @@ export default function FoodHomeScreen({ navigation }: any) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => navigation?.addListener?.('focus', load), [navigation, load]);
 
+  const [starting, setStarting] = useState(false);
   const startCycle = useCallback(async () => {
     haptic.medium();
+    setStarting(true);
     try {
       const c = await createCycle({ eat_out_days: 2 });
       setCycle(c);
       navigation.navigate('FoodPantry', { cycleId: c.id });
-    } catch (err) {
-      console.warn('start cycle error:', err);
+    } catch (err: any) {
+      haptic.error();
+      const msg = String(err?.message || err).replace(/^API \d+: /, '').replace(/^\{"detail":"|"\}$/g, '');
+      Alert.alert('Could not start the cycle', msg.includes('Network') || msg.includes('Unreachable') || msg.includes('abort') ? 'The Mac is unreachable. Turn on Tailscale and try again.' : msg);
+    } finally {
+      setStarting(false);
     }
   }, [navigation]);
 
@@ -135,8 +141,8 @@ export default function FoodHomeScreen({ navigation }: any) {
           <Text style={s.help}>Moves a little with every swipe and every "cooked it" tap. Never flips on one signal.</Text>
         </View>
 
-        <TouchableOpacity style={s.btn} onPress={cta.onPress} activeOpacity={0.9}>
-          <Text style={s.btnText}>{cta.label}</Text>
+        <TouchableOpacity style={[s.btn, starting && { opacity: 0.6 }]} onPress={cta.onPress} disabled={starting} activeOpacity={0.9}>
+          <Text style={s.btnText}>{starting ? 'Starting…' : cta.label}</Text>
         </TouchableOpacity>
         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
           <TouchableOpacity style={s.ghost} onPress={() => navigation.navigate('FoodRecipes')}><Text style={s.ghostText}>Recipes</Text></TouchableOpacity>

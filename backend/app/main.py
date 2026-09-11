@@ -94,14 +94,15 @@ app.add_middleware(
 # --- API key auth — fail-closed ---
 _api_key = os.getenv("API_KEY", "")
 
-_PUBLIC_PATHS = {"/", "/health", "/api/config-status"}
+_PUBLIC_PATHS = {"/", "/api", "/health", "/api/config-status"}
 
 
 _testing = os.getenv("TESTING", "") == "1"
 
 
 def _is_public_path(path: str) -> bool:
-    return path in _PUBLIC_PATHS
+    # Everything outside /api is the web app (static files) or a health probe; data lives under /api/v1.
+    return path in _PUBLIC_PATHS or not path.startswith("/api/")
 
 
 @app.middleware("http")
@@ -214,11 +215,21 @@ async def config_status():
     }
 
 
-@app.get("/")
+@app.get("/api")
 async def root():
-    """Root endpoint."""
+    """API root."""
     return {
         "app": "Mastery Tracker API",
         "version": "0.1.0",
         "docs": "/docs",
     }
+
+
+# --- Web app (Expo web export) served by the same process, so the app works in a browser on
+# any device on the tailnet. Built by ops/mac/build-web.sh into HABITS_WEB_DIR. Mounted last so
+# API routes win; html=True serves index.html for unknown paths (client-side routing).
+_web_dir = os.getenv("HABITS_WEB_DIR", str(_Path.home() / "Library" / "Application Support" / "Habits" / "web"))
+if os.path.isdir(_web_dir) and os.path.isfile(os.path.join(_web_dir, "index.html")):
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=_web_dir, html=True), name="web")
