@@ -38,6 +38,7 @@ export function getApiUrl(): string {
 const _configPromise: Promise<void> = (async () => {
   if (Platform.OS === 'web') {
     try {
+      if (typeof window !== 'undefined' && window.location?.origin && !process.env.EXPO_PUBLIC_API_URL) API_URL = window.location.origin;
       const res = await fetch('/config.json', { cache: 'no-store' });
       if (res.ok) {
         const cfg = await res.json();

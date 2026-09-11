@@ -60,6 +60,16 @@ if ! .venv/bin/alembic upgrade head >>"$LOG_DIR/deploy.log" 2>&1; then
   git reset -q --hard "$OLD"; restart_api; exit 1
 fi
 
+# Web app: rebuild when mobile/ changed (or no build exists yet), before restarting so the
+# new bundle is served by the new process.
+if [ ! -d "$HABITS_HOME/web" ] || ! git -C "$HABITS_SRV" diff --quiet "$OLD" "$NEW" -- mobile/ ; then
+  if bash "$HABITS_SRV/backend/ops/mac/build-web.sh" >>"$LOG_DIR/deploy.log" 2>&1; then
+    log "web app rebuilt"
+  else
+    notify "web build failed at ${NEW:0:7} (API still deploys; see web-build.log)"
+  fi
+fi
+
 restart_api
 if wait_healthy; then
   log "deployed ${NEW:0:7} OK"

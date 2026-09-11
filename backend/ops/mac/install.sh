@@ -54,6 +54,9 @@ export HABITS_SECRETS_DISABLED=1
 .venv/bin/alembic upgrade head
 echo "    $DATABASE_URL"
 
+echo "==> 4b. web app"
+bash "$HERE/build-web.sh" || echo "    web build failed (see ~/Library/Logs/habits/web-build.log); continuing"
+
 echo "==> 5. launchd agents"
 chmod +x "$HERE"/*.sh
 for tmpl in "$HERE"/plists/*.plist; do
