@@ -963,7 +963,16 @@ async def discover(
     fetch=None,
     normaliser=None,
 ) -> dict:
-    """Run one discovery pass. Returns {added: [...], skipped: n, checked: n}."""
+    """Run one discovery pass. Returns {added: [...], skipped: n, checked: n, log: [...]}.
+    Default mode asks the model to search the web itself (FOOD_DISCOVERY=llm); the crawl
+    mode (fetch + extract, optional browser) is the fallback and is used when `urls` is given."""
+    if urls is None and fetch is None and discovery_mode() == "llm":
+        try:
+            return await discover_with_llm_search(db, user_id, limit=limit)
+        except Exception as e:  # noqa: BLE001 — fall back to crawling
+            logger.warning(
+                "LLM web search discovery failed (%s); falling back to crawl", e
+            )
 
     normaliser = normaliser or normalise
     session: BrowserSession | None = None
@@ -1074,7 +1083,13 @@ async def discover(
                 log.append({"url": url, "outcome": "added", "title": recipe.title})
             else:
                 log.append({"url": url, "outcome": "duplicate", "title": found.title})
-        return {"added": added, "skipped": skipped, "checked": checked, "log": log}
+        return {
+            "added": added,
+            "skipped": skipped,
+            "checked": checked,
+            "log": log,
+            "mode": "crawl",
+        }
     finally:
         if session is not None:
             await session.aclose()
@@ -1082,3 +1097,235 @@ async def discover(
 
 def _needs_browser(url: str) -> bool:
     return "maangchi.com" in url
+
+
+# ---------------------------------------------------------------------------
+# 5. LLM web search (default path): the model browses and returns normalised recipes
+# ---------------------------------------------------------------------------
+
+DEFAULT_DISCOVERY_PROMPT = (
+    "I cook rarely and meal-prep: dishes that batch for 2–4 days and reheat well in an oven or pan "
+    "(microwave is a last resort). Few ingredients, nothing exotic bought for one dish. High protein "
+    "for muscle. I love Korean food — Maangchi is my go-to — and Japanese food. Things I already make: "
+    "sundubu jjigae, dak galbi, hot pot udon, dak dori tang, galbi tang. Variety, but don't get too creative."
+)
+
+SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "recipes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "source_url": {
+                        "type": "string",
+                        "description": "the exact recipe page you read",
+                    },
+                    "source_site": {
+                        "type": "string",
+                        "description": "e.g. maangchi, justonecookbook, seriouseats",
+                    },
+                    "rating": {
+                        "type": "number",
+                        "description": "the page's own rating if shown, else null",
+                    },
+                    "review_count": {"type": "integer"},
+                    "cuisine": {"type": "string"},
+                    "protein_source": {
+                        "type": "string",
+                        "description": "chicken|beef|pork|fish|tofu|egg|other",
+                    },
+                    "prep_minutes": {"type": "integer"},
+                    "cook_minutes": {"type": "integer"},
+                    "servings": {"type": "integer"},
+                    "protein_g_per_serving": {"type": "number"},
+                    "prep_days": {
+                        "type": "integer",
+                        "description": "days a batch keeps well in the fridge",
+                    },
+                    "reheat": {
+                        "type": "string",
+                        "description": "oven|pan|cold|microwave",
+                    },
+                    "batch_ok": {"type": "boolean"},
+                    "why": {
+                        "type": "string",
+                        "description": "one line: why this fits the brief",
+                    },
+                    "steps": {"type": "array", "items": {"type": "string"}},
+                    "ingredients": NORMALISE_SCHEMA["properties"]["ingredients"],
+                },
+                "required": [
+                    "title",
+                    "source_url",
+                    "source_site",
+                    "cuisine",
+                    "protein_source",
+                    "servings",
+                    "prep_days",
+                    "reheat",
+                    "ingredients",
+                ],
+            },
+        }
+    },
+    "required": ["recipes"],
+}
+
+
+def _found_from_llm(r: dict) -> Found:
+    return Found(
+        url=str(r.get("source_url") or "").strip(),
+        title=str(r.get("title") or "").strip()[:160],
+        rating=float(r["rating"])
+        if isinstance(r.get("rating"), (int, float))
+        else None,
+        review_count=int(r["review_count"])
+        if isinstance(r.get("review_count"), int)
+        else None,
+        ingredients_raw=[str(i.get("name", "")) for i in r.get("ingredients", [])],
+        steps=[str(x) for x in (r.get("steps") or [])][:30],
+        prep_minutes=int(r.get("prep_minutes") or 0),
+        cook_minutes=int(r.get("cook_minutes") or 0),
+        servings=int(r.get("servings") or 4),
+        cuisine=(str(r.get("cuisine") or "").lower() or None),
+    )
+
+
+async def discover_with_llm_search(
+    db: Session,
+    user_id: int,
+    *,
+    limit: int = 6,
+    prompt: str | None = None,
+    searcher=None,
+) -> dict:
+    """Ask the model (with its web_search tool) for recipes that fit the brief, then upsert them.
+    `searcher` is injectable for tests; by default it is llm.structured_output with web_search."""
+    from app.models.food import FoodSettings
+
+    settings = db.query(FoodSettings).filter(FoodSettings.user_id == user_id).first()
+    brief = prompt or (
+        settings.discovery_prompt
+        if settings and settings.discovery_prompt
+        else DEFAULT_DISCOVERY_PROMPT
+    )
+    known = db.query(Recipe).filter(Recipe.user_id == user_id).all()
+    known_urls = {r.source_url for r in known if r.source_url}
+    known_titles = [r.title for r in known][:60]
+    profile = fp.taste_profile(db, user_id, n=8)
+    taste = (
+        ", ".join(f"{p['label']} ({p['weight']:+.2f})" for p in profile) or "none yet"
+    )
+
+    system = (
+        "You are a meal-prep recipe scout with web search. Find real recipe pages that match the owner's brief, "
+        "read each page, and return the recipes normalised for a planner. Prefer these sources in order: "
+        + ", ".join(SOURCE_PRIORITY)
+        + ". Only use pages you actually opened; copy the exact URL. Hard rules: at most "
+        f"{MAX_INGREDIENTS} essential ingredients, at most {MAX_MINUTES} minutes total, batchable, high protein. "
+        "Mark an ingredient essential only if the dish would not taste like itself without it; garnishes and "
+        "optional items are not essential. Use canonical purchasable ingredient names in lower case (e.g. 'chicken thighs'), "
+        "with a store guess (hmart for Korean/Japanese staples, wf for meat and fish, weg for produce) and a typical pack "
+        "label and USD price. Never invent ratings: null if the page shows none."
+    )
+    user = (
+        f"Brief from the owner:\n{brief}\n\n"
+        f"Learned taste weights (higher = liked more): {taste}\n\n"
+        f"Already in the catalogue — do not return these or close variants: {'; '.join(known_titles) or 'nothing yet'}\n\n"
+        f"Return {limit} new recipes (fewer if the web offers fewer that fit)."
+    )
+    if searcher is None:
+        from app.services.llm import REASONING, structured_output
+
+        async def searcher(system_, user_):  # noqa: E306
+            return await structured_output(
+                system=system_,
+                user_prompt=user_,
+                tool_name="find_recipes",
+                tool_description="Return the recipes found.",
+                output_schema=SEARCH_SCHEMA,
+                model=REASONING,
+                max_tokens=6000,
+                tools=[{"type": "web_search"}],
+                reasoning_effort="medium",
+                timeout=300.0,
+                max_retries=1,
+            )
+
+    out = await searcher(system, user)
+    added, log = [], []
+    for r in (out.get("recipes") or [])[: limit * 2]:
+        found = _found_from_llm(r)
+        if not found.url.startswith("http") or not found.title:
+            log.append(
+                {
+                    "url": found.url,
+                    "outcome": "skipped",
+                    "detail": "no usable URL/title",
+                }
+            )
+            continue
+        if found.url in known_urls:
+            log.append({"url": found.url, "outcome": "duplicate", "title": found.title})
+            continue
+        norm = dict(r)
+        norm.setdefault("suitable", True)
+        n_ess = sum(1 for i in norm.get("ingredients", []) if i.get("essential", True))
+        if (
+            n_ess == 0
+            or n_ess > MAX_INGREDIENTS
+            or (found.prep_minutes + found.cook_minutes) > MAX_MINUTES
+        ):
+            log.append(
+                {
+                    "url": found.url,
+                    "outcome": "not a fit",
+                    "title": found.title,
+                    "detail": f"{n_ess} essential · {found.prep_minutes + found.cook_minutes} min",
+                }
+            )
+            continue
+        recipe = upsert_candidate(db, user_id, found, norm)
+        if recipe:
+            known_urls.add(found.url)
+            added.append(
+                {
+                    "id": recipe.id,
+                    "title": recipe.title,
+                    "source": recipe.source_site,
+                    "rating": recipe.rating,
+                    "ingredients": len(recipe.ingredients),
+                }
+            )
+            log.append(
+                {
+                    "url": found.url,
+                    "outcome": "added",
+                    "title": recipe.title,
+                    "detail": (r.get("why") or "")[:120],
+                }
+            )
+        else:
+            log.append({"url": found.url, "outcome": "duplicate", "title": found.title})
+        if len(added) >= limit:
+            break
+    return {
+        "added": added,
+        "skipped": len(log) - len(added),
+        "checked": len(log),
+        "log": log,
+        "mode": "llm_search",
+    }
+
+
+def discovery_mode() -> str:
+    """llm (default when an OpenAI key is set) | crawl (fetch + extract, no key needed)."""
+    import os
+
+    mode = os.getenv("FOOD_DISCOVERY", "llm")
+    if mode == "llm" and not os.getenv("OPENAI_API_KEY"):
+        return "crawl"
+    return mode

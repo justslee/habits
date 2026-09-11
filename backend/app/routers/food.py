@@ -758,6 +758,7 @@ def patch_merchant(store: str, payload: MerchantPatch, db: Session = Depends(get
 
 
 class SettingsOut(BaseModel):
+    discovery_prompt: str | None = None
     budget_per_cycle: float
     per_order_cap: float
     per_cycle_cap: float
@@ -768,6 +769,7 @@ class SettingsOut(BaseModel):
 
 
 class SettingsPatch(BaseModel):
+    discovery_prompt: str | None = Field(default=None, max_length=2000)
     budget_per_cycle: float | None = Field(default=None, ge=0)
     per_order_cap: float | None = Field(default=None, ge=0)
     per_cycle_cap: float | None = Field(default=None, ge=0)
@@ -777,6 +779,7 @@ class SettingsPatch(BaseModel):
 
 def _settings_out(s: FoodSettings) -> SettingsOut:
     return SettingsOut(
+        discovery_prompt=s.discovery_prompt,
         budget_per_cycle=s.budget_per_cycle,
         per_order_cap=s.per_order_cap,
         per_cycle_cap=s.per_cycle_cap,

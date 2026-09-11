@@ -301,3 +301,145 @@ async def test_merchants_carry_location_channel_and_deals(db_session):
             assert any(i.get("is_deal") for i in weg["items"]), "deal line applied"
         scan = (await client.post("/api/v1/food/merchants/scan-deals")).json()
         assert scan["mode"] == "dry_run"
+
+
+@pytest.mark.asyncio
+async def test_llm_search_discovery_upserts_and_filters(db_session):
+    async with _client() as client:
+        await client.get("/api/v1/food/recipes")
+        # the owner's brief is editable and travels with the search
+        st = (
+            await client.patch(
+                "/api/v1/food/settings",
+                json={
+                    "discovery_prompt": "more Japanese, no seafood, like the bowls at a Koreatown lunch spot"
+                },
+            )
+        ).json()
+        assert "no seafood" in st["discovery_prompt"]
+        captured = {}
+
+        async def fake_searcher(system, user):
+            captured["user"] = user
+            base_ing = [
+                {
+                    "name": "chicken thighs",
+                    "quantity": 2,
+                    "unit": "lb",
+                    "essential": True,
+                    "reason": "core",
+                    "category": "protein",
+                    "preferred_store": "wf",
+                    "est_price": 12.99,
+                    "pack_label": "3 lb",
+                },
+                {
+                    "name": "soy sauce",
+                    "quantity": 3,
+                    "unit": "tbsp",
+                    "essential": True,
+                    "reason": "the sauce",
+                    "category": "staple",
+                    "shelf_stable": True,
+                    "preferred_store": "hmart",
+                    "est_price": 4.99,
+                    "pack_label": "1 L",
+                },
+                {
+                    "name": "sesame seeds",
+                    "essential": False,
+                    "reason": "garnish",
+                    "category": "staple",
+                    "shelf_stable": True,
+                },
+            ]
+            return {
+                "recipes": [
+                    {
+                        "title": "Chicken Bulgogi Bowls",
+                        "source_url": "https://www.maangchi.com/recipe/dak-bulgogi",
+                        "source_site": "maangchi",
+                        "rating": 4.8,
+                        "review_count": 300,
+                        "cuisine": "korean",
+                        "protein_source": "chicken",
+                        "prep_minutes": 15,
+                        "cook_minutes": 15,
+                        "servings": 4,
+                        "protein_g_per_serving": 40,
+                        "prep_days": 3,
+                        "reheat": "pan",
+                        "batch_ok": True,
+                        "why": "batchable, few ingredients",
+                        "ingredients": base_ing,
+                    },
+                    {
+                        "title": "Dak galbi",
+                        "source_url": "https://www.maangchi.com/recipe/dakgalbi",
+                        "source_site": "maangchi",
+                        "cuisine": "korean",
+                        "protein_source": "chicken",
+                        "servings": 4,
+                        "prep_days": 3,
+                        "reheat": "pan",
+                        "ingredients": base_ing,
+                    },
+                    {
+                        "title": "Weekend Ramen Project",
+                        "source_url": "https://example.com/ramen",
+                        "source_site": "example",
+                        "cuisine": "japanese",
+                        "protein_source": "pork",
+                        "prep_minutes": 60,
+                        "cook_minutes": 240,
+                        "servings": 6,
+                        "prep_days": 3,
+                        "reheat": "pan",
+                        "ingredients": base_ing,
+                    },
+                    {
+                        "title": "Untraceable",
+                        "source_url": "",
+                        "source_site": "x",
+                        "cuisine": "korean",
+                        "protein_source": "beef",
+                        "servings": 4,
+                        "prep_days": 3,
+                        "reheat": "pan",
+                        "ingredients": base_ing,
+                    },
+                ]
+            }
+
+        out = await rd.discover_with_llm_search(
+            db_session, 1, limit=4, searcher=fake_searcher
+        )
+        assert out["mode"] == "llm_search"
+        assert "no seafood" in captured["user"] and "Dak galbi" in captured["user"], (
+            "brief + known titles are in the prompt"
+        )
+        outcomes = {l.get("title") or l["url"]: l["outcome"] for l in out["log"]}
+        assert outcomes["Chicken Bulgogi Bowls"] == "added"
+        assert outcomes["Dak galbi"] == "duplicate", "seeded recipe url is known"
+        assert outcomes["Weekend Ramen Project"] == "not a fit", (
+            "300 minutes breaks the rule"
+        )
+        assert outcomes[""] == "skipped"
+        r = (
+            db_session.query(Recipe)
+            .filter(Recipe.title == "Chicken Bulgogi Bowls")
+            .first()
+        )
+        assert (
+            r
+            and r.status == "candidate"
+            and r.rating == 4.8
+            and r.source_site == "maangchi"
+        )
+        names = {ri.ingredient.name: ri.essential for ri in r.ingredients}
+        assert names["chicken thighs"] is True and names["sesame seeds"] is False
+        # rerun: duplicate, nothing added
+        again = await rd.discover_with_llm_search(
+            db_session, 1, limit=4, searcher=fake_searcher
+        )
+        assert again["added"] == []

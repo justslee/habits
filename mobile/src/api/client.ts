@@ -819,6 +819,7 @@ export interface CartTask {
   order: { merchant_order_id: string | null; total: number; placed_at: string; placed_by: string; delivery_window: string | null } | null;
 }
 export interface FoodSettingsData {
+  discovery_prompt: string | null;
   budget_per_cycle: number; per_order_cap: number; per_cycle_cap: number; ordering_enabled: boolean;
   supervised_cycles_remaining: number; approval_ttl_minutes: number; total_tolerance: number;
 }
@@ -899,7 +900,7 @@ export interface MerchantData {
   deal_text: string | null; deal_value: number; deal_min: number; deal_expires: string | null; deal_active: boolean;
 }
 export interface DiscoverLog { url: string; outcome: string; title?: string; detail?: string }
-export interface DiscoverResult { added: { id: number; title: string; source: string | null; rating: number | null; ingredients: number }[]; skipped: number; checked: number; log?: DiscoverLog[] }
+export interface DiscoverResult { added: { id: number; title: string; source: string | null; rating: number | null; ingredients: number }[]; skipped: number; checked: number; log?: DiscoverLog[]; mode?: string }
 
 export function patchRecipe(id: number, p: { status?: 'candidate' | 'proven' | 'retired'; notes?: string; user_rating?: number }): Promise<FoodRecipe> {
   return request(`/api/v1/food/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(p) });
