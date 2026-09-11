@@ -49,13 +49,12 @@ export default function SessionScreen({ route, navigation }: any) {
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
-  const plan = useMemo<PlanExercise[]>(() => {
-    if (!session?.ai_plan) return [];
-    try {
-      const parsed = JSON.parse(session.ai_plan);
-      return parsed.exercises ?? [];
-    } catch { return []; }
+  /** The stored plan is the whole prescription: blocks flattened for logging, plus run and mobility. */
+  const prescription = useMemo<any>(() => {
+    if (!session?.ai_plan) return null;
+    try { return JSON.parse(session.ai_plan); } catch { return null; }
   }, [session]);
+  const plan = useMemo<PlanExercise[]>(() => prescription?.exercises ?? [], [prescription]);
 
   const current = plan[index];
   const loggedSets = useMemo(
@@ -140,10 +139,43 @@ export default function SessionScreen({ route, navigation }: any) {
   const setsDone = Math.min(loggedSets, current?.sets ?? 3);
   const movementComplete = current ? loggedSets >= current.sets : false;
 
+  // Some sessions are a run and mobility with nothing to log set by set.
+  if (!plan.length) {
+    return (
+      <Screen contextKey="session-easy">
+        <FlowTop step={prescription?.title ?? session.day_type} onBack={() => navigation.goBack()} />
+        <Title>Keep it{'\n'}<Em>easy.</Em></Title>
+        <Body style={{ marginTop: 12 }}>{prescription?.budget ?? 'Easy aerobic work and mobility.'}</Body>
+
+        {prescription?.run ? (
+          <View style={[s.card, { backgroundColor: c.panel }]}>
+            <Eyebrow>Run · {prescription.run.minutes} min</Eyebrow>
+            <Subtitle style={{ marginTop: 6 }}>{prescription.run.structure}</Subtitle>
+          </View>
+        ) : null}
+
+        {prescription?.mobility?.length ? (
+          <>
+            <Section title="Mobility" trailing={<Small>~8 min</Small>} />
+            {prescription.mobility.map((mv: [string, string], i: number) => (
+              <View key={mv[0]} style={[s.planRow, { borderBottomColor: c.line }]}>
+                <Body style={{ flex: 1, color: c.fg }}>{mv[0]}</Body>
+                <Small>{mv[1]}</Small>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {prescription?.rules?.length ? <Small style={{ marginTop: 16 }}>{prescription.rules[0]}</Small> : null}
+        <Button full label="Finish session" haptic="light" style={{ marginTop: 22 }} onPress={finish} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen contextKey={`session-${index}`}>
       <FlowTop
-        step={`${session.day_type} · ${index + 1} of ${plan.length} moves`}
+        step={`${prescription?.title ?? session.day_type} · ${index + 1} of ${plan.length}`}
         onBack={() => navigation.goBack()}
       />
       <Title>Find your{'\n'}<Em>rhythm.</Em></Title>

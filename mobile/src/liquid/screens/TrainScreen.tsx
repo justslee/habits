@@ -302,7 +302,7 @@ function WeekView({ week, onAdjust }: { week: TrainWeek | null; onAdjust: (d: st
     <>
       <Title>A week{'\n'}<Em>that fits.</Em></Title>
       <Body style={{ marginTop: 12 }}>
-        {prettyDate(week.week_start)} · {week.phase} · {week.week_kind} week · rotation {week.rotation}
+        Week of {prettyDate(week.week_start)} · {week.week_kind} week · rotation {week.rotation}
       </Body>
 
       <View style={{ marginTop: 20 }}>

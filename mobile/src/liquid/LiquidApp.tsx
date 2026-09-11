@@ -77,13 +77,14 @@ export default function LiquidApp({ navigationRef }: { navigationRef?: any }) {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <LiquidThemeProvider>
-        <SheetProvider>
-          <ToastProvider>
+        {/* Toast outside Sheet: sheet content raises toasts, so it must see the provider. */}
+        <ToastProvider>
+          <SheetProvider>
             <View style={{ flex: 1 }}>
               <Shell navigationRef={navigationRef} />
             </View>
-          </ToastProvider>
-        </SheetProvider>
+          </SheetProvider>
+        </ToastProvider>
       </LiquidThemeProvider>
     </GestureHandlerRootView>
   );
