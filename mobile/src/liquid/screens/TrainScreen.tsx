@@ -17,6 +17,7 @@ import {
   patchTrainSettings, revertTrainAdjustment, startTrainToday,
 } from '../../api/client';
 import { useTheme } from '../theme';
+import { useRefreshOn } from '../refresh';
 import { fonts, radius } from '../tokens';
 import { T, m } from '../motion';
 import { feel } from '../haptics';
@@ -73,6 +74,8 @@ export default function TrainScreen({ navigation }: any) {
 
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A sheet never blurs the screen, so a coach change has to say so itself.
+  useRefreshOn(load);
 
   const refresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 

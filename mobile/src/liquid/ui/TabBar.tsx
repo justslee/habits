@@ -31,6 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { CommonActions } from '@react-navigation/native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useTheme } from '../theme';
+import { useRefresh } from '../refresh';
 import { ASSISTANT_LABEL, TABS, fonts, radius } from '../tokens';
 import { T, SPRING, m } from '../motion';
 import { feel } from '../haptics';
@@ -87,6 +88,7 @@ export function LiquidTabBar({ state, navigation }: BottomTabBarProps) {
   const { c, moves, look } = useTheme();
   const insets = useSafeAreaInsets();
   const sheet = useSheet();
+  const { bump } = useRefresh();
   const [size, setSize] = React.useState({ w: 0, h: 0 });
   /** Where the lens sits, in tab units. Fractional while dragging. */
   const pos = useSharedValue(state.index);
@@ -201,7 +203,7 @@ export function LiquidTabBar({ state, navigation }: BottomTabBarProps) {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={ASSISTANT_LABEL[current] ?? 'Assistant'}
-        onPress={() => sheet.open('A little help.', () => <AssistantSheet tab={current} />)}
+        onPress={() => sheet.open('A little help.', () => <AssistantSheet tab={current} onChanged={bump} />)}
         style={({ pressed }) => [
           s.assistant,
           { backgroundColor: c.panel, borderColor: c.line },

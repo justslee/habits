@@ -17,6 +17,7 @@ import {
   getTrainToday, startTrainToday, toggleHabitToday, updateTodo,
 } from '../../api/client';
 import { useTheme } from '../theme';
+import { useRefreshOn } from '../refresh';
 import { fonts } from '../tokens';
 import { feel } from '../haptics';
 import { Screen } from '../ui/Screen';
@@ -65,6 +66,8 @@ export default function DailyScreen({ navigation }: any) {
 
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A sheet never blurs the screen, so a coach change has to say so itself.
+  useRefreshOn(load);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);

@@ -20,6 +20,7 @@ import {
   getSpeakingHistory, getSpeakingSession, getSpeakingStats, getTopicSuggestions, submitSpeakingSession,
 } from '../../api/client';
 import { useTheme } from '../theme';
+import { useRefreshOn } from '../refresh';
 import { fonts, radius } from '../tokens';
 import { feel } from '../haptics';
 import { T, m } from '../motion';
@@ -86,6 +87,8 @@ export default function SpeakScreen({ navigation }: any) {
 
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A sheet never blurs the screen, so a coach change has to say so itself.
+  useRefreshOn(load);
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
   // The orb breathes continuously: one cycle swells it, a slower one squashes and turns it, so

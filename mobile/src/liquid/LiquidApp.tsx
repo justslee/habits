@@ -12,6 +12,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { RefreshProvider } from './refresh';
 import { LiquidThemeProvider, useTheme } from './theme';
 import { SheetProvider } from './ui/Sheet';
 import { ToastProvider } from './ui/Toast';
@@ -79,11 +80,13 @@ export default function LiquidApp({ navigationRef }: { navigationRef?: any }) {
       <LiquidThemeProvider>
         {/* Toast outside Sheet: sheet content raises toasts, so it must see the provider. */}
         <ToastProvider>
-          <SheetProvider>
-            <View style={{ flex: 1 }}>
-              <Shell navigationRef={navigationRef} />
-            </View>
-          </SheetProvider>
+          <RefreshProvider>
+            <SheetProvider>
+              <View style={{ flex: 1 }}>
+                <Shell navigationRef={navigationRef} />
+              </View>
+            </SheetProvider>
+          </RefreshProvider>
         </ToastProvider>
       </LiquidThemeProvider>
     </GestureHandlerRootView>

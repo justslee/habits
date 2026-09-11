@@ -18,6 +18,7 @@ import {
   getDailySummary, getDashboardStats, getHeatmap, getPillarConcepts, getRecentEntries, getVision,
 } from '../../api/client';
 import { useTheme } from '../theme';
+import { useRefreshOn } from '../refresh';
 import { AURORA, AURORA_PEARL, fonts, gesture, radius } from '../tokens';
 import { T, m } from '../motion';
 import { feel } from '../haptics';
@@ -102,6 +103,8 @@ export default function NorthStarScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // A sheet never blurs the screen, so a coach change has to say so itself.
+  useRefreshOn(load);
 
   const growth = useMemo(() => buildGrowth(history), [history]);
   const lastIndex = Math.max(0, growth.days - 1);

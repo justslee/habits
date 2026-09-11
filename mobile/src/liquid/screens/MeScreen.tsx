@@ -18,6 +18,7 @@ import { API_URL, checkHealth, setRuntimeServer } from '../../api/client';
 import { loadServerSettings, saveServerSettings, normalizeServerUrl } from '../../services/settings';
 import { DesignVersion, getDesignVersion, setDesignVersion } from '../version';
 import { useTheme } from '../theme';
+import { useRefreshOn } from '../refresh';
 import { Appearance, MotionSetting, fonts, radius } from '../tokens';
 import { feel } from '../haptics';
 import { Screen } from '../ui/Screen';
@@ -56,6 +57,8 @@ export default function MeScreen({ navigation }: any) {
 
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A sheet never blurs the screen, so a coach change has to say so itself.
+  useRefreshOn(load);
   const refresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const appearanceSheet = useCallback(() => {

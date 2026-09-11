@@ -22,6 +22,7 @@ import {
   getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart, putPantry, runCart, swipeCard,
 } from '../../api/client';
 import { useTheme } from '../theme';
+import { useRefreshOn } from '../refresh';
 import { fonts, gesture, radius } from '../tokens';
 import { T, m } from '../motion';
 import { feel } from '../haptics';
@@ -75,6 +76,8 @@ export default function FoodScreen({ navigation }: any) {
 
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // A sheet never blurs the screen, so a coach change has to say so itself.
+  useRefreshOn(load);
   const refresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const go = useCallback((next: Stage) => { feel.selection(); setStage(next); }, []);
