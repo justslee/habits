@@ -175,3 +175,26 @@ async def test_coach_chat_applies_adjustment(db_session, monkeypatch):
         assert (await client.get("/api/v1/train/today")).json()["prescription"][
             "session"
         ] == "RUN"
+
+
+def test_the_programme_opens_with_session_one_on_its_first_day():
+    """Nothing is planned before the start, and day one is S1 wherever it lands."""
+    first = gp.PROGRAM_START
+    opening = gp.plan_week(gp.week_start(first), travel_days=set(), tournaments=[])
+    by_date = {d.date: d for d in opening}
+    assert by_date[first].session == "S1"
+    assert all(
+        d.session is None for d in opening if d.date < first
+    ), "no session may be planned before the programme starts"
+
+    # The following week is the ordinary rhythm, untouched.
+    nxt = gp.plan_week(
+        gp.week_start(first) + datetime.timedelta(days=7), travel_days=set(), tournaments=[]
+    )
+    assert [d.session for d in nxt] == ["S1", "S2", None, "S3", "S5", "S4", None]
+
+    # A week entirely before the start holds nothing at all.
+    before = gp.plan_week(
+        gp.week_start(first) - datetime.timedelta(days=14), travel_days=set(), tournaments=[]
+    )
+    assert all(d.session is None for d in before)

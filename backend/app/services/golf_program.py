@@ -20,7 +20,7 @@ import math
 import re
 from dataclasses import dataclass
 
-PROGRAM_START = datetime.date(2026, 9, 8)
+PROGRAM_START = datetime.date(2026, 9, 12)
 FIRST_EVENT_DEFAULT = datetime.date(
     2027, 4, 24
 )  # April/May 2027; the owner sets the real date
@@ -826,6 +826,29 @@ def plan_week(
         if ws <= d <= ws + datetime.timedelta(days=6)
     }
     days = [ws + datetime.timedelta(days=i) for i in range(7)]
+
+    # The programme has a first day. Nothing is planned before it, and it opens with Session 1
+    # wherever in the week it falls, so the first thing you do is the first session. From the
+    # following Monday the normal rhythm takes over untouched.
+    if ws + datetime.timedelta(days=6) < PROGRAM_START:
+        return [
+            DayPlan(d, None, "Before the programme starts", travel=d in travel_days)
+            for d in days
+        ]
+    if ws <= PROGRAM_START <= ws + datetime.timedelta(days=6) and PROGRAM_START.weekday() != 0:
+        out = []
+        for d in days:
+            pp = _pin_plan(d, pins[d], d in travel_days) if d in pins else None
+            if pp:
+                out.append(pp)
+            elif d < PROGRAM_START:
+                out.append(DayPlan(d, None, "Before the programme starts", travel=d in travel_days))
+            elif d == PROGRAM_START and d not in travel_days:
+                out.append(DayPlan(d, "S1", SESSIONS["S1"]["title"], travel=False))
+            else:
+                out.append(DayPlan(d, None, "Rest or golf", travel=d in travel_days))
+        return out
+
     t = tournament_in_week(ws, tournaments)
     if t is not None:
         out = []
