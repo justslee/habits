@@ -10,7 +10,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  WorkoutSession, addExerciseLog, completeTrainSession, getWorkoutSession,
+  ExerciseProfileData, WorkoutSession, addExerciseLog, completeTrainSession,
+  getExerciseProfiles, getWorkoutSession,
 } from '../../api/client';
 import { useTheme } from '../theme';
 import { fonts, radius } from '../tokens';
@@ -29,6 +30,10 @@ interface PlanExercise {
 
 const REST_SECONDS = 90;
 
+/** "S1" reads as "Session 1"; anything else keeps its own name. */
+const shortName = (id: string) =>
+  /^S\d$/.test(id) ? `Session ${id.slice(1)}` : id === 'RUN' ? 'Your run' : id === 'MOB' ? 'Mobility' : id;
+
 export default function SessionScreen({ route, navigation }: any) {
   const { c } = useTheme();
   const sheet = useSheet();
@@ -36,6 +41,7 @@ export default function SessionScreen({ route, navigation }: any) {
   const sessionId: number = route.params?.sessionId;
 
   const [session, setSession] = useState<WorkoutSession | null>(null);
+  const [profiles, setProfiles] = useState<ExerciseProfileData[]>([]);
   const [index, setIndex] = useState(0);
   const [weight, setWeight] = useState(45);
   const [reps, setReps] = useState(8);
@@ -45,6 +51,8 @@ export default function SessionScreen({ route, navigation }: any) {
 
   useEffect(() => {
     getWorkoutSession(sessionId).then(setSession).catch(() => toast.show('Could not open that session.'));
+    // Profiles carry what you lifted last time and whether the load is ready to go up.
+    getExerciseProfiles().then(setProfiles).catch(() => {});
   }, [sessionId, toast]);
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
@@ -57,18 +65,25 @@ export default function SessionScreen({ route, navigation }: any) {
   const plan = useMemo<PlanExercise[]>(() => prescription?.exercises ?? [], [prescription]);
 
   const current = plan[index];
-  const loggedSets = useMemo(
-    () => (session?.exercises ?? []).filter(e => e.exercise_name === current?.name && !e.is_warmup).length,
+  const setsThisMovement = useMemo(
+    () => (session?.exercises ?? []).filter(e => e.exercise_name === current?.name && !e.is_warmup),
     [session, current],
   );
+  const loggedSets = setsThisMovement.length;
+  const profile = useMemo(
+    () => profiles.find(p => p.exercise_name.toLowerCase() === (current?.name ?? '').toLowerCase()) ?? null,
+    [profiles, current],
+  );
 
-  // A movement's suggested load and reps seed the steppers as you reach it.
+  // A movement's suggested load and reps seed the steppers as you reach it. Unloaded work —
+  // jumps, carries, core — starts at zero rather than at a barbell weight.
   useEffect(() => {
     if (!current) return;
-    if (current.weight) setWeight(Math.round(current.weight));
+    const unloaded = !current.weight && ['power', 'core', 'carry'].includes(current.kind ?? '');
+    setWeight(current.weight ? Math.round(current.weight) : unloaded ? 0 : profile?.current_working_weight ?? 45);
     const first = parseInt(String(current.reps).replace(/[^0-9].*$/, ''), 10);
     if (!Number.isNaN(first)) setReps(first);
-  }, [current]);
+  }, [current, profile]);
 
   const startRest = useCallback(() => {
     if (timer.current) clearInterval(timer.current);
@@ -175,7 +190,7 @@ export default function SessionScreen({ route, navigation }: any) {
   return (
     <Screen contextKey={`session-${index}`}>
       <FlowTop
-        step={`${prescription?.title ?? session.day_type} · ${index + 1} of ${plan.length}`}
+        step={`${shortName(prescription?.session ?? session.day_type)} · ${index + 1} of ${plan.length}`}
         onBack={() => navigation.goBack()}
       />
       <Title>Find your{'\n'}<Em>rhythm.</Em></Title>
@@ -187,6 +202,19 @@ export default function SessionScreen({ route, navigation }: any) {
         <Body style={{ marginTop: 9 }}>
           Target {current?.sets} × {current?.reps}{current?.weight ? ` · ${current.weight} lb suggested` : ''}
         </Body>
+        {profile?.current_working_weight ? (
+          <Small style={{ marginTop: 6 }}>
+            Last time {profile.current_working_weight} lb
+            {profile.current_rep_target ? ` × ${profile.current_rep_target}` : ''}
+            {profile.progression_status === 'progressing' ? ' · earned an increase' : ''}
+            {profile.stall_count ? ` · held ${profile.stall_count}×` : ''}
+          </Small>
+        ) : null}
+        {setsThisMovement.length ? (
+          <Small style={{ marginTop: 4, color: c.accent }}>
+            Logged {setsThisMovement.map(e => `${e.weight ?? '–'}×${e.reps ?? '–'}`).join(' · ')}
+          </Small>
+        ) : null}
 
         <View style={s.track}>
           {Array.from({ length: current?.sets ?? 3 }, (_, i) => (
@@ -195,7 +223,12 @@ export default function SessionScreen({ route, navigation }: any) {
         </View>
 
         <View style={s.fields}>
-          <Stepper label="Weight · lb" value={weight} onChange={v => setWeight(Math.max(0, v))} step={5} />
+          <Stepper
+            label={weight === 0 ? 'Bodyweight' : 'Weight · lb'}
+            value={weight}
+            onChange={v => setWeight(Math.max(0, v))}
+            step={5}
+          />
           <Stepper label="Reps" value={reps} onChange={v => setReps(Math.max(1, v))} step={1} />
         </View>
 

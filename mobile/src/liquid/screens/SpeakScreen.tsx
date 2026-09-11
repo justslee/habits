@@ -72,7 +72,8 @@ export default function SpeakScreen({ navigation }: any) {
 
   const recording = useRef<Audio.Recording | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const breathe = useSharedValue(0);
+  const pulse = useSharedValue(0);
+  const morph = useSharedValue(0);
 
   const load = useCallback(async () => {
     const [h, st, sg] = await Promise.allSettled([
@@ -87,22 +88,44 @@ export default function SpeakScreen({ navigation }: any) {
   useFocusEffect(useCallback(() => { load(); }, [load]));
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
-  // The orb breathes slowly at rest and faster while listening.
+  // The orb breathes continuously: one cycle swells it, a slower one squashes and turns it, so
+  // it reads as alive rather than as a spinning image. Listening makes both faster and wider.
+  const live = stage === 'recording';
   useEffect(() => {
-    if (!moves) { cancelAnimation(breathe); return; }
-    breathe.value = withRepeat(
-      withTiming(1, { duration: stage === 'recording' ? 2200 : 5200, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true,
+    if (!moves) {
+      cancelAnimation(pulse);
+      cancelAnimation(morph);
+      pulse.value = 0;
+      morph.value = 0.5;
+      return;
+    }
+    pulse.value = withRepeat(
+      withTiming(1, { duration: live ? 1300 : 2400, easing: Easing.inOut(Easing.quad) }), -1, true,
     );
-    return () => cancelAnimation(breathe);
-  }, [moves, stage, breathe]);
+    morph.value = withRepeat(
+      withTiming(1, { duration: live ? 2000 : 3700, easing: Easing.inOut(Easing.ease) }), -1, true,
+    );
+    return () => { cancelAnimation(pulse); cancelAnimation(morph); };
+  }, [moves, live, pulse, morph]);
 
-  const orb = useAnimatedStyle(() => ({
-    transform: [
-      { rotate: `${-20 + breathe.value * (stage === 'recording' ? 46 : 30)}deg` },
-      { scale: 1 + breathe.value * (stage === 'recording' ? 0.1 : 0.05) },
-    ],
+  const orb = useAnimatedStyle(() => {
+    const swell = live ? 0.1 : 0.055;
+    const squash = live ? 0.075 : 0.04;
+    const turn = live ? 34 : 14;
+    return {
+      transform: [
+        { scale: 1 + pulse.value * swell },
+        { scaleX: 1 + (morph.value - 0.5) * squash },
+        { scaleY: 1 - (morph.value - 0.5) * squash },
+        { rotate: `${-18 + morph.value * turn}deg` },
+      ],
+    };
+  });
+
+  // A soft halo breathing against the orb, so the pulse reads even at a glance.
+  const halo = useAnimatedStyle(() => ({
+    opacity: 0.10 + pulse.value * (live ? 0.3 : 0.16),
+    transform: [{ scale: 1.06 + pulse.value * (live ? 0.22 : 0.12) }],
   }));
 
   const start = useCallback(async () => {
@@ -175,7 +198,10 @@ export default function SpeakScreen({ navigation }: any) {
         <FlowTop step={`${AUDIENCE_LABEL[audience]} · ${targetLabel(target)}`} onBack={cancel} />
         <Title numberOfLines={2}>{topic}</Title>
         <View style={s.stage}>
-          <Animated.View style={orb}><VoiceOrb /></Animated.View>
+          <View style={s.orbWrap}>
+            <Animated.View pointerEvents="none" style={[s.halo, { backgroundColor: c.accent }, halo]} />
+            <Animated.View style={orb}><VoiceOrb /></Animated.View>
+          </View>
           <Animated.Text style={[s.clock, { color: over ? c.warm : c.fg }]}>
             {stage === 'processing' ? 'Listening back…' : clock(elapsed)}
           </Animated.Text>
@@ -215,7 +241,10 @@ export default function SpeakScreen({ navigation }: any) {
       </Body>
 
       <View style={s.stageSmall}>
-        <Animated.View style={orb}><VoiceOrb size={120} /></Animated.View>
+        <View style={s.orbWrap}>
+          <Animated.View pointerEvents="none" style={[s.haloSmall, { backgroundColor: c.accent }, halo]} />
+          <Animated.View style={orb}><VoiceOrb size={120} /></Animated.View>
+        </View>
       </View>
 
       <Eyebrow>What are you explaining?</Eyebrow>
@@ -414,6 +443,9 @@ function Evaluation({
 const s = StyleSheet.create({
   stage: { alignItems: 'center', paddingVertical: 40, gap: 18 },
   stageSmall: { alignItems: 'center', paddingVertical: 18 },
+  orbWrap: { alignItems: 'center', justifyContent: 'center' },
+  halo: { position: 'absolute', width: 151, height: 151, borderRadius: 76 },
+  haloSmall: { position: 'absolute', width: 120, height: 120, borderRadius: 60 },
   clock: { fontFamily: fonts.serif, fontSize: 52, letterSpacing: -1 },
 
   input: {

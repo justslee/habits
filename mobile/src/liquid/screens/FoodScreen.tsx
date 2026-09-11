@@ -410,6 +410,12 @@ function PlanView({ cycle, plan, go, load }: any) {
       <Body style={{ marginTop: 12 }}>
         {plan.meals.length} recipes · {servings} servings · {plan.covered_days} days of lunch and dinner.
       </Body>
+      <Small style={{ marginTop: 8 }}>
+        No cooking while you're away. The {cycle.travel_days.length} travel day
+        {cycle.travel_days.length === 1 ? '' : 's'} and {cycle.eat_out_days} night
+        {cycle.eat_out_days === 1 ? '' : 's'} out are left out of the plan, and a batch never spans
+        a trip, so nothing is left to spoil.
+      </Small>
 
       <View style={s.miniDays}>
         {Array.from({ length: 14 }, (_, i) => {
