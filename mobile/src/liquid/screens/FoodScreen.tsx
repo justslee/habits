@@ -19,7 +19,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import {
   Bag, BagsResponse, CartTask, FoodCycle, FoodDeck, FoodPlan, FoodRecipe, PantryEntry, SpendSummary,
   approveBags, approveCart, buildBags, buildPlan, createCycle, getBags, getCarts, getCurrentCycle,
-  getDeck, getPantry, getPlan, getSpend, placeCart, putPantry, runCart, swipeCard,
+  getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart, putPantry, runCart, swipeCard,
 } from '../../api/client';
 import { useTheme } from '../theme';
 import { fonts, gesture, radius } from '../tokens';
@@ -27,14 +27,15 @@ import { T, m } from '../motion';
 import { feel } from '../haptics';
 import { Screen } from '../ui/Screen';
 import { Body, Em, Eyebrow, Small, Subtitle, Title } from '../ui/Text';
-import { Button, InlineButton } from '../ui/Button';
+import { Button, InlineButton, Options } from '../ui/Button';
 import { Badge, CalendarNote, Coverage, DetailRow, FlowTop, Notice, Panel, Section, TopBar } from '../ui/Surfaces';
 import { Bowl } from '../ui/Sculpture';
 import { useSheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { prettyDate } from '../ui/Chart';
+import { RecipeSheet } from '../sheets/RecipeSheet';
 
-type Stage = 'home' | 'pantry' | 'deck' | 'plan' | 'bags' | 'review' | 'receipt' | 'spend';
+type Stage = 'home' | 'pantry' | 'deck' | 'plan' | 'bags' | 'review' | 'receipt' | 'spend' | 'book';
 const PANTRY_STATES: PantryEntry['state'][] = ['plenty', 'some', 'gone'];
 const PANTRY_LABEL: Record<string, string> = { plenty: 'Have', some: 'Low', gone: 'Need' };
 const money = (n: number) => `$${n.toFixed(2)}`;
@@ -50,6 +51,7 @@ export default function FoodScreen({ navigation }: any) {
   const [bags, setBags] = useState<BagsResponse | null>(null);
   const [carts, setCarts] = useState<CartTask[]>([]);
   const [spend, setSpend] = useState<SpendSummary | null>(null);
+  const [recipes, setRecipes] = useState<FoodRecipe[]>([]);
   const [store, setStore] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,9 +59,10 @@ export default function FoodScreen({ navigation }: any) {
   const load = useCallback(async () => {
     const cy = await getCurrentCycle().catch(() => null);
     setCycle(cy);
-    const [sp, pa] = await Promise.allSettled([getSpend(), getPantry()]);
+    const [sp, pa, rc] = await Promise.allSettled([getSpend(), getPantry(), getFoodRecipes()]);
     if (sp.status === 'fulfilled') setSpend(sp.value);
     if (pa.status === 'fulfilled') setPantry(pa.value);
+    if (rc.status === 'fulfilled') setRecipes(rc.value);
     if (!cy) return;
     const [dk, pl, bg, ct] = await Promise.allSettled([
       getDeck(cy.id), getPlan(cy.id), getBags(cy.id), getCarts(cy.id),
@@ -89,7 +92,7 @@ export default function FoodScreen({ navigation }: any) {
   }, [load, go, toast]);
 
   const props = {
-    cycle, deck, plan, pantry, bags, carts, spend, store, setStore, busy, setBusy,
+    cycle, deck, plan, pantry, bags, carts, spend, recipes, store, setStore, busy, setBusy,
     go, load, setDeck, setPlan, setPantry, setBags, setCarts, startCycle,
   };
 
@@ -103,13 +106,14 @@ export default function FoodScreen({ navigation }: any) {
       {stage === 'review' ? <Review {...props} /> : null}
       {stage === 'receipt' ? <Receipt {...props} /> : null}
       {stage === 'spend' ? <Spend {...props} /> : null}
+      {stage === 'book' ? <Book {...props} /> : null}
     </Screen>
   );
 }
 
 // --- Home -------------------------------------------------------------------
 
-function Home({ cycle, deck, plan, spend, go, startCycle, busy }: any) {
+function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) {
   const { c } = useTheme();
   const ready = !!plan?.meals?.length;
   const covered = plan?.covered_days ?? 0;
@@ -158,6 +162,12 @@ function Home({ cycle, deck, plan, spend, go, startCycle, busy }: any) {
           onPress={() => (ready ? go('plan') : cycle ? go('pantry') : startCycle())}
         />
       </Panel>
+
+      <Section title="Your recipe book" trailing={<InlineButton label="Open" icon="arrow-forward" onPress={() => go('book')} />} />
+      <Body>
+        {recipes.filter((r: FoodRecipe) => r.times_cooked > 0).length} cooked ·{' '}
+        {recipes.length} saved. Every one keeps its ingredients and its method.
+      </Body>
 
       <Section title="The kitchen ledger" trailing={<InlineButton label="View spend" icon="arrow-forward" onPress={() => go('spend')} />} />
       <View style={s.rowBetween}>
@@ -349,15 +359,7 @@ function Deck({ cycle, deck, setDeck, go, load }: any) {
         <InlineButton
           label="Recipe details"
           icon="arrow-forward"
-          onPress={() => sheet.open(card.title, () => (
-            <View>
-              <Body>{card.notes ?? 'A familiar favourite.'}</Body>
-              <DetailRow label="Cook once" value={`${card.servings} servings`} />
-              <DetailRow label="Active prep" value={`${card.prep_minutes} min`} />
-              <DetailRow label="Reheat" value={card.reheat} />
-              <DetailRow label="Source" value={card.source_site ?? '—'} last />
-            </View>
-          ))}
+          onPress={() => sheet.open(card.title, () => <RecipeSheet recipe={card} />)}
         />
       </View>
       {deck.learned?.length ? <Small style={{ marginTop: 10 }}>Learning: {deck.learned.join(' · ')}</Small> : null}
@@ -452,13 +454,7 @@ function PlanView({ cycle, plan, go, load }: any) {
             </View>
             <InlineButton
               label="Details"
-              onPress={() => sheet.open(meal.recipe.title, () => (
-                <View>
-                  <Body>{meal.recipe.notes ?? `${meal.recipe.reheat} reheat · ${meal.recipe.total_minutes} min total.`}</Body>
-                  <DetailRow label="Cook once" value={`${meal.servings} portions`} />
-                  <DetailRow label="Covers" value={`${meal.days_covered.length} days`} last />
-                </View>
-              ))}
+              onPress={() => sheet.open(meal.recipe.title, () => <RecipeSheet recipe={meal.recipe} />)}
             />
           </View>
         ))}
@@ -767,4 +763,74 @@ const s = StyleSheet.create({
 
   bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 13, height: 150, marginVertical: 30 },
   bar: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 7 },
+
+  bookRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingVertical: 16 },
+  bookMark: { width: 4, height: 34, borderRadius: 2 },
+  bookTitle: { fontFamily: fonts.medium, fontSize: 15 },
 });
+
+/**
+ * The recipe book: everything you have cooked, and everything waiting to be. Each one opens in
+ * full, with its ingredients and its method.
+ */
+function Book({ recipes, go }: any) {
+  const { c } = useTheme();
+  const sheet = useSheet();
+  const all: FoodRecipe[] = recipes ?? [];
+  const cooked = all
+    .filter(r => r.times_cooked > 0)
+    .sort((a, b) => (b.last_cooked ?? '').localeCompare(a.last_cooked ?? ''));
+  const rest = all.filter(r => !r.times_cooked).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  // Opening on an empty shelf tells you nothing; start wherever there is something to read.
+  const [query, setQuery] = useState<'cooked' | 'all'>(cooked.length ? 'cooked' : 'all');
+  const shown = query === 'cooked' ? cooked : all;
+
+  const open = (r: FoodRecipe) => { feel.selection(); sheet.open(r.title, () => <RecipeSheet recipe={r} />); };
+
+  return (
+    <>
+      <FlowTop step="Your recipe book" onBack={() => go('home')} />
+      <Title>What you{'\n'}<Em>actually cook.</Em></Title>
+      <Body style={{ marginTop: 12 }}>
+        {cooked.length} cooked, {rest.length} still to try. Open one for its ingredients and method.
+      </Body>
+
+      <Options
+        values={['cooked', 'all'] as const}
+        selected={query}
+        onSelect={setQuery}
+        labels={(v: string) => (v === 'cooked' ? `Cooked (${cooked.length})` : `Everything (${all.length})`)}
+      />
+
+      {shown.length ? shown.map((r, i) => (
+        <Pressable
+          key={r.id}
+          accessibilityRole="button"
+          accessibilityLabel={`${r.title}. ${r.times_cooked ? `Cooked ${r.times_cooked} times.` : 'Not cooked yet.'} Open the recipe.`}
+          onPress={() => open(r)}
+          style={[s.bookRow, { borderTopColor: i === 0 ? 'transparent' : c.line }]}
+        >
+          <View style={[s.bookMark, { backgroundColor: r.times_cooked ? c.accent : c.panel2 }]} />
+          <View style={{ flex: 1 }}>
+            <Animated.Text style={[s.bookTitle, { color: c.fg }]} numberOfLines={1}>{r.title}</Animated.Text>
+            <Small style={{ marginTop: 3 }} numberOfLines={1}>
+              {[
+                r.cuisine ? r.cuisine.replace(/^./, ch => ch.toUpperCase()) : null,
+                `${r.total_minutes} min`,
+                `${r.servings} servings`,
+                r.times_cooked ? `cooked ${r.times_cooked}×` : null,
+                r.last_cooked ? prettyDate(r.last_cooked) : null,
+              ].filter(Boolean).join(' · ')}
+            </Small>
+          </View>
+          {r.user_rating ? <Small style={{ color: c.accent }}>{r.user_rating}/5</Small> : null}
+          <Ionicons name="chevron-forward" size={16} color={c.muted} />
+        </Pressable>
+      )) : (
+        <Body style={{ marginTop: 16 }}>
+          {query === 'cooked' ? 'Nothing cooked yet. Finish a meal and it lands here.' : 'No recipes saved yet.'}
+        </Body>
+      )}
+    </>
+  );
+}

@@ -30,6 +30,7 @@ from app.db.seed_food import seed_food
 from app.models.food import CycleMeal, MealCycle, PantryItem, Recipe, RecipeIngredient
 from app.models.user import User
 from app.services import food_planner as fp
+from app.services import recipe_method as recipe_method_service
 
 router = APIRouter(prefix="/api/v1/food", tags=["food"])
 
@@ -97,6 +98,7 @@ class RecipeOut(BaseModel):
     user_rating: int | None
     notes: str | None
     hue: int | None
+    method: dict | None  # {steps, equipment, make_ahead, source_note} once fetched
     ingredients: list[IngredientOut]
 
 
@@ -124,6 +126,7 @@ def _recipe_out(r: Recipe) -> RecipeOut:
         user_rating=r.user_rating,
         notes=r.notes,
         hue=r.hue,
+        method=r.steps if isinstance(r.steps, dict) else ({"steps": r.steps} if r.steps else None),
         ingredients=[
             IngredientOut(
                 id=ri.id,
@@ -279,6 +282,26 @@ class CookedIn(BaseModel):
 
 
 # --- recipes ---------------------------------------------------------------
+
+
+@router.post("/recipes/{recipe_id}/method", response_model=RecipeOut)
+async def recipe_method(
+    recipe_id: int, refresh: bool = Query(default=False), db: Session = Depends(get_db)
+):
+    """Fetch and keep this recipe's method, summarised from its own source page."""
+    user = _user(db)
+    recipe = (
+        db.query(Recipe)
+        .filter(Recipe.id == recipe_id, Recipe.user_id == user.id)
+        .first()
+    )
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    try:
+        recipe = await recipe_method_service.fetch_method(db, recipe, refresh=refresh)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not read the method: {str(e)[:200]}")
+    return _recipe_out(recipe)
 
 
 @router.get("/recipes", response_model=list[RecipeOut])

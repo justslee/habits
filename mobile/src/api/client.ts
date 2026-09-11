@@ -652,6 +652,8 @@ export interface FoodRecipe {
   user_rating: number | null;
   notes: string | null;
   hue: number | null;
+  /** Filled on demand from the recipe's own source; null until then. */
+  method: { steps: string[]; equipment?: string[]; make_ahead?: string; source_note?: string } | null;
   ingredients: FoodIngredient[];
 }
 
@@ -710,6 +712,10 @@ export interface TasteEntry { feature: string; label: string; weight: number }
 
 export function getFoodRecipes(): Promise<FoodRecipe[]> {
   return request('/api/v1/food/recipes');
+}
+/** Fetch and cache this recipe's method, summarised from its source page. */
+export function fetchRecipeMethod(recipeId: number, refresh = false): Promise<FoodRecipe> {
+  return request(`/api/v1/food/recipes/${recipeId}/method${refresh ? '?refresh=true' : ''}`, { method: 'POST' });
 }
 export function getPantry(): Promise<PantryEntry[]> {
   return request('/api/v1/food/pantry');

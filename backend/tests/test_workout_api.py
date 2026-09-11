@@ -111,10 +111,19 @@ class TestAddExerciseLog:
 
 
 class TestExerciseProfiles:
-    def test_list_empty(self, db_session):
+    def test_list_seeds_the_movement_library(self, db_session):
+        """A user with no profiles gets the movement library seeded on first read.
+
+        The endpoint auto-seeds deliberately, so an empty list is only ever correct
+        when there is no user at all.
+        """
         resp = client.get("/api/v1/workouts/exercises/profiles")
         assert resp.status_code == 200
-        assert resp.json() == []
+        data = resp.json()
+        assert data, "the movement library should be seeded on first read"
+        names = {p["exercise_name"] for p in data}
+        assert "Bench Press" in names
+        assert all(p["current_rep_target"] for p in data)
 
     def test_list_profiles(self, db_session):
         user = db_session.query(User).first()
