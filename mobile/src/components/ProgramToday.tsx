@@ -5,30 +5,41 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors, fonts, radius, spacing, typography } from '../theme';
 import {
-  GolfEventData, TrainProgram, TrainToday, TrainWeek, addGolfEvent, deleteGolfEvent, getGolfEvents, getTrainLog, getTrainProgram, getTrainToday, getTrainWeek, startTrainToday,
+  AdjustResult, TrainProgram, TrainToday, TrainWeek, getTrainProgram, getTrainToday, getTrainWeek, revertTrainAdjustment, startTrainToday,
 } from '../api/client';
 import { haptic } from '../utils/haptics';
+import AdjustDaySheet from './AdjustDaySheet';
 
 const KIND_COLOR: Record<string, string> = { normal: colors.accent, lighter: colors.info, tournament: colors.warning, travel: colors.textTertiary };
-const SESSION_COLOR: Record<string, string> = { S1: '#8B5CF6', S2: '#F97316', S3: '#22D3EE', S4: '#EC4899', S5: '#76C99C', MOB: '#6F708A' };
+const SESSION_COLOR: Record<string, string> = { S1: '#8B5CF6', S2: '#F97316', S3: '#22D3EE', S4: '#EC4899', S5: '#76C99C', MOB: '#6F708A', RUN: '#3B82F6' };
 const fmt = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 export default function ProgramToday({ navigation, onAsk }: { navigation: any; onAsk?: () => void }) {
   const [program, setProgram] = useState<TrainProgram | null>(null);
   const [today, setToday] = useState<TrainToday | null>(null);
   const [week, setWeek] = useState<TrainWeek | null>(null);
-  const [events, setEvents] = useState<GolfEventData[]>([]);
   const [starting, setStarting] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [p, t, w, e] = await Promise.all([getTrainProgram(), getTrainToday(), getTrainWeek(), getGolfEvents()]);
-      setProgram(p); setToday(t); setWeek(w); setEvents(e);
+      const [p, t, w] = await Promise.all([getTrainProgram(), getTrainToday(), getTrainWeek()]);
+      setProgram(p); setToday(t); setWeek(w);
     } catch (err) { console.warn('program', err); }
   }, []);
+
+  const applied = useCallback((r: AdjustResult) => {
+    setWeek(r.week); setToday(r.today);
+    Alert.alert(r.note || 'Week re-planned', r.changes.join('\n'));
+  }, []);
+  const undo = useCallback(async () => {
+    const id = today?.day?.adjustment_id;
+    if (!id) return;
+    try { const r = await revertTrainAdjustment(id); haptic.light(); setWeek(r.week); setToday(r.today); Alert.alert('Undone', r.changes.join('\n')); } catch (err) { console.warn(err); }
+  }, [today]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => navigation?.addListener?.('focus', load), [navigation, load]);
 
@@ -42,20 +53,6 @@ export default function ProgramToday({ navigation, onAsk }: { navigation: any; o
       Alert.alert('Nothing to start', String(err?.message || err).replace(/^API \d+: /, '').replace(/^\{"detail":"|"\}$/g, ''));
     } finally { setStarting(false); }
   }, [navigation]);
-
-  const addEvent = useCallback(() => {
-    if (!Alert.prompt) { Alert.alert('Add a tournament', 'Use the web app or the Mac to add events on this platform.'); return; }
-    Alert.prompt('Tournament date', 'YYYY-MM-DD (first round). Tournament weeks switch to the taper automatically.', (date) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return;
-      Alert.prompt('Name', 'e.g. Club championship', async (name) => {
-        try { await addGolfEvent({ event_date: date!, name: name || 'Tournament' }); haptic.success(); load(); } catch (err) { console.warn(err); }
-      });
-    });
-  }, [load]);
-
-  const shareLog = useCallback(async () => {
-    try { const l = await getTrainLog(); await Share.share({ message: l.text }); } catch (err) { console.warn(err); }
-  }, []);
 
   if (!program || !today || !week) return <Text style={s.help}>Loading the program…</Text>;
   const p = today.prescription;
@@ -76,7 +73,7 @@ export default function ProgramToday({ navigation, onAsk }: { navigation: any; o
       {p ? (
         <View style={s.card}>
           <View style={s.rowBetween}>
-            <Text style={[typography.eyebrow, { color: SESSION_COLOR[p.session] || colors.accent }]}>{p.session === 'MOB' ? 'TRAVEL DAY' : p.session.startsWith('T-') ? 'TOURNAMENT WEEK' : `SESSION ${p.session.slice(1)}`}</Text>
+            <Text style={[typography.eyebrow, { color: SESSION_COLOR[p.session] || colors.accent }]}>{p.session === 'MOB' ? 'TRAVEL DAY' : p.session === 'RUN' ? 'YOUR RUN · REPLACES THE GYM' : p.session.startsWith('T-') ? 'TOURNAMENT WEEK' : `SESSION ${p.session.slice(1)}${p.adjusted ? ' · YOUR CHANGE' : ''}`}</Text>
             <Text style={s.meta}>{p.target_minutes[0]}–{p.target_minutes[1]} min</Text>
           </View>
           <Text style={s.title}>{p.title}</Text>
@@ -92,20 +89,35 @@ export default function ProgramToday({ navigation, onAsk }: { navigation: any; o
               ))}
             </View>
           ))}
-          {p.run && <View style={s.block}><Text style={s.blockName}>RUN · {p.run.minutes} MIN</Text><Text style={s.exName}>{p.run.structure}</Text></View>}
+          {p.run && <View style={s.block}><Text style={s.blockName}>RUN · {p.run.minutes} MIN{p.run.miles ? ` · ${p.run.miles} MI` : ''}{p.run.intensity ? ` · ${p.run.intensity.toUpperCase()}` : ''}</Text><Text style={s.exName}>{p.run.structure}</Text></View>}
+          {p.day_note ? <Text style={[s.rule, { color: colors.warning }]}>{p.day_note}</Text> : null}
           {p.session === 'MOB' && <View style={s.block}>{p.mobility.map(([m, d]) => <View key={m} style={s.exRow}><Text style={s.exName}>{m}</Text><Text style={s.exDose}>{d}</Text></View>)}</View>}
           <Text style={s.rule}>{p.rules[0]}</Text>
-          {today.status === 'completed' ? (
+          {p.session === 'RUN' ? (
+            today.day?.status === 'completed'
+              ? <Text style={[s.rule, { color: colors.success }]}>Run logged ✓</Text>
+              : <TouchableOpacity style={[s.btn, { backgroundColor: SESSION_COLOR.RUN }]} onPress={() => { haptic.medium(); navigation?.navigate?.('LogRun', { distance: p.run?.miles, runType: p.run?.intensity === 'hard' ? 'tempo' : 'easy' }); }} activeOpacity={0.9}><Text style={s.btnText}>Log the run</Text></TouchableOpacity>
+          ) : today.status === 'completed' ? (
             <TouchableOpacity style={[s.btn, { backgroundColor: colors.accentMuted }]} onPress={() => navigation?.navigate?.('WorkoutDetail', { sessionId: today.session_id })}><Text style={[s.btnText, { color: colors.accentLight }]}>Done · view session</Text></TouchableOpacity>
           ) : p.session !== 'MOB' ? (
             <TouchableOpacity style={s.btn} onPress={start} disabled={starting} activeOpacity={0.9}><Text style={s.btnText}>{starting ? 'Starting…' : today.session_id ? 'Continue session' : 'Start session · timer on'}</Text></TouchableOpacity>
           ) : null}
+          {today.status !== 'completed' && (
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18, marginTop: 4 }}>
+              <TouchableOpacity style={s.ghost} onPress={() => { haptic.light(); setAdjustOpen(true); }}><Text style={s.link}>Change today</Text></TouchableOpacity>
+              {today.day?.adjustment_id ? <TouchableOpacity style={s.ghost} onPress={undo}><Text style={[s.link, { color: colors.error }]}>Undo my change</Text></TouchableOpacity> : null}
+            </View>
+          )}
         </View>
       ) : (
         <View style={s.card}>
           <Text style={typography.eyebrow}>TODAY</Text>
           <Text style={s.title}>{today.day?.label || 'Rest, golf or mobility'}</Text>
           <Text style={s.help}>8 minutes of the daily mobility routine counts. No catch-up gym work.</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18, marginTop: 4 }}>
+            <TouchableOpacity style={s.ghost} onPress={() => { haptic.light(); setAdjustOpen(true); }}><Text style={s.link}>Train today anyway</Text></TouchableOpacity>
+            {today.day?.adjustment_id ? <TouchableOpacity style={s.ghost} onPress={undo}><Text style={[s.link, { color: colors.error }]}>Undo my change</Text></TouchableOpacity> : null}
+          </View>
         </View>
       )}
 
@@ -118,7 +130,7 @@ export default function ProgramToday({ navigation, onAsk }: { navigation: any; o
               <View key={d.date} style={[s.day, isToday && s.dayToday, d.travel && s.dayTravel]}>
                 <Text style={s.dayD}>{d.weekday}</Text>
                 <View style={[s.dayDot, { backgroundColor: d.session ? (SESSION_COLOR[d.session] || colors.warning) : 'transparent', borderColor: d.session ? 'transparent' : colors.line }]} />
-                <Text style={[s.dayS, { color: d.status === 'completed' ? colors.success : colors.text }]} numberOfLines={1}>{d.travel ? '✈' : d.session ? (d.session.startsWith('T-') ? d.session.slice(2, 5) : d.session) : '—'}</Text>
+                <Text style={[s.dayS, { color: d.status === 'completed' ? colors.success : colors.text }]} numberOfLines={1}>{d.travel ? '✈' : d.session === 'RUN' ? '🏃' : d.session ? (d.session.startsWith('T-') ? d.session.slice(2, 5) : d.session) : d.adjusted ? '↻' : '—'}</Text>
               </View>
             );
           })}
@@ -126,25 +138,11 @@ export default function ProgramToday({ navigation, onAsk }: { navigation: any; o
         {week.days.filter(d => d.note).map(d => <Text key={d.date} style={s.help}>{d.weekday}: {d.note}</Text>)}
       </View>
 
-      <View style={s.card}>
-        <View style={s.rowBetween}>
-          <Text style={typography.eyebrow}>TOURNAMENTS &amp; ROUNDS</Text>
-          <TouchableOpacity onPress={addEvent}><Text style={s.link}>+ Add</Text></TouchableOpacity>
-        </View>
-        {events.length ? events.map(e => (
-          <View key={e.id} style={s.exRow}>
-            <Text style={s.exName}>{e.name} <Text style={s.meta}>· {e.kind}</Text></Text>
-            <Text style={s.exDose}>{fmt(e.event_date)}</Text>
-            <TouchableOpacity onPress={() => Alert.alert('Remove?', e.name, [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => { await deleteGolfEvent(e.id); load(); } }])}><Text style={[s.meta, { color: colors.error, marginLeft: 10 }]}>×</Text></TouchableOpacity>
-          </View>
-        )) : <Text style={s.help}>None yet. The earliest tournament sets when the pre-event taper starts.</Text>}
-      </View>
-
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
-        <TouchableOpacity style={s.ghost} onPress={shareLog}><Text style={s.link}>Weekly log</Text></TouchableOpacity>
         {onAsk && <TouchableOpacity style={s.ghost} onPress={onAsk}><Text style={s.link}>Ask the coach</Text></TouchableOpacity>}
         <TouchableOpacity style={s.ghost} onPress={() => { haptic.medium(); navigation?.navigate?.('CoachVoice'); }}><Text style={s.link}>🎙 Talk live</Text></TouchableOpacity>
       </View>
+      <AdjustDaySheet visible={adjustOpen} onClose={() => setAdjustOpen(false)} date={today.date} day={today.day} onApplied={applied} />
     </View>
   );
 }

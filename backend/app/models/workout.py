@@ -172,3 +172,21 @@ class TrainingSettings(Base, TimestampMixin):
     extra_lighter_weeks: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True
     )  # comma-separated week-start dates
+
+
+class TrainingAdjustment(Base, TimestampMixin):
+    """A change you made to a planned day (run outside instead, rest, golf, swap, move, shorten).
+    The planner re-lays the rest of the week around it. reverted_at undoes it."""
+
+    __tablename__ = "training_adjustments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    params: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # your words
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # what changed
+    reverted_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime, nullable=True
+    )

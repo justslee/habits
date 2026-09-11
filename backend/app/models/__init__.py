@@ -13,7 +13,7 @@ from app.models.run import (
     PersonalRecord, PlannedRun, RunningProfile, RunSegmentLog, RunSession, RunSplit,
     TrainingPlan,
 )
-from app.models.workout import ExerciseLog, ExerciseProfile, GolfEvent, TrainingSettings, WorkoutSession
+from app.models.workout import ExerciseLog, ExerciseProfile, GolfEvent, TrainingAdjustment, TrainingSettings, WorkoutSession
 from app.models.daily_todo import DailyHabit, DailyHabitLog, DailyTodo
 from app.models.vision import Vision
 from app.models.concept import PillarConcept
@@ -35,6 +35,7 @@ __all__ = [
     "WeeklyReview",
     "WorkoutSession",
     "GolfEvent",
+    "TrainingAdjustment",
     "TrainingSettings",
     "ExerciseLog",
     "ExerciseProfile",

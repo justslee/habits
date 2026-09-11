@@ -760,6 +760,46 @@ class DayPlan:
     label: str
     travel: bool = False
     note: str | None = None
+    adjusted: str | None = (
+        None  # run | rest | golf | swap | move | shorten (your change)
+    )
+    detail: dict | None = None  # the pin: miles/minutes/session/id
+
+
+def _pin_plan(d: datetime.date, pin: dict, travel: bool) -> DayPlan | None:
+    """A day you changed: an outdoor run, a rest day or golf. Sessions (swap/move) are placed by the planner."""
+    k = pin.get("kind")
+    if k == "run":
+        miles = pin.get("miles")
+        mins = pin.get("minutes")
+        label = (
+            f"Outdoor run · {miles:g} mi"
+            if miles
+            else f"Run · {mins} min"
+            if mins
+            else "Outdoor run"
+        )
+        return DayPlan(d, "RUN", label, travel=travel, adjusted="run", detail=pin)
+    if k == "rest":
+        return DayPlan(
+            d,
+            None,
+            pin.get("label") or "Rest (your call)",
+            travel=travel,
+            adjusted="rest",
+            detail=pin,
+        )
+    if k == "golf":
+        return DayPlan(
+            d, None, "Golf (your call)", travel=travel, adjusted="golf", detail=pin
+        )
+    return None
+
+
+def _big_run(pin: dict) -> bool:
+    return pin.get("kind") == "run" and (
+        (pin.get("miles") or 0) >= 3 or (pin.get("minutes") or 0) >= 30
+    )
 
 
 def plan_week(
@@ -769,12 +809,31 @@ def plan_week(
     tournaments: list[datetime.date],
     five_sessions: bool = True,
     golf_days: set[datetime.date] | None = None,
+    pins: dict[datetime.date, dict] | None = None,
+    not_before: datetime.date | None = None,
 ) -> list[DayPlan]:
+    """Lay the week out around travel, tournaments and your own changes (pins).
+
+    pins: {date: {"kind": run|rest|golf|swap|move|shorten, "session": "S3", "miles": 6, "minutes": 45, ...}}
+      run/rest/golf take the day; the session that was there is moved to the nearest free day
+      (lower-body sessions stay 48 h apart; nothing is stacked; nothing moves into the past).
+      swap/move put the named session on that day. shorten keeps the session and caps its minutes.
+      A run of 3+ miles (or 30+ min) covers the week's running, so Session 5 is dropped that week.
+    """
+    pins = {
+        d: p
+        for d, p in (pins or {}).items()
+        if ws <= d <= ws + datetime.timedelta(days=6)
+    }
     days = [ws + datetime.timedelta(days=i) for i in range(7)]
     t = tournament_in_week(ws, tournaments)
     if t is not None:
         out = []
         for d in days:
+            pp = _pin_plan(d, pins[d], d in travel_days) if d in pins else None
+            if pp:
+                out.append(pp)
+                continue
             off = (d - t).days
             tpl = TOURNAMENT_TEMPLATE.get(off)
             if d in travel_days and tpl and tpl[0] not in ("T-event",):
@@ -790,21 +849,41 @@ def plan_week(
         for i in sorted(DEFAULT_WEEK)
         if five_sessions or DEFAULT_WEEK[i] != "S5"
     ]
-    free = [d for d in days if d not in travel_days]
-    # keep the default day when it is free; otherwise move to the nearest free day still unused
+    s5_dropped_for_run = False
+    if any(_big_run(p) for p in pins.values()) and "S5" in wanted:
+        wanted.remove("S5")
+        s5_dropped_for_run = True
+
+    # sessions you pinned explicitly (swap / move) take their day first
     assigned: dict[datetime.date, str] = {}
+    for d, pin in pins.items():
+        sid = pin.get("session")
+        if (
+            pin.get("kind") in ("swap", "move")
+            and sid in SESSIONS
+            and d not in travel_days
+        ):
+            assigned[d] = sid
+            if sid not in wanted:
+                wanted.append(sid)
+    blocked = set(travel_days) | {
+        d for d, p in pins.items() if p.get("kind") in ("run", "rest", "golf")
+    }
+    free = [d for d in days if d not in blocked]
+    # keep the default day when it is free; otherwise move to the nearest free day still unused
     for wd, sid in DEFAULT_WEEK.items():
-        if sid not in wanted:
+        if sid not in wanted or sid in assigned.values():
             continue
         d = ws + datetime.timedelta(days=wd)
         if d in free and d not in assigned:
             assigned[d] = sid
+    relocatable = [d for d in free if not_before is None or d >= not_before]
     for sid in [s for s in PRIORITY if s in wanted and s not in assigned.values()]:
         default_d = ws + datetime.timedelta(
             days=next(k for k, v in DEFAULT_WEEK.items() if v == sid)
         )
         candidates = sorted(
-            (d for d in free if d not in assigned),
+            (d for d in relocatable if d not in assigned),
             key=lambda d: (abs((d - default_d).days), d),
         )
         for d in candidates:
@@ -818,19 +897,33 @@ def plan_week(
     out = []
     dropped = [s for s in wanted if s not in assigned.values()]
     for d in days:
-        if d in travel_days:
+        pp = _pin_plan(d, pins[d], d in travel_days) if d in pins else None
+        if pp:
+            out.append(pp)
+        elif d in travel_days:
             out.append(DayPlan(d, "MOB", "Travel · 8-min mobility", travel=True))
         elif d in assigned:
             sid = assigned[d]
+            pin = pins.get(d)
             moved = DEFAULT_WEEK.get(d.weekday()) != sid
-            out.append(
-                DayPlan(
-                    d,
-                    sid,
-                    SESSIONS[sid]["title"],
-                    note="moved around travel" if moved else None,
+            note = None
+            if pin and pin.get("kind") in ("swap", "move"):
+                note = "your change"
+            elif moved:
+                note = (
+                    "moved around travel" if travel_days else "moved around your change"
                 )
-            )
+            dp = DayPlan(d, sid, SESSIONS[sid]["title"], note=note)
+            if pin and pin.get("kind") == "shorten":
+                dp.adjusted = "shorten"
+                dp.detail = pin
+                dp.note = (
+                    dp.note + " · " if dp.note else ""
+                ) + f"capped at {pin.get('minutes')} min"
+            elif pin and pin.get("kind") in ("swap", "move"):
+                dp.adjusted = pin["kind"]
+                dp.detail = pin
+            out.append(dp)
         else:
             out.append(
                 DayPlan(
@@ -841,17 +934,182 @@ def plan_week(
                     else "Rest, golf or mobility",
                 )
             )
+    # the day after a real run: heavy legs / no intervals
+    for i, dp in enumerate(out[1:], start=1):
+        prev = out[i - 1]
+        if (
+            prev.session == "RUN"
+            and _big_run(prev.detail or {})
+            and dp.session in SESSIONS
+        ):
+            extra = (
+                "legs may be heavy after yesterday's run — hold loads, RPE 7"
+                if dp.session in LOWER_BODY
+                else "run block easy 15 min today, no intervals (you ran yesterday)"
+                if dp.session == "S2"
+                else None
+            )
+            if extra:
+                dp.note = (dp.note + " · " if dp.note else "") + extra
+    notes = []
+    if s5_dropped_for_run:
+        notes.append("Session 5 dropped this week — your run covers it")
     if dropped:
-        note = (
+        notes.append(
             "Not enough free days this week — dropped "
             + ", ".join(dropped)
             + " (no catch-up work)"
         )
+    if notes:
+        note = " · ".join(notes)
         for dp in out:
             if dp.session and dp.session.startswith("S"):
                 dp.note = (dp.note + " · " if dp.note else "") + note
                 break
     return out
+
+
+def run_prescription(
+    d: datetime.date,
+    pin: dict,
+    *,
+    first_event: datetime.date = FIRST_EVENT_DEFAULT,
+    lighter: bool | None = None,
+) -> dict:
+    """An outdoor run you chose instead of the gym, in the same shape as a session prescription."""
+    phase = phase_for(d, first_event)
+    lighter = is_lighter_week(d) if lighter is None else lighter
+    miles = pin.get("miles")
+    minutes = pin.get("minutes") or (round(miles * 9.5) if miles else 40)
+    intensity = pin.get("intensity") or "easy"
+    if intensity == "hard":
+        structure = "10 min easy · middle miles at a steady, strong effort (RPE 7–8) · last 5 min easy"
+    elif intensity == "moderate":
+        structure = "Steady, conversational-to-brisk (RPE 5–6); pick it up over the last mile if you feel good"
+    else:
+        structure = "Easy and conversational (RPE 3–5). Time on feet, not pace."
+    title = f"Outdoor run · {miles:g} mi" if miles else f"Outdoor run · {minutes} min"
+    rules = [
+        "This replaces today's gym session; the session moves to the nearest free day (nothing is stacked).",
+        "It counts as this week's running — Session 5 is dropped and tomorrow's intervals become easy running.",
+        "Finish with the 8-minute mobility routine. If legs are heavy tomorrow, hold loads and keep RPE 7.",
+    ]
+    if lighter:
+        rules.append("Lighter week: keep it genuinely easy.")
+    if phase.key in ("pre_event", "in_season"):
+        rules.append(
+            "Pre-event/in-season: keep runs 20–40 min easy; freshness beats fitness now."
+        )
+    return {
+        "session": "RUN",
+        "title": title,
+        "phase": phase.key,
+        "phase_name": phase.name,
+        "phase_notes": phase.notes,
+        "week_kind": "lighter" if lighter else "normal",
+        "rotation": rotation_week(d),
+        "target_minutes": [max(15, minutes - 5), minutes + 5],
+        "budget": f"Run {minutes} min · mobility 8 min",
+        "warmup": ["Walk 3 min", "Leg swings 10/side", "Easy first half mile"],
+        "blocks": [],
+        "run": {
+            "minutes": minutes,
+            "miles": miles,
+            "intensity": intensity,
+            "structure": structure,
+        },
+        "mobility": DAILY_MOBILITY,
+        "rules": rules,
+        "estimated_duration_minutes": minutes + 8,
+    }
+
+
+def shorten(p: dict, cap: int) -> dict:
+    """Cap a prescription at `cap` minutes the way the plan says: drop the last accessory exercises
+    (omit-first ones go first), then a set from the main lifts. Warm-up and rests stay."""
+    import copy
+
+    p = copy.deepcopy(p)
+    est = int(p.get("estimated_duration_minutes") or p["target_minutes"][1])
+    if est <= cap:
+        return p
+    removed: list[str] = []
+    if p.get("run") and cap < 60 and (p["run"].get("minutes") or 0) > 15:
+        p["run"] = {
+            **p["run"],
+            "minutes": 15,
+            "structure": "15 min easy — shortened day, no intervals",
+        }
+        est -= (p["run"].get("minutes") or 18) - 15 + 3
+    order: list[tuple[int, int]] = []
+    for bi, b in enumerate(p["blocks"]):
+        for ei, e in enumerate(b["exercises"]):
+            if e.get("kind") in ("accessory", "core", "carry"):
+                order.append((bi, ei))
+    order.sort(
+        key=lambda t: (
+            0 if p["blocks"][t[0]]["exercises"][t[1]].get("omit_first") else 1,
+            -t[0],
+            -t[1],
+        )
+    )
+    for bi, ei in order:
+        if est <= cap:
+            break
+        e = p["blocks"][bi]["exercises"][ei]
+        e["_drop"] = True
+        removed.append(e["name"])
+        est -= max(4, int(e["sets"] * 1.5) + 1)
+    for b in p["blocks"]:
+        b["exercises"] = [e for e in b["exercises"] if not e.get("_drop")]
+    p["blocks"] = [b for b in p["blocks"] if b["exercises"]]
+    if est > cap:
+        for b in p["blocks"]:
+            for e in b["exercises"]:
+                if e.get("kind") == "main" and e["sets"] > 2 and est > cap:
+                    e["sets"] -= 1
+                    est -= 3
+                    removed.append(f"one set of {e['name']}")
+    p["target_minutes"] = [max(20, cap - 10), cap]
+    p["estimated_duration_minutes"] = min(est, cap)
+    p["rules"] = [
+        f"Capped at {cap} min: dropped {', '.join(removed) if removed else 'nothing'}. Keep the warm-up and needed rest; never make it up after."
+    ] + list(p.get("rules", []))
+    p["shortened_to"] = cap
+    return p
+
+
+def after_run(p: dict) -> dict:
+    """Session 2 the day after a real run: run block goes easy, no intervals."""
+    import copy
+
+    p = copy.deepcopy(p)
+    if p.get("run"):
+        p["run"] = {
+            **p["run"],
+            "minutes": 15,
+            "structure": "15 min easy, conversational — you ran yesterday; no intervals",
+        }
+    p["rules"] = ["You ran yesterday: no intervals today, keep the run easy."] + list(
+        p.get("rules", [])
+    )
+    return p
+
+
+def describe_change(before: list[DayPlan], after: list[DayPlan]) -> list[str]:
+    """Human lines for what a change did to the week."""
+    lines = []
+    for b, a in zip(before, after):
+        if (b.session, b.label) == (a.session, a.label) and b.note == a.note:
+            continue
+        wd = a.date.strftime("%a")
+        if (b.session, b.label) != (a.session, a.label):
+            old = b.label if b.session else "rest"
+            new = a.label if a.session else a.label
+            lines.append(f"{wd}: {old} → {new}")
+        elif a.note and a.note != b.note:
+            lines.append(f"{wd}: {a.label} · {a.note}")
+    return lines or ["No change to the week."]
 
 
 # ---------------------------------------------------------------------------
