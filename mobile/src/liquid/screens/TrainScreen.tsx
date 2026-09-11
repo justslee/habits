@@ -173,28 +173,54 @@ function TodayView({
   const done = today?.status === 'completed';
   const isRun = p?.session === 'RUN';
 
+  /** Which day of the strip is open. Null means today, which is where the strip starts. */
+  const [picked, setPicked] = useState<string | null>(null);
+  const shown = picked ?? today?.date ?? null;
+  const other: TrainDay | null =
+    picked && picked !== today?.date ? week?.days.find((d: TrainDay) => d.date === picked) ?? null : null;
+
+  // A day rolling over should not leave you looking at a day you did not choose.
+  useEffect(() => { setPicked(null); }, [today?.date]);
+
   return (
     <>
       {week ? (
         <View style={s.weekStrip}>
           {week.days.map((d: TrainDay) => {
             const isToday = d.date === today?.date;
+            const on = d.date === shown;
             return (
-              <View key={d.date} style={[s.day, { backgroundColor: isToday ? c.fg : 'transparent' }]}>
-                <Small style={{ color: isToday ? c.bg : c.muted }}>{d.weekday[0]}</Small>
-                <Animated.Text style={[s.dayNum, { color: isToday ? c.bg : c.fg }]}>
+              <Pressable
+                key={d.date}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`${d.weekday} the ${Number(d.date.slice(8, 10))}. ${d.session ? sessionName(d.session) : 'Rest'}${isToday ? '. Today' : ''}`}
+                onPress={() => { feel.selection(); setPicked(d.date === today?.date ? null : d.date); }}
+                style={({ pressed }) => [
+                  s.day,
+                  {
+                    backgroundColor: on ? c.fg : isToday ? c.panel2 : 'transparent',
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Small style={{ color: on ? c.bg : c.muted }}>{d.weekday[0]}</Small>
+                <Animated.Text style={[s.dayNum, { color: on ? c.bg : c.fg }]}>
                   {Number(d.date.slice(8, 10))}
                 </Animated.Text>
                 <View style={{
                   width: 3, height: 3, borderRadius: 2,
-                  backgroundColor: d.session ? (isToday ? c.bg : c.muted) : 'transparent',
+                  backgroundColor: d.session ? (on ? c.bg : c.muted) : 'transparent',
                   opacity: 0.6,
                 }} />
-              </View>
+              </Pressable>
             );
           })}
         </View>
       ) : null}
+
+      {other ? <OtherDay day={other} isPast={other.date < (today?.date ?? '')} onAdjust={onAdjust} onBack={() => setPicked(null)} /> : (
+        <>
 
       <Hero onHold={p ? () => onAdjust(today?.date, today?.day) : undefined}>
         <Eyebrow numberOfLines={1}>
@@ -265,10 +291,78 @@ function TodayView({
       ) : null}
 
       <Hint>Hold the session to make it fit your day</Hint>
+        </>
+      )}
 
       <Section title="The bigger picture" />
       <GoalLine title="From foundation to fairway" sub={program ? `${program.phase.name} · through ${prettyDate(program.phase.end)}` : 'Your programme'} onPress={onProgram} first />
       <GoalLine title="Small wins, adding up" sub="Training history and progress" onPress={onHistory} />
+    </>
+  );
+}
+
+/**
+ * A day other than today, opened from the strip. The week carries what is planned for each day
+ * but only today has a full prescription, so this shows what is known and offers to change it
+ * rather than pretending to the same detail.
+ */
+function OtherDay({
+  day, isPast, onAdjust, onBack,
+}: {
+  day: TrainDay;
+  isPast: boolean;
+  onAdjust: (d: string, day: TrainDay) => void;
+  onBack: () => void;
+}) {
+  const { c } = useTheme();
+  const rest = !day.session;
+  const statusLine =
+    day.status === 'completed' ? 'Done' : day.status === 'skipped' ? 'Skipped' : isPast ? 'Not logged' : null;
+
+  return (
+    <>
+      <Hero onHold={isPast ? undefined : () => onAdjust(day.date, day)}>
+        <Eyebrow numberOfLines={1}>
+          {prettyDate(day.date)}
+          {day.travel ? ' · travelling' : ''}
+          {day.adjusted ? ' · changed' : ''}
+        </Eyebrow>
+        <Subtitle style={{ maxWidth: 220, marginTop: 13 }}>
+          {rest ? <>Rest.{'\n'}<Em>That counts too.</Em></> : <>{sessionName(day.session)}.{'\n'}<Em>{isPast ? 'Already behind you.' : 'Still ahead.'}</Em></>}
+        </Subtitle>
+        <Body style={{ marginTop: 7, maxWidth: 205 }} numberOfLines={2}>
+          {day.label || (rest ? 'Golf, mobility, or a walk.' : 'Planned for this day.')}
+        </Body>
+        <HeroActions>
+          {isPast ? (
+            <Button label="Back to today" kind="secondary" onPress={onBack} />
+          ) : (
+            <>
+              <Button
+                label="Change this day"
+                iconAfter="arrow-forward"
+                iconAfterRotate={-45}
+                haptic="light"
+                onPress={() => onAdjust(day.date, day)}
+              />
+              <IconButton
+                icon="today-outline"
+                accessibilityLabel="Back to today"
+                background={c.panel2}
+                haptic="soft"
+                onPress={onBack}
+              />
+            </>
+          )}
+        </HeroActions>
+      </Hero>
+
+      {day.note ? <Small style={{ marginTop: 10, color: c.warm }}>{day.note}</Small> : null}
+      {statusLine ? (
+        <Section title="How it went" trailing={<Small>{statusLine}</Small>} />
+      ) : null}
+
+      <Hint>{isPast ? 'Tap today to get back to your session' : 'Hold the card to change this day'}</Hint>
     </>
   );
 }

@@ -756,7 +756,7 @@ const s = StyleSheet.create({
   navBtn: { flex: 1, minHeight: 45, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   navLabel: { fontFamily: fonts.regular, fontSize: 12 },
 
-  strip: { flexDirection: 'row', gap: 10, marginTop: 8, marginBottom: 25, paddingBottom: 19, borderBottomWidth: 1 },
+  strip: { flexDirection: 'row', gap: 10, marginTop: 8, marginBottom: 14, paddingBottom: 16, borderBottomWidth: 1 },
   stripValue: { fontFamily: fonts.serif, fontSize: 29, lineHeight: 29 * 1.1, letterSpacing: -0.4 },
   stripUnit: { fontFamily: fonts.serif, fontSize: 16 },
   stripUnitGap: { fontFamily: fonts.serif, fontSize: 16 },
@@ -786,13 +786,13 @@ const s = StyleSheet.create({
   surfaceValue: { fontFamily: fonts.serif, fontSize: 26, lineHeight: 26 },
 
   pillarGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  pillar: { width: '48%', borderRadius: radius.card, paddingVertical: 17, paddingHorizontal: 16, overflow: 'hidden' },
-  pillarTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, minHeight: 30 },
+  pillar: { width: '48%', borderRadius: radius.card, paddingVertical: 14, paddingHorizontal: 16, overflow: 'hidden' },
+  pillarTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, minHeight: 28 },
   pillarName: { fontFamily: fonts.medium, fontSize: 12, flex: 1, lineHeight: 15 },
   pillarLevel: { fontFamily: fonts.regular, fontSize: 11 },
-  pillarValue: { fontFamily: fonts.serif, fontSize: 34, letterSpacing: -0.6, lineHeight: 34 * 1.3, marginTop: 11 },
+  pillarValue: { fontFamily: fonts.serif, fontSize: 34, letterSpacing: -0.6, lineHeight: 34 * 1.08, marginTop: 8 },
   pillarPct: { fontFamily: fonts.serif, fontSize: 18 },
-  track: { height: 3, borderRadius: 4, marginTop: 7, marginBottom: 10, overflow: 'hidden', position: 'relative' },
+  track: { height: 3, borderRadius: 4, marginTop: 9, marginBottom: 9, overflow: 'hidden', position: 'relative' },
 
   targetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 50, paddingVertical: 12 },
   detailLabel: { fontFamily: fonts.regular, fontSize: 13 },
