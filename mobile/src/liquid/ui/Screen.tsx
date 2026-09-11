@@ -58,7 +58,7 @@ export function Screen({
 
   if (!scroll) {
     return (
-      <View style={[s.root, { backgroundColor: c.bg, paddingTop: insets.top + 13 }, !edgeToEdge && s.pad, style]}>
+      <View style={[s.root, { backgroundColor: c.bg, paddingTop: edgeToEdge ? 0 : insets.top + 13 }, !edgeToEdge && s.pad, style]}>
         {body}
       </View>
     );
@@ -68,7 +68,8 @@ export function Screen({
     <ScrollView
       style={[s.root, { backgroundColor: c.bg }, style]}
       contentContainerStyle={[
-        { paddingTop: insets.top + 13, paddingBottom: 32 },
+        // An edge-to-edge screen owns its own top inset, so its header can run under the status bar.
+        { paddingTop: edgeToEdge ? 0 : insets.top + 13, paddingBottom: 32 },
         !edgeToEdge && s.pad,
       ]}
       showsVerticalScrollIndicator={false}
