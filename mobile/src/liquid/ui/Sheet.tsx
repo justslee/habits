@@ -6,11 +6,14 @@
  * It dismisses after a 65pt drag or a shorter drag released with enough downward velocity.
  * Opening a second sheet cancels the obsolete one. A soft impact marks opening and settling closed.
  *
+ * The sheet rises with the keyboard and gives back the height the keyboard takes, so a field is
+ * never hidden behind it.
+ *
  * `useSheet().open(title, render)` mirrors the prototype's `openSheet(title, body)`.
  */
 
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS, useAnimatedStyle, useSharedValue, withTiming,
@@ -82,6 +85,9 @@ function SheetSurface({
   onExited: () => void;
 }) {
   const { c, moves } = useTheme();
+  const { height: windowHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const lift = useSharedValue(0);
   const y = useSharedValue(moves ? 28 : 0);
   const scale = useSharedValue(moves ? 0.985 : 1);
   const opacity = useSharedValue(1);
@@ -106,6 +112,24 @@ function SheetSurface({
     });
   }, [leaving, moves, onExited, opacity, y]);
 
+  // The panel rises by the keyboard's height and the scroll area gives back the same space,
+  // so a field stays visible instead of sitting behind the keyboard. iOS reports the duration
+  // of its own animation, so the sheet moves in step with it.
+  useEffect(() => {
+    const to = (height: number, duration: number) => {
+      setKeyboardHeight(height);
+      lift.value = withTiming(height, { duration: duration || 250 });
+    };
+    const subs = [
+      Keyboard.addListener('keyboardWillShow', e => to(e.endCoordinates.height, e.duration)),
+      Keyboard.addListener('keyboardWillHide', e => to(0, e.duration)),
+      // Android has no "will" events; these are harmless repeats on iOS.
+      Keyboard.addListener('keyboardDidShow', e => to(e.endCoordinates.height, e.duration)),
+      Keyboard.addListener('keyboardDidHide', e => to(0, e.duration)),
+    ];
+    return () => subs.forEach(sub => sub.remove());
+  }, [lift]);
+
   const dismiss = useCallback(() => onRequestClose(), [onRequestClose]);
 
   const pan = Gesture.Pan()
@@ -128,7 +152,7 @@ function SheetSurface({
     .onFinalize(() => { dragging.value = false; });
 
   const panelStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: y.value }, { scale: scale.value }],
+    transform: [{ translateY: y.value - lift.value }, { scale: scale.value }],
   }));
   const layerStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
@@ -155,9 +179,11 @@ function SheetSurface({
               </Pressable>
             </View>
             <ScrollView
-              style={{ maxHeight: 460 }}
+              style={{ maxHeight: Math.max(180, Math.min(560, windowHeight - keyboardHeight - 230)) }}
               contentContainerStyle={{ paddingBottom: 24 }}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
             >
               {children}
             </ScrollView>
