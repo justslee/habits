@@ -321,11 +321,15 @@ function Deck({ cycle, deck, setDeck, go, load }: any) {
           <View style={[s.recipeArt, { backgroundColor: c.artBg }]}>
             <Eyebrow style={{ color: c.artFg }}>{card.source_site ?? 'Recipe'}{card.rating ? ` · ${card.rating.toFixed(1)}★` : ''}</Eyebrow>
             <View style={s.bowlSmall}><Bowl size={120} /></View>
+            <Animated.Text style={[s.recipeArtWord, { color: c.artFg }]} numberOfLines={1}>
+              {(card.protein_source ?? card.cuisine ?? 'Home cooking').replace(/^./, ch => ch.toUpperCase())}
+            </Animated.Text>
           </View>
           <View style={{ padding: 18, paddingHorizontal: 20 }}>
             <Animated.Text style={[s.recipeTitle, { color: c.fg }]}>{card.title}</Animated.Text>
             <Body style={{ marginTop: 10, marginBottom: 15 }} numberOfLines={3}>
-              {card.notes ?? `${card.cuisine ?? 'Familiar'} · ${card.reheat} reheat · cooks ${card.servings} servings.`}
+              {card.notes
+                ?? `${(card.cuisine ?? 'Familiar').replace(/^./, ch => ch.toUpperCase())} · ${card.reheat} reheat · cooks ${card.servings} servings.`}
             </Body>
             <View style={[s.recipeStats, { borderTopColor: c.line }]}>
               <Stat value={`${card.prep_minutes} min`} label="active prep" />
@@ -740,6 +744,7 @@ const s = StyleSheet.create({
   recipe: { borderRadius: 25, overflow: 'hidden', marginTop: 21, marginBottom: 11 },
   recipeArt: { minHeight: 148, padding: 16, paddingHorizontal: 19, justifyContent: 'space-between', overflow: 'hidden' },
   recipeTitle: { fontFamily: fonts.serif, fontSize: 34, lineHeight: 34, letterSpacing: -0.6 },
+  recipeArtWord: { fontFamily: fonts.medium, fontSize: 31, letterSpacing: -1, lineHeight: 40, maxWidth: 220 },
   recipeStats: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 14, borderTopWidth: 1, gap: 8 },
   deckActions: { flexDirection: 'row', gap: 9, marginTop: 18 },
 

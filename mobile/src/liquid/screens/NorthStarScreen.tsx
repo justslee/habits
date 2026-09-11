@@ -14,8 +14,8 @@ import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  ConceptTreeData, DailySummaryData, DashboardStats, HeatmapDay, VisionData,
-  getDailySummary, getDashboardStats, getHeatmap, getPillarConcepts, getVision,
+  ConceptTreeData, DailySummaryData, DashboardStats, EntryResponse, HeatmapDay, VisionData,
+  getDailySummary, getDashboardStats, getHeatmap, getPillarConcepts, getRecentEntries, getVision,
 } from '../../api/client';
 import { useTheme } from '../theme';
 import { fonts, gesture, radius } from '../tokens';
@@ -63,6 +63,7 @@ export default function NorthStarScreen({ navigation }: any) {
   const [vision, setVision] = useState<VisionData | null>(null);
   const [summary, setSummary] = useState<DailySummaryData | null>(null);
   const [trees, setTrees] = useState<Map<number, ConceptTreeData>>(new Map());
+  const [entries, setEntries] = useState<EntryResponse[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const [range, setRange] = useState<string>('90');
@@ -82,8 +83,8 @@ export default function NorthStarScreen({ navigation }: any) {
   }, []));
 
   const load = useCallback(async () => {
-    const [s, h, v, d] = await Promise.allSettled([
-      getDashboardStats(), getHeatmap(365), getVision(), getDailySummary(),
+    const [s, h, v, d, e] = await Promise.allSettled([
+      getDashboardStats(), getHeatmap(365), getVision(), getDailySummary(), getRecentEntries(30),
     ]);
     if (s.status === 'fulfilled') {
       setStats(s.value);
@@ -96,6 +97,7 @@ export default function NorthStarScreen({ navigation }: any) {
     if (h.status === 'fulfilled') setHistory(h.value);
     if (v.status === 'fulfilled') setVision(v.value);
     if (d.status === 'fulfilled') setSummary(d.value);
+    if (e.status === 'fulfilled') setEntries(e.value);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -196,6 +198,7 @@ export default function NorthStarScreen({ navigation }: any) {
         {view === 'compound' ? (
           <Compound
             growth={growth} history={history} stats={stats} pillars={pillars}
+            entries={entries}
             range={range} setRange={setRange} mode={mode} setMode={setMode}
             unit={unit} setUnit={setUnit} hidden={hidden} setHidden={setHidden}
             focus={today} setFocus={setFocus} heat={heatIndex} setHeat={setHeat}
@@ -280,7 +283,7 @@ function StatStrip({ items }: { items: { label: string; value: string; unit?: st
 // --- Compound ---------------------------------------------------------------
 
 function Compound({
-  growth, history, stats, pillars, range, setRange, mode, setMode, unit, setUnit,
+  growth, history, stats, pillars, entries, range, setRange, mode, setMode, unit, setUnit,
   hidden, setHidden, focus, setFocus, heat, setHeat, navigation,
 }: any) {
   const { c } = useTheme();
@@ -446,6 +449,22 @@ function Compound({
         <Surface label="Logged days" value={`${history.filter((h: HeatmapDay) => h.count > 0).length}`} sub={`of ${history.length}`} />
         <Surface label="Speaking" value={stats?.pillar_breakdown.find((p: any) => /speak/i.test(p.pillar_name))?.entry_count?.toString() ?? '—'} sub="sessions logged" onPress={() => navigation.navigate('Speak')} />
       </View>
+
+      <Section title="Recent deep work." trailing={<Small>Last five</Small>} />
+      {entries.length ? entries.slice(0, 5).map((e: EntryResponse) => {
+        const idx = pillars.findIndex((p: PillarView) => p.id === e.pillar_tags?.[0]);
+        return (
+          <View key={e.id} style={s.recent}>
+            <View style={{ width: 5, borderRadius: 5, backgroundColor: idx >= 0 ? pillars[idx].color : c.muted }} />
+            <View style={{ flex: 1 }}>
+              <Animated.Text style={[s.detailLabel, { color: c.fg }]} numberOfLines={2}>{e.description}</Animated.Text>
+              <Small style={{ marginTop: 5 }}>
+                {idx >= 0 ? `${pillars[idx].name} · ` : ''}{prettyDate(e.entry_date)} · {e.time_invested_minutes} min
+              </Small>
+            </View>
+          </View>
+        );
+      }) : <Body>No deep work logged in the last month.</Body>}
 
       <Section title="A record of showing up." trailing={<Small>6 months</Small>} />
       <Heatmap
@@ -761,4 +780,5 @@ const s = StyleSheet.create({
   habitStat: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 15, borderBottomWidth: 1 },
   check: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   nudge: { borderLeftWidth: 2, paddingLeft: 14, marginVertical: 22 },
+  recent: { flexDirection: 'row', gap: 12, paddingVertical: 15, borderBottomWidth: 0 },
 });
