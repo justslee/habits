@@ -1,12 +1,10 @@
-"""Recipe discovery from JSON-LD pages, dedupe, constraints; merchant deals."""
-
-import json
+"""Recipe discovery = one model call with web search; merchant deals."""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models.food import Recipe
+from app.models.food import PantryItem, Recipe
 from app.services import recipe_discovery as rd
 
 
@@ -14,222 +12,198 @@ def _client():
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-def _page(
-    title,
-    ingredients,
-    rating="4.8",
-    count="612",
-    prep="PT15M",
-    cook="PT30M",
-    yield_="4 servings",
-    cuisine="Korean",
-    graph=False,
-):
-    rec = {
-        "@context": "https://schema.org",
-        "@type": "Recipe",
-        "name": title,
-        "recipeIngredient": ingredients,
-        "recipeInstructions": [
-            {"@type": "HowToStep", "text": "Marinate the meat."},
-            {"@type": "HowToStep", "text": "Pan-fry until done."},
-        ],
-        "prepTime": prep,
-        "cookTime": cook,
-        "recipeYield": yield_,
-        "recipeCuisine": cuisine,
-        "aggregateRating": {
-            "@type": "AggregateRating",
-            "ratingValue": rating,
-            "ratingCount": count,
-        },
-        "image": {"@type": "ImageObject", "url": "https://img.example/x.jpg"},
-    }
-    data = (
-        {"@context": "https://schema.org", "@graph": [{"@type": "WebPage"}, rec]}
-        if graph
-        else rec
-    )
-    return f'<html><head><script type="application/ld+json">{json.dumps(data)}</script></head><body>x</body></html>'
+BASE_ING = [
+    {
+        "name": "chicken thighs",
+        "quantity": 2,
+        "unit": "lb",
+        "essential": True,
+        "reason": "core",
+        "category": "protein",
+        "preferred_store": "wf",
+        "est_price": 12.99,
+        "pack_label": "3 lb",
+    },
+    {
+        "name": "soy sauce",
+        "quantity": 3,
+        "unit": "tbsp",
+        "essential": True,
+        "reason": "the sauce",
+        "category": "staple",
+        "shelf_stable": True,
+        "preferred_store": "hmart",
+        "est_price": 4.99,
+        "pack_label": "1 L",
+    },
+    {
+        "name": "mirin",
+        "quantity": 1,
+        "unit": "tbsp",
+        "essential": True,
+        "category": "staple",
+        "shelf_stable": True,
+        "preferred_store": "hmart",
+        "est_price": 5.49,
+        "pack_label": "500 ml",
+    },
+    {
+        "name": "sesame seeds",
+        "essential": False,
+        "reason": "garnish",
+        "category": "staple",
+        "shelf_stable": True,
+    },
+]
 
 
-PAGES = {
-    "https://www.maangchi.com/recipe/jeyuk-bokkeum": _page(
-        "Spicy stir-fried pork (Jeyuk bokkeum)",
-        [
-            "1 pound pork shoulder, thinly sliced",
-            "3 tablespoons gochujang",
-            "1 tablespoon gochugaru",
-            "1 medium onion, sliced",
-            "4 cloves garlic, minced",
-            "2 scallions, chopped",
-            "1 tablespoon soy sauce",
-            "1 teaspoon sesame seeds, for garnish",
-        ],
-        graph=True,
-    ),
-    "https://www.justonecookbook.com/gyudon/": _page(
-        "Gyudon (Beef Bowl)",
-        [
-            "1 lb thinly sliced beef",
-            "1 onion",
-            "4 tbsp soy sauce",
-            "2 tbsp mirin",
-            "2 tbsp sake",
-            "1 cup dashi",
-            "2 cups cooked rice",
-        ],
-        rating="4.9",
-        count="1024",
-        cuisine="Japanese",
-    ),
-    "https://example.com/blog": "<html><body>no recipe here</body></html>",
-    "https://example.com/too-many": _page(
-        "Fussy dish", [f"1 tsp spice {i}" for i in range(16)], cuisine="Fusion"
-    ),
-}
-
-
-async def fake_fetch(url: str) -> str:
-    if url not in PAGES:
-        raise RuntimeError("404")
-    return PAGES[url]
-
-
-def test_extract_recipe_reads_jsonld_and_graph():
-    f = rd.extract_recipe(
-        PAGES["https://www.maangchi.com/recipe/jeyuk-bokkeum"],
-        "https://www.maangchi.com/recipe/jeyuk-bokkeum",
-    )
-    assert f and f.title.startswith("Spicy stir-fried pork")
-    assert (
-        f.rating == 4.8
-        and f.review_count == 612
-        and f.prep_minutes == 15
-        and f.cook_minutes == 30
-        and f.servings == 4
-    )
-    assert (
-        f.cuisine == "korean"
-        and f.image == "https://img.example/x.jpg"
-        and len(f.steps) == 2
-    )
-    assert rd.extract_recipe(PAGES["https://example.com/blog"], "x") is None
-
-
-def test_heuristic_normalise_marks_garnish_optional_and_parses_quantities():
-    f = rd.extract_recipe(
-        PAGES["https://www.maangchi.com/recipe/jeyuk-bokkeum"],
-        "https://www.maangchi.com/recipe/jeyuk-bokkeum",
-    )
-    n = rd.heuristic_normalise(f)
-    by = {i["name"]: i for i in n["ingredients"]}
-    assert (
-        by["pork shoulder"]["quantity"] == 1.0
-        and by["pork shoulder"]["unit"] == "lb"
-        and by["pork shoulder"]["essential"]
-    )
-    assert by["gochujang"]["category"] == "staple" and by["gochujang"]["shelf_stable"]
-    assert by["sesame seeds"]["essential"] is False
-    assert (
-        n["protein_source"] == "pork"
-        and n["cuisine"] == "korean"
-        and n["suitable"] is True
-    )
-
-
-def test_bot_wall_detection():
-    assert rd._looks_blocked(403, "") and rd._looks_blocked(
-        200, "<title>Just a moment...</title>"
-    )
-    assert not rd._looks_blocked(200, "<html>recipe</html>")
-
-
-def test_rank_urls_prefers_priority_sources():
-    ranked = rd.rank_urls(
-        [
-            "https://random.blog/x",
-            "https://www.justonecookbook.com/a/",
-            "https://www.maangchi.com/recipe/b?utm=1",
-            "https://www.maangchi.com/recipe/b",
+async def fake_searcher(system, user):
+    fake_searcher.calls.append((system, user))
+    return {
+        "recipes": [
+            {
+                "title": "Chicken Bulgogi Bowls",
+                "source_url": "https://www.maangchi.com/recipe/dak-bulgogi",
+                "source_site": "maangchi",
+                "rating": 4.8,
+                "review_count": 300,
+                "cuisine": "korean",
+                "protein_source": "chicken",
+                "prep_minutes": 15,
+                "cook_minutes": 15,
+                "servings": 4,
+                "protein_g_per_serving": 40,
+                "prep_days": 3,
+                "reheat": "pan",
+                "batch_ok": True,
+                "why": "batchable, few ingredients",
+                "ingredients": BASE_ING,
+            },
+            {
+                "title": "Dak galbi",
+                "source_url": "https://www.maangchi.com/recipe/dakgalbi",
+                "source_site": "maangchi",
+                "cuisine": "korean",
+                "protein_source": "chicken",
+                "servings": 4,
+                "prep_days": 3,
+                "reheat": "pan",
+                "ingredients": BASE_ING,
+            },
+            {
+                "title": "Weekend Ramen Project",
+                "source_url": "https://example.com/ramen",
+                "source_site": "example",
+                "cuisine": "japanese",
+                "protein_source": "pork",
+                "prep_minutes": 60,
+                "cook_minutes": 240,
+                "servings": 6,
+                "prep_days": 3,
+                "reheat": "pan",
+                "ingredients": BASE_ING,
+            },
+            {
+                "title": "Untraceable",
+                "source_url": "",
+                "source_site": "x",
+                "cuisine": "korean",
+                "protein_source": "beef",
+                "servings": 4,
+                "prep_days": 3,
+                "reheat": "pan",
+                "ingredients": BASE_ING,
+            },
+            {
+                "title": "Kitchen-sink stew",
+                "source_url": "https://example.com/stew",
+                "source_site": "example",
+                "cuisine": "korean",
+                "protein_source": "beef",
+                "servings": 4,
+                "prep_days": 3,
+                "reheat": "pan",
+                "ingredients": [
+                    {"name": f"thing {i}", "essential": True, "category": "other"}
+                    for i in range(14)
+                ],
+            },
         ]
+    }
+
+
+fake_searcher.calls = []
+
+
+def test_prompt_and_schema_are_compact():
+    assert "steps" not in str(rd.SEARCH_SCHEMA), (
+        "no recipe steps: they blow the output budget"
     )
-    assert (
-        ranked[0].startswith("https://www.maangchi.com")
-        and ranked[1].startswith("https://www.justonecookbook.com")
-        and len(ranked) == 3
-    )
+    assert rd.SOURCE_PRIORITY[0] == "maangchi.com"
+    assert "Maangchi" in rd.DEFAULT_DISCOVERY_PROMPT
 
 
 @pytest.mark.asyncio
-async def test_discover_adds_candidates_dedupes_and_filters(db_session):
+async def test_discovery_uses_brief_dedupes_and_enforces_rules(db_session):
     async with _client() as client:
         await client.get("/api/v1/food/recipes")
-        out = await rd.discover(
-            db_session,
-            1,
-            limit=6,
-            urls=list(PAGES),
-            fetch=fake_fetch,
-            normaliser=lambda f: _async(rd.heuristic_normalise(f)),
+        st = (
+            await client.patch(
+                "/api/v1/food/settings",
+                json={
+                    "discovery_prompt": "more Japanese, no seafood, like the bowls at a Koreatown lunch spot"
+                },
+            )
+        ).json()
+        assert "no seafood" in st["discovery_prompt"]
+        fake_searcher.calls.clear()
+        out = await rd.discover(db_session, 1, limit=4, searcher=fake_searcher)
+        assert out["mode"] == "llm_search"
+        system, user = fake_searcher.calls[0]
+        assert "no seafood" in user and "Dak galbi" in user, (
+            "brief and known titles travel in the prompt"
         )
-        titles = {a["title"] for a in out["added"]}
-        assert "Gyudon (Beef Bowl)" in titles and any(
-            t.startswith("Spicy stir-fried pork") for t in titles
+        assert "web search" in system and "12" in system
+        outcomes = {l.get("title") or l["url"]: l["outcome"] for l in out["log"]}
+        assert outcomes["Chicken Bulgogi Bowls"] == "added"
+        assert outcomes["Dak galbi"] == "duplicate", "seeded url is known"
+        assert outcomes["Weekend Ramen Project"] == "not a fit", (
+            "300 minutes breaks the rule"
         )
-        assert "Fussy dish" not in titles, "16 ingredients breaks the ≤12 rule"
-        assert out["skipped"] >= 2
+        assert outcomes["Kitchen-sink stew"] == "not a fit", (
+            "14 essentials breaks the rule"
+        )
+        assert outcomes[""] == "skipped"
         r = (
             db_session.query(Recipe)
-            .filter(Recipe.title == "Gyudon (Beef Bowl)")
+            .filter(Recipe.title == "Chicken Bulgogi Bowls")
             .first()
         )
         assert (
-            r.status == "candidate"
-            and r.rating == 4.9
-            and r.source_site == "justonecookbook"
-            and r.protein_source == "beef"
+            r
+            and r.status == "candidate"
+            and r.rating == 4.8
+            and r.source_site == "maangchi"
+            and r.protein_source == "chicken"
         )
-        assert {ri.ingredient.name for ri in r.ingredients} >= {
-            "beef",
-            "soy sauce",
-            "mirin",
-        }
-        assert all(ri.ingredient.package_sizes for ri in r.ingredients), (
-            "new ingredients get a store and a pack estimate"
-        )
-        from app.models.food import PantryItem
-
+        names = {ri.ingredient.name: ri.essential for ri in r.ingredients}
+        assert names["chicken thighs"] is True and names["sesame seeds"] is False
         staples = [ri.ingredient for ri in r.ingredients if ri.ingredient.shelf_stable]
         assert staples and all(
             db_session.query(PantryItem)
             .filter(PantryItem.ingredient_id == i.id)
             .first()
             for i in staples
-        ), "new shelf-stable staples land in the pantry check"
-        # second pass: nothing new
-        again = await rd.discover(
-            db_session,
-            1,
-            limit=6,
-            urls=list(PAGES),
-            fetch=fake_fetch,
-            normaliser=lambda f: _async(rd.heuristic_normalise(f)),
-        )
+        ), "new staples land in the pantry check"
+        again = await rd.discover(db_session, 1, limit=4, searcher=fake_searcher)
         assert again["added"] == []
-        # the new candidates can show up in a deck
         cycle = (
             await client.post("/api/v1/food/cycles", json={"start_date": "2026-10-04"})
         ).json()
         deck = (await client.get(f"/api/v1/food/cycles/{cycle['id']}/deck")).json()
         assert deck["remaining_count"] > 0
-        assert (await client.get("/api/v1/food/discover/queries")).json()["sources"][
-            0
-        ] == "maangchi.com"
-
-
-async def _async(v):
-    return v
+        q = (await client.get("/api/v1/food/discover/queries")).json()
+        assert q["sources"][0] == "maangchi.com" and "no seafood" in q["prompt"]
 
 
 @pytest.mark.asyncio
@@ -243,7 +217,6 @@ async def test_merchants_carry_location_channel_and_deals(db_session):
             and ms["hmart"]["channel"] == "site"
         )
         assert ms["weg"]["channel"] == "doordash" and ms["wf"]["channel"] == "amazon"
-        # add a DoorDash grocer with a deal, and put a deal on Wegmans
         r = await client.post(
             "/api/v1/food/merchants",
             json={
@@ -275,7 +248,6 @@ async def test_merchants_carry_location_channel_and_deals(db_session):
             )
         ).json()
         assert w["deal_active"] is True
-        # bags apply the deal as a negative line when the bag clears the deal minimum
         recipes = {
             x["slug"]: x for x in (await client.get("/api/v1/food/recipes")).json()
         }
@@ -301,145 +273,3 @@ async def test_merchants_carry_location_channel_and_deals(db_session):
             assert any(i.get("is_deal") for i in weg["items"]), "deal line applied"
         scan = (await client.post("/api/v1/food/merchants/scan-deals")).json()
         assert scan["mode"] == "dry_run"
-
-
-@pytest.mark.asyncio
-async def test_llm_search_discovery_upserts_and_filters(db_session):
-    async with _client() as client:
-        await client.get("/api/v1/food/recipes")
-        # the owner's brief is editable and travels with the search
-        st = (
-            await client.patch(
-                "/api/v1/food/settings",
-                json={
-                    "discovery_prompt": "more Japanese, no seafood, like the bowls at a Koreatown lunch spot"
-                },
-            )
-        ).json()
-        assert "no seafood" in st["discovery_prompt"]
-        captured = {}
-
-        async def fake_searcher(system, user):
-            captured["user"] = user
-            base_ing = [
-                {
-                    "name": "chicken thighs",
-                    "quantity": 2,
-                    "unit": "lb",
-                    "essential": True,
-                    "reason": "core",
-                    "category": "protein",
-                    "preferred_store": "wf",
-                    "est_price": 12.99,
-                    "pack_label": "3 lb",
-                },
-                {
-                    "name": "soy sauce",
-                    "quantity": 3,
-                    "unit": "tbsp",
-                    "essential": True,
-                    "reason": "the sauce",
-                    "category": "staple",
-                    "shelf_stable": True,
-                    "preferred_store": "hmart",
-                    "est_price": 4.99,
-                    "pack_label": "1 L",
-                },
-                {
-                    "name": "sesame seeds",
-                    "essential": False,
-                    "reason": "garnish",
-                    "category": "staple",
-                    "shelf_stable": True,
-                },
-            ]
-            return {
-                "recipes": [
-                    {
-                        "title": "Chicken Bulgogi Bowls",
-                        "source_url": "https://www.maangchi.com/recipe/dak-bulgogi",
-                        "source_site": "maangchi",
-                        "rating": 4.8,
-                        "review_count": 300,
-                        "cuisine": "korean",
-                        "protein_source": "chicken",
-                        "prep_minutes": 15,
-                        "cook_minutes": 15,
-                        "servings": 4,
-                        "protein_g_per_serving": 40,
-                        "prep_days": 3,
-                        "reheat": "pan",
-                        "batch_ok": True,
-                        "why": "batchable, few ingredients",
-                        "ingredients": base_ing,
-                    },
-                    {
-                        "title": "Dak galbi",
-                        "source_url": "https://www.maangchi.com/recipe/dakgalbi",
-                        "source_site": "maangchi",
-                        "cuisine": "korean",
-                        "protein_source": "chicken",
-                        "servings": 4,
-                        "prep_days": 3,
-                        "reheat": "pan",
-                        "ingredients": base_ing,
-                    },
-                    {
-                        "title": "Weekend Ramen Project",
-                        "source_url": "https://example.com/ramen",
-                        "source_site": "example",
-                        "cuisine": "japanese",
-                        "protein_source": "pork",
-                        "prep_minutes": 60,
-                        "cook_minutes": 240,
-                        "servings": 6,
-                        "prep_days": 3,
-                        "reheat": "pan",
-                        "ingredients": base_ing,
-                    },
-                    {
-                        "title": "Untraceable",
-                        "source_url": "",
-                        "source_site": "x",
-                        "cuisine": "korean",
-                        "protein_source": "beef",
-                        "servings": 4,
-                        "prep_days": 3,
-                        "reheat": "pan",
-                        "ingredients": base_ing,
-                    },
-                ]
-            }
-
-        out = await rd.discover_with_llm_search(
-            db_session, 1, limit=4, searcher=fake_searcher
-        )
-        assert out["mode"] == "llm_search"
-        assert "no seafood" in captured["user"] and "Dak galbi" in captured["user"], (
-            "brief + known titles are in the prompt"
-        )
-        outcomes = {l.get("title") or l["url"]: l["outcome"] for l in out["log"]}
-        assert outcomes["Chicken Bulgogi Bowls"] == "added"
-        assert outcomes["Dak galbi"] == "duplicate", "seeded recipe url is known"
-        assert outcomes["Weekend Ramen Project"] == "not a fit", (
-            "300 minutes breaks the rule"
-        )
-        assert outcomes[""] == "skipped"
-        r = (
-            db_session.query(Recipe)
-            .filter(Recipe.title == "Chicken Bulgogi Bowls")
-            .first()
-        )
-        assert (
-            r
-            and r.status == "candidate"
-            and r.rating == 4.8
-            and r.source_site == "maangchi"
-        )
-        names = {ri.ingredient.name: ri.essential for ri in r.ingredients}
-        assert names["chicken thighs"] is True and names["sesame seeds"] is False
-        # rerun: duplicate, nothing added
-        again = await rd.discover_with_llm_search(
-            db_session, 1, limit=4, searcher=fake_searcher
-        )
-        assert again["added"] == []

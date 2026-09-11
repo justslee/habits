@@ -1,30 +1,28 @@
-"""Recipe discovery from the web (docs/PLAN-FOOD.md §4).
+"""Recipe discovery = one model call with web search (docs/PLAN-FOOD.md §4).
 
-1. queries shaped by the taste profile, plus a source-priority list (Maangchi, Just One
-   Cookbook first); with no search key configured, a curated URL list per source keeps
-   discovery working
-2. fetch the page and read its schema.org Recipe JSON-LD: title, ingredients, steps,
-   times, yield, rating and review count — most recipe sites publish it
-3. normalise with the LLM when a key is present (essential verdicts with reasons, protein
-   estimate, keeps-for days, reheat, canonical ingredient names with store and pack
-   estimates); a heuristic path covers the no-key case
-4. filter to the owner's constraints (≤ 12 ingredients, ≤ 90 minutes, batchable) and
-   upsert as `candidate` recipes; the deck mixes them in at 30 %
+The model searches the web itself, reads the pages, and returns recipes already normalised
+for the planner. No scraping, no browser, no bot walls. The prompt carries the owner's
+standing brief (editable in the app), the learned taste weights, and the titles already in
+the catalogue so it looks for new ones. Code still enforces the hard rules (≤ 12 essential
+ingredients, ≤ 90 minutes) and dedupes by URL.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
-from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-import httpx
 from sqlalchemy.orm import Session
 
-from app.models.food import Ingredient, Recipe, RecipeIngredient
+from app.models.food import (
+    FoodSettings,
+    Ingredient,
+    PantryItem,
+    Recipe,
+    RecipeIngredient,
+)
 from app.services import food_planner as fp
 
 logger = logging.getLogger(__name__)
@@ -39,71 +37,8 @@ SOURCE_PRIORITY = [
     "cooking.nytimes.com",
     "thewoksoflife.com",
 ]
-# Works without a search key: known batch-friendly, high-protein pages on the priority sources.
-CURATED_URLS = [
-    "https://www.maangchi.com/recipe/dakgangjeong",
-    "https://www.maangchi.com/recipe/jeyuk-deopbap",
-    "https://www.maangchi.com/recipe/doenjang-jjigae",
-    "https://www.maangchi.com/recipe/samgyetang",
-    "https://www.maangchi.com/recipe/yukgaejang",
-    "https://www.maangchi.com/recipe/tteokgalbi",
-    "https://www.maangchi.com/recipe/godeungeo-gui",
-    "https://www.maangchi.com/recipe/dakjjim",
-    "https://www.justonecookbook.com/gyudon/",
-    "https://www.justonecookbook.com/chicken-katsu/",
-    "https://www.justonecookbook.com/nikujaga/",
-    "https://www.justonecookbook.com/miso-salmon/",
-    "https://www.justonecookbook.com/japanese-curry/",
-    "https://www.justonecookbook.com/chicken-teriyaki/",
-    "https://www.justonecookbook.com/shogayaki/",
-    "https://www.justonecookbook.com/butadon/",
-]
-MAANGCHI_INDEX = "https://www.maangchi.com/recipes"
-INDEX_KEYWORDS = (
-    "dak",
-    "chicken",
-    "jeyuk",
-    "pork",
-    "bulgogi",
-    "beef",
-    "galbi",
-    "jjim",
-    "jjigae",
-    "tang",
-    "gui",
-    "bokkeum",
-    "deopbap",
-    "samgyeopsal",
-    "godeungeo",
-    "saengseon",
-)
 MAX_INGREDIENTS = 12
-MAX_BROWSER_PAGES_PER_HOST = (
-    3  # be a polite guest on bot-walled sites; the weekly run accumulates
-)
 MAX_MINUTES = 90
-GARNISH_WORDS = re.compile(
-    r"\b(garnish|optional|to serve|for serving|sesame seeds|toasted sesame|sprinkle)\b",
-    re.I,
-)
-QTY_RE = re.compile(
-    r"^\s*(?:plus\s+)?(\d+\s*[½¼¾⅓⅔]|\d+(?:[./]\d+)?|\d+\s+\d/\d|½|¼|¾|⅓|⅔)?\s*(tablespoons|tablespoon|tbsp|teaspoons|teaspoon|tsp|pounds|pound|lbs|lb|ounces|ounce|oz|cups|cup|cloves|clove|pieces|piece|packages|package|cans|can|slices|slice|bunch|head|inch|kg|g|ml|l)?\b\s*(?:of\s+)?(.*)$",
-    re.I,
-)
-FRACTIONS = {"½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 0.33, "⅔": 0.67}
-PROTEIN_WORDS = {
-    "chicken": "chicken",
-    "beef": "beef",
-    "short rib": "beef",
-    "brisket": "beef",
-    "pork": "pork",
-    "salmon": "fish",
-    "mackerel": "fish",
-    "cod": "fish",
-    "shrimp": "fish",
-    "tofu": "tofu",
-    "egg": "egg",
-}
 STORE_FOR_CATEGORY = {
     "protein": "wf",
     "produce": "weg",
@@ -112,996 +47,6 @@ STORE_FOR_CATEGORY = {
     "dairy": "weg",
     "other": "hmart",
 }
-KOREAN_STAPLES = (
-    "gochujang",
-    "gochugaru",
-    "doenjang",
-    "soy sauce",
-    "sesame oil",
-    "mirin",
-    "rice cakes",
-    "kimchi",
-    "dashi",
-    "miso",
-    "udon",
-    "rice",
-    "fish sauce",
-    "rice wine",
-    "sake",
-)
-
-
-@dataclass
-class Found:
-    url: str
-    title: str
-    rating: float | None
-    review_count: int | None
-    ingredients_raw: list[str]
-    steps: list[str]
-    prep_minutes: int
-    cook_minutes: int
-    servings: int
-    cuisine: str | None
-    image: str | None = None
-    extra: dict = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# 1. queries
-# ---------------------------------------------------------------------------
-
-
-def queries_for(db: Session, user_id: int) -> list[str]:
-    profile = fp.taste_profile(db, user_id, n=8)
-    proteins = [p["label"] for p in profile if p["feature"].startswith("protein:")][
-        :2
-    ] or ["chicken", "beef"]
-    cuisines = [p["label"] for p in profile if p["feature"].startswith("cuisine:")][
-        :2
-    ] or ["korean", "japanese"]
-    qs = []
-    for c in cuisines:
-        for pr in proteins:
-            qs.append(f"{c} {pr} recipe meal prep high protein")
-    qs.append("site:maangchi.com chicken recipe")
-    qs.append("site:justonecookbook.com one pot recipe")
-    return qs[:6]
-
-
-async def search_urls(queries: list[str]) -> list[str]:
-    try:
-        from app.services.web_research import _search
-    except Exception:  # noqa: BLE001
-        return []
-    urls: list[str] = []
-    for q in queries:
-        try:
-            for r in await _search(q):
-                u = getattr(r, "url", None) or (
-                    r.get("url") if isinstance(r, dict) else None
-                )
-                if u:
-                    urls.append(u)
-        except Exception as e:  # noqa: BLE001
-            logger.info("search failed for %r: %s", q, e)
-    return urls
-
-
-def rank_urls(urls: list[str]) -> list[str]:
-    def key(u: str) -> int:
-        host = urlparse(u).netloc.replace("www.", "")
-        return (
-            SOURCE_PRIORITY.index(host)
-            if host in SOURCE_PRIORITY
-            else len(SOURCE_PRIORITY)
-        )
-
-    seen, out = set(), []
-    for u in sorted(urls, key=key):
-        u = u.split("#")[0].split("?")[0]
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
-    return out
-
-
-# ---------------------------------------------------------------------------
-# 2. fetch + JSON-LD
-# ---------------------------------------------------------------------------
-
-
-BOT_WALL_MARKERS = (
-    "Attention Required! | Cloudflare",
-    "Just a moment...",
-    "cf-challenge",
-    "captcha-delivery",
-)
-
-
-def _looks_blocked(status: int, text: str) -> bool:
-    return status in (403, 429, 503) or any(m in text[:6000] for m in BOT_WALL_MARKERS)
-
-
-class BrowserSession:
-    """One headed Chrome (the Habits profile) reused across a discovery run. Headless Chrome
-    does not clear Maangchi's Cloudflare check; headed does. Throttled to be a polite guest."""
-
-    def __init__(self, headless: bool = False, min_gap_s: float = 20.0):
-        import concurrent.futures
-
-        self.headless = headless
-        self.min_gap_s = min_gap_s
-        self._pw = self._ctx = self._page = None
-        self._last = 0.0
-        self._warm: set[str] = set()
-        # sync Playwright is greenlet-bound to the thread that started it: everything runs here
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="habits-browser"
-        )
-
-    async def run(self, fn, *args):
-        import asyncio
-
-        return await asyncio.get_running_loop().run_in_executor(
-            self._executor, fn, *args
-        )
-
-    async def aget(self, url: str) -> str:
-        return await self.run(self.get, url)
-
-    async def aclose(self) -> None:
-        try:
-            await self.run(self.close)
-        finally:
-            self._executor.shutdown(wait=False)
-
-    def _open(self):
-        if self._page:
-            return self._page
-        import tempfile
-
-        from playwright.sync_api import sync_playwright
-
-        from app.services.store_adapters import PROFILE_DIR
-
-        profile = (
-            PROFILE_DIR.parent / "chrome-profile-discovery"
-        )  # separate from the cart profile
-        profile.mkdir(parents=True, exist_ok=True)
-        self._pw = sync_playwright().start()
-        for attempt, pdir in enumerate(
-            (profile, tempfile.mkdtemp(prefix="habits-discovery-"))
-        ):
-            try:
-                try:
-                    self._ctx = self._pw.chromium.launch_persistent_context(
-                        str(pdir), headless=self.headless, channel="chrome"
-                    )
-                except Exception:  # noqa: BLE001 — no Google Chrome: bundled Chromium
-                    self._ctx = self._pw.chromium.launch_persistent_context(
-                        str(pdir), headless=self.headless
-                    )
-                break
-            except Exception as e:  # noqa: BLE001 — a stale lock from a crashed run: fall back to a scratch profile
-                if attempt == 1:
-                    raise
-                logger.warning(
-                    "discovery profile busy (%s); using a scratch profile", str(e)[:80]
-                )
-        self._page = self._ctx.new_page()
-        return self._page
-
-    def get(self, url: str) -> str:
-        import time
-
-        page = self._open()
-        host = urlparse(url).netloc
-        if host not in self._warm:  # land on the home page first, like a person would
-            try:
-                page.goto(
-                    f"https://{host}/", wait_until="domcontentloaded", timeout=30000
-                )
-                time.sleep(2)
-            except Exception:  # noqa: BLE001
-                pass
-            self._warm.add(host)
-        gap = self.min_gap_s - (time.time() - self._last)
-        if gap > 0:
-            time.sleep(gap)
-        page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        for _ in range(15):  # give an interstitial a few seconds to clear
-            if not any(
-                m in page.title() for m in ("Attention Required", "Just a moment")
-            ):
-                break
-            time.sleep(1.5)
-        try:  # recipe cards are often lazy; wait for one, then let the page settle
-            page.wait_for_selector(
-                ".recipe-card-ingredients, .wprm-recipe-ingredients, .tasty-recipes-ingredients, [class*='ingredients'] li, script[type='application/ld+json']",
-                timeout=12000,
-            )
-            page.wait_for_load_state("networkidle", timeout=10000)
-        except Exception:  # noqa: BLE001 — take whatever rendered
-            pass
-        self._last = time.time()
-        html = page.content()
-        if any(m in page.title() for m in ("Attention Required", "Just a moment")):
-            raise RuntimeError("bot wall did not clear")
-        return html
-
-    def close(self) -> None:
-        try:
-            if self._ctx:
-                self._ctx.close()
-            if self._pw:
-                self._pw.stop()
-        finally:
-            self._pw = self._ctx = self._page = None
-
-
-def fetch_html_browser(url: str, headless: bool = False) -> str:
-    """One-off browser fetch (a run should prefer a shared BrowserSession)."""
-    sess = BrowserSession(headless=headless)
-    try:
-        return sess.get(url)
-    finally:
-        sess.close()
-
-
-def maangchi_index_urls(session: "BrowserSession") -> list[str]:
-    """Recipe links from Maangchi's index, filtered to protein-forward mains."""
-    html = session.get(MAANGCHI_INDEX)
-    links = sorted(
-        set(re.findall(r'href="(https://www\.maangchi\.com/recipe/[a-z0-9\-]+)"', html))
-    )
-    return [u for u in links if any(k in u for k in INDEX_KEYWORDS)]
-
-
-async def fetch_html(url: str, session: BrowserSession | None = None) -> str:
-    """Plain HTTP first; a real browser when the site blocks bots."""
-    import asyncio
-
-    async with httpx.AsyncClient(
-        timeout=20.0,
-        follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (Habits food planner)"},
-    ) as client:
-        r = await client.get(url)
-        if not _looks_blocked(r.status_code, r.text):
-            r.raise_for_status()
-            return r.text
-    try:
-        if session is not None:
-            return await session.aget(url)
-        return await asyncio.to_thread(fetch_html_browser, url)
-    except Exception as e:  # noqa: BLE001
-        raise RuntimeError(
-            f"blocked by a bot wall and no browser available ({e.__class__.__name__})"
-        ) from e
-
-
-def _iso_minutes(v) -> int:
-    if not v or not isinstance(v, str):
-        return 0
-    m = re.match(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?", v)
-    if not m:
-        return 0
-    d, h, mi = (int(x) if x else 0 for x in m.groups())
-    return d * 1440 + h * 60 + mi
-
-
-def _walk_jsonld(node):
-    if isinstance(node, list):
-        for n in node:
-            yield from _walk_jsonld(n)
-    elif isinstance(node, dict):
-        t = node.get("@type")
-        types = t if isinstance(t, list) else [t]
-        if "Recipe" in types:
-            yield node
-        for k in ("@graph", "mainEntity", "itemListElement"):
-            if k in node:
-                yield from _walk_jsonld(node[k])
-
-
-def _strip(html: str) -> str:
-    return (
-        re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
-        .replace("&amp;", "&")
-        .replace("&#8217;", "'")
-        .replace("&nbsp;", " ")
-        .strip()
-    )
-
-
-NOISE = re.compile(r"<(script|iframe|style|noscript)\b.*?</\1>", re.S | re.I)
-AD_DIV = re.compile(
-    r"<div[^>]+class=\"[^\"]*adthrive[^\"]*\"[^>]*>.*?</div>", re.S | re.I
-)
-
-
-def _declutter(html: str) -> str:
-    """Drop scripts, iframes and ad containers so lists and headings sit next to each other."""
-    html = NOISE.sub(" ", html)
-    return AD_DIV.sub(" ", html)
-
-
-def extract_recipe_html(html: str, url: str) -> Found | None:
-    """Fallback for pages without schema.org Recipe (Maangchi): title from og:title, the first
-    list under an Ingredients heading, steps under Directions/Instructions, 'Serves N'."""
-    html = _declutter(html)
-    m = re.search(
-        r"class=\"[^\"]*(?:recipe-card-ingredients|wprm-recipe-ingredients|tasty-recipes-ingredients)[^\"]*\"[^>]*>(.{0,8000})",
-        html,
-        re.S | re.I,
-    ) or re.search(
-        r"<h[1-6][^>]*>\s*Ingredients[^<]*</h[1-6]>(.{0,6000})", html, re.S | re.I
-    )
-    if not m:
-        return None
-    items = [_strip(i) for i in re.findall(r"<li[^>]*>(.*?)</li>", m.group(1), re.S)]
-    items = [i for i in items if 2 < len(i) < 160][:24]
-    if len(items) < 3:
-        return None
-    t = re.search(r'property="og:title" content="([^"]+)"', html) or re.search(
-        r"<title>(.*?)</title>", html, re.S
-    )
-    title = (
-        _strip(t.group(1))
-        if t
-        else url.rstrip("/").split("/")[-1].replace("-", " ").title()
-    )
-    title = re.split(r"\s+[|\-–]\s+", title)[0][:120]
-    steps: list[str] = []
-    d = re.search(
-        r"class=\"[^\"]*(?:recipe-card-directions|wprm-recipe-instructions|tasty-recipes-instructions)[^\"]*\"[^>]*>(.{0,12000})",
-        html,
-        re.S | re.I,
-    ) or re.search(
-        r"<h[1-6][^>]*>\s*(?:Directions|Instructions|Method)[^<]*</h[1-6]>(.{0,12000})",
-        html,
-        re.S | re.I,
-    )
-    if d:
-        steps = [
-            _strip(x)
-            for x in re.findall(r"<(?:li|p)[^>]*>(.*?)</(?:li|p)>", d.group(1), re.S)
-        ]
-        steps = [x for x in steps if len(x) > 20][:30]
-    sv = re.search(r"Ingredients for ([0-9]+)", html, re.I) or re.search(
-        r"(?:Serves|Servings?)[:\s]*([0-9]+)", html, re.I
-    )
-    servings = int(sv.group(1)) if sv else 4
-    host = urlparse(url).netloc.replace("www.", "")
-    return Found(
-        url=url,
-        title=title,
-        rating=None,
-        review_count=None,
-        ingredients_raw=items,
-        steps=steps,
-        prep_minutes=0,
-        cook_minutes=0,
-        servings=servings,
-        cuisine="korean" if "maangchi" in host or "korean" in host else None,
-    )
-
-
-def extract_recipe(html: str, url: str) -> Found | None:
-    found = _extract_jsonld(html, url)
-    return found or extract_recipe_html(html, url)
-
-
-def _extract_jsonld(html: str, url: str) -> Found | None:
-    for block in re.findall(
-        r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
-        html,
-        re.S | re.I,
-    ):
-        try:
-            data = json.loads(block.strip())
-        except json.JSONDecodeError:
-            continue
-        for rec in _walk_jsonld(data):
-            title = (rec.get("name") or "").strip()
-            ings = [
-                i.strip()
-                for i in (rec.get("recipeIngredient") or [])
-                if isinstance(i, str) and i.strip()
-            ]
-            if not title or not ings:
-                continue
-            steps = []
-            for s in rec.get("recipeInstructions") or []:
-                if isinstance(s, str):
-                    steps.append(s.strip())
-                elif isinstance(s, dict):
-                    if s.get("@type") == "HowToSection":
-                        steps += [
-                            x.get("text", "").strip()
-                            for x in s.get("itemListElement", [])
-                            if isinstance(x, dict)
-                        ]
-                    else:
-                        steps.append((s.get("text") or s.get("name") or "").strip())
-            agg = rec.get("aggregateRating") or {}
-            try:
-                rating = (
-                    float(agg.get("ratingValue"))
-                    if agg.get("ratingValue") not in (None, "")
-                    else None
-                )
-                count = (
-                    int(
-                        str(
-                            agg.get("ratingCount") or agg.get("reviewCount") or "0"
-                        ).replace(",", "")
-                    )
-                    or None
-                )
-            except (TypeError, ValueError):
-                rating, count = None, None
-            y = rec.get("recipeYield")
-            y = y[0] if isinstance(y, list) and y else y
-            m = re.search(r"\d+", str(y or ""))
-            servings = int(m.group()) if m else 4
-            cuisine = rec.get("recipeCuisine")
-            cuisine = (
-                cuisine[0] if isinstance(cuisine, list) and cuisine else cuisine
-            ) or None
-            img = rec.get("image")
-            if isinstance(img, dict):
-                img = img.get("url")
-            if isinstance(img, list) and img:
-                img = img[0] if isinstance(img[0], str) else img[0].get("url")
-            prep, cook, total = (
-                _iso_minutes(rec.get("prepTime")),
-                _iso_minutes(rec.get("cookTime")),
-                _iso_minutes(rec.get("totalTime")),
-            )
-            if not prep and not cook and total:
-                prep, cook = max(5, total // 3), total - max(5, total // 3)
-            return Found(
-                url=url,
-                title=title,
-                rating=rating,
-                review_count=count,
-                ingredients_raw=ings,
-                steps=[s for s in steps if s],
-                prep_minutes=prep,
-                cook_minutes=cook,
-                servings=max(1, servings),
-                cuisine=str(cuisine).lower() if cuisine else None,
-                image=img if isinstance(img, str) else None,
-            )
-    return None
-
-
-# ---------------------------------------------------------------------------
-# 3. normalise
-# ---------------------------------------------------------------------------
-
-
-def _parse_ingredient(raw: str) -> dict:
-    text = re.sub(r"\(.*?\)", "", raw).strip()
-    m = QTY_RE.match(text)
-    qty, unit, name = (m.group(1), m.group(2), m.group(3)) if m else (None, None, text)
-    q = None
-    if qty:
-        qty = qty.strip()
-        if qty in FRACTIONS:
-            q = FRACTIONS[qty]
-        elif qty[-1] in FRACTIONS:  # "3 ½"
-            q = float(qty[:-1].strip() or 0) + FRACTIONS[qty[-1]]
-        elif " " in qty and "/" in qty:
-            a, b = qty.split()
-            n, d = b.split("/")
-            q = float(a) + float(n) / float(d)
-        elif "/" in qty:
-            n, d = qty.split("/")
-            q = float(n) / float(d)
-        else:
-            try:
-                q = float(qty)
-            except ValueError:
-                q = None
-    name = re.sub(r",.*$", "", name).strip().lower()
-    name = re.sub(
-        r"\b(fresh|large|medium|small|thinly sliced|sliced|chopped|minced|diced|peeled|boneless|skinless|finely|roughly|about)\b",
-        "",
-        name,
-    ).strip(" ,")
-    name = re.sub(r"\s+", " ", name)
-    unit = (unit or "").lower().rstrip("s") or None
-    unit = {"pound": "lb", "tablespoon": "tbsp", "teaspoon": "tsp", "ounce": "oz"}.get(
-        unit, unit
-    )
-    return {
-        "name": name[:80] or raw[:80].lower(),
-        "quantity": q,
-        "unit": unit,
-        "raw": raw,
-    }
-
-
-def _category(name: str) -> str:
-    if any(
-        w in name
-        for w in (
-            "chicken",
-            "beef",
-            "pork",
-            "rib",
-            "salmon",
-            "mackerel",
-            "cod",
-            "shrimp",
-            "tofu",
-            "egg",
-            "brisket",
-            "steak",
-        )
-    ):
-        return "protein"
-    if any(w in name for w in KOREAN_STAPLES) or any(
-        w in name
-        for w in (
-            "sugar",
-            "salt",
-            "oil",
-            "vinegar",
-            "flour",
-            "starch",
-            "pepper",
-            "sauce",
-            "paste",
-            "noodle",
-            "stock",
-            "broth",
-            "honey",
-        )
-    ):
-        return "staple"
-    if any(
-        w in name
-        for w in (
-            "onion",
-            "garlic",
-            "ginger",
-            "scallion",
-            "cabbage",
-            "potato",
-            "carrot",
-            "zucchini",
-            "mushroom",
-            "pepper",
-            "radish",
-            "leek",
-            "spinach",
-            "bean sprout",
-            "lettuce",
-            "cucumber",
-        )
-    ):
-        return "produce"
-    return "other"
-
-
-def heuristic_normalise(found: Found) -> dict:
-    ings = []
-    for raw in found.ingredients_raw[: MAX_INGREDIENTS + 4]:
-        p = _parse_ingredient(raw)
-        cat = _category(p["name"])
-        essential = not GARNISH_WORDS.search(raw) and cat != "other"
-        ings.append(
-            {
-                **p,
-                "category": cat,
-                "essential": essential,
-                "reason": "garnish or optional"
-                if not essential and GARNISH_WORDS.search(raw)
-                else ("core ingredient" if essential else "minor"),
-                "shelf_stable": cat == "staple",
-                "shelf_life_days": 365
-                if cat == "staple"
-                else (3 if cat == "protein" else 10),
-                "preferred_store": STORE_FOR_CATEGORY.get(cat, "hmart"),
-                "est_price": 4.99 if cat != "protein" else 12.99,
-                "pack_label": "1 lb" if cat == "protein" else "1",
-            }
-        )
-    text = " ".join(found.ingredients_raw).lower()
-    protein = next((v for k, v in PROTEIN_WORDS.items() if k in text), "other")
-    host = urlparse(found.url).netloc.replace("www.", "")
-    cuisine = found.cuisine or (
-        "korean"
-        if "maangchi" in host or "korean" in host
-        else "japanese"
-        if "justonecookbook" in host
-        else None
-    )
-    total = found.prep_minutes + found.cook_minutes
-    return {
-        "cuisine": cuisine,
-        "protein_source": protein,
-        "servings": found.servings,
-        "protein_g_per_serving": {
-            "chicken": 42,
-            "beef": 40,
-            "pork": 36,
-            "fish": 38,
-            "tofu": 22,
-            "egg": 24,
-        }.get(protein, 20),
-        "prep_days": 4 if found.servings >= 4 and protein != "fish" else 2,
-        "reheat": "oven" if "bake" in " ".join(found.steps).lower() else "pan",
-        "batch_ok": found.servings >= 3,
-        "suitable": sum(1 for i in ings if i["essential"]) <= MAX_INGREDIENTS
-        and (total == 0 or total <= MAX_MINUTES)
-        and found.servings >= 2,
-        "why": "heuristic",
-        "ingredients": ings,
-    }
-
-
-NORMALISE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "cuisine": {"type": "string"},
-        "protein_source": {
-            "type": "string",
-            "description": "chicken|beef|pork|fish|tofu|egg|other",
-        },
-        "servings": {"type": "integer"},
-        "protein_g_per_serving": {"type": "number"},
-        "prep_days": {
-            "type": "integer",
-            "description": "how many days a batch keeps well in the fridge",
-        },
-        "reheat": {
-            "type": "string",
-            "description": "oven|pan|cold|microwave — best way to reheat leftovers",
-        },
-        "batch_ok": {"type": "boolean"},
-        "suitable": {
-            "type": "boolean",
-            "description": "fits: ≤12 ingredients, ≤90 min, preps well, high protein",
-        },
-        "why": {"type": "string"},
-        "ingredients": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "canonical purchasable name, lower case, e.g. 'chicken thighs'",
-                    },
-                    "quantity": {"type": "number"},
-                    "unit": {"type": "string"},
-                    "essential": {
-                        "type": "boolean",
-                        "description": "true if the dish would not taste like itself without it",
-                    },
-                    "reason": {"type": "string"},
-                    "category": {
-                        "type": "string",
-                        "description": "protein|produce|staple|ferment|dairy|other",
-                    },
-                    "shelf_stable": {"type": "boolean"},
-                    "shelf_life_days": {"type": "integer"},
-                    "preferred_store": {
-                        "type": "string",
-                        "description": "hmart|wf|weg",
-                    },
-                    "est_price": {
-                        "type": "number",
-                        "description": "USD for one typical pack",
-                    },
-                    "pack_label": {
-                        "type": "string",
-                        "description": "e.g. '3 lb', '500 g', 'bunch'",
-                    },
-                },
-                "required": ["name", "essential", "category"],
-            },
-        },
-    },
-    "required": [
-        "cuisine",
-        "protein_source",
-        "servings",
-        "protein_g_per_serving",
-        "prep_days",
-        "reheat",
-        "batch_ok",
-        "suitable",
-        "ingredients",
-    ],
-}
-
-
-async def normalise(found: Found) -> dict:
-    try:
-        from app.services.llm import REASONING, structured_output
-    except Exception:  # noqa: BLE001
-        return heuristic_normalise(found)
-    try:
-        out = await structured_output(
-            system=(
-                "You normalise recipes for a meal-prep planner. The owner cooks rarely, batches for 2–4 days, reheats in the oven or a pan, "
-                "wants few ingredients and nothing exotic bought for one dish, and prioritises protein. Mark an ingredient essential only if the "
-                "dish would not taste like itself without it; garnishes and optional items are not essential. Use canonical purchasable names."
-            ),
-            user_prompt=f"Title: {found.title}\nURL: {found.url}\nServings: {found.servings}\nPrep {found.prep_minutes} min, cook {found.cook_minutes} min\nIngredients:\n- "
-            + "\n- ".join(found.ingredients_raw)
-            + "\n\nSteps:\n"
-            + "\n".join(found.steps[:12]),
-            tool_name="normalise_recipe",
-            tool_description="Return the normalised recipe.",
-            output_schema=NORMALISE_SCHEMA,
-            model=REASONING,
-            max_tokens=3000,
-        )
-        if not out.get("ingredients"):
-            raise ValueError("empty normalisation")
-        out.setdefault("why", "model")
-        return out
-    except Exception as e:  # noqa: BLE001
-        logger.info("LLM normalisation unavailable (%s); using heuristics", e)
-        return heuristic_normalise(found)
-
-
-# ---------------------------------------------------------------------------
-# 4. upsert
-# ---------------------------------------------------------------------------
-
-
-def _slug(title: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    return s[:70] or hashlib.sha1(title.encode()).hexdigest()[:10]
-
-
-def upsert_candidate(
-    db: Session, user_id: int, found: Found, norm: dict
-) -> Recipe | None:
-    if (
-        db.query(Recipe)
-        .filter(Recipe.user_id == user_id, Recipe.source_url == found.url)
-        .first()
-    ):
-        return None
-    slug = _slug(found.title)
-    if db.query(Recipe).filter(Recipe.slug == slug).first():
-        slug = f"{slug}-{hashlib.sha1(found.url.encode()).hexdigest()[:6]}"
-    host = urlparse(found.url).netloc.replace("www.", "")
-    site = host.split(".")[0]
-    recipe = Recipe(
-        user_id=user_id,
-        slug=slug,
-        title=found.title[:160],
-        source_url=found.url,
-        source_site=site,
-        rating=found.rating,
-        review_count=found.review_count,
-        cuisine=(norm.get("cuisine") or None),
-        protein_source=norm.get("protein_source"),
-        prep_minutes=found.prep_minutes,
-        cook_minutes=found.cook_minutes,
-        servings=int(norm.get("servings") or found.servings),
-        protein_g_per_serving=norm.get("protein_g_per_serving"),
-        prep_days=int(norm.get("prep_days") or 2),
-        reheat=(norm.get("reheat") or "pan").lower(),
-        batch_ok=bool(norm.get("batch_ok", True)),
-        status="candidate",
-        affinity=fp.COLD_START_AFFINITY,
-        steps=found.steps[:30] or None,
-        image_url=found.image,
-        hue=int(hashlib.sha1(found.title.encode()).hexdigest()[:2], 16) * 360 // 255,
-        notes=f"found via discovery · {norm.get('why', '')}".strip(),
-    )
-    db.add(recipe)
-    db.flush()
-    by_name = {i.name: i for i in db.query(Ingredient).all()}
-    ordered = sorted(norm["ingredients"], key=lambda i: not i.get("essential", True))
-    for spec in ordered[:MAX_INGREDIENTS]:
-        name = (spec.get("name") or "").strip().lower()
-        if not name:
-            continue
-        ing = by_name.get(name)
-        if ing is None:
-            store = (
-                spec.get("preferred_store")
-                if spec.get("preferred_store") in ("hmart", "wf", "weg")
-                else STORE_FOR_CATEGORY.get(spec.get("category", "other"), "hmart")
-            )
-            ing = Ingredient(
-                name=name,
-                category=spec.get("category"),
-                preferred_store=store,
-                quality_tier="high"
-                if spec.get("category") in ("protein", "produce")
-                else "standard",
-                shelf_life_days=spec.get("shelf_life_days"),
-                shelf_stable=bool(spec.get("shelf_stable")),
-                package_sizes={
-                    store: {
-                        "label": spec.get("pack_label") or "1",
-                        "price": float(spec.get("est_price") or 4.99),
-                        "estimated": True,
-                    }
-                },
-            )
-            db.add(ing)
-            db.flush()
-            by_name[name] = ing
-            if ing.shelf_stable:
-                from app.models.food import PantryItem
-
-                db.add(PantryItem(user_id=user_id, ingredient_id=ing.id, state="some"))
-        db.add(
-            RecipeIngredient(
-                recipe_id=recipe.id,
-                ingredient_id=ing.id,
-                quantity=spec.get("quantity"),
-                unit=spec.get("unit"),
-                essential=bool(spec.get("essential", True)),
-                essential_reason=(spec.get("reason") or None),
-            )
-        )
-    db.commit()
-    return recipe
-
-
-async def discover(
-    db: Session,
-    user_id: int,
-    *,
-    limit: int = 6,
-    urls: list[str] | None = None,
-    fetch=None,
-    normaliser=None,
-) -> dict:
-    """Run one discovery pass. Returns {added: [...], skipped: n, checked: n, log: [...]}.
-    Default mode asks the model to search the web itself (FOOD_DISCOVERY=llm); the crawl
-    mode (fetch + extract, optional browser) is the fallback and is used when `urls` is given."""
-    if urls is None and fetch is None and discovery_mode() == "llm":
-        try:
-            return await discover_with_llm_search(db, user_id, limit=limit)
-        except Exception as e:  # noqa: BLE001 — fall back to crawling
-            logger.warning(
-                "LLM web search discovery failed (%s); falling back to crawl", e
-            )
-
-    normaliser = normaliser or normalise
-    session: BrowserSession | None = None
-    own_fetch = fetch is None
-
-    async def _fetch(url: str) -> str:
-        nonlocal session
-        if not own_fetch:
-            return await fetch(url)
-        if session is None and _needs_browser(url):
-            session = BrowserSession()
-        return await fetch_html(url, session)
-
-    try:
-        if urls is None:
-            urls = rank_urls(await search_urls(queries_for(db, user_id)))
-            if not urls:  # no search key: curated pages + the Maangchi index
-                urls = list(CURATED_URLS)
-                try:
-                    session = session or BrowserSession()
-                    urls += [
-                        u
-                        for u in await session.run(maangchi_index_urls, session)
-                        if u not in urls
-                    ]
-                except Exception as e:  # noqa: BLE001
-                    logger.info("maangchi index unavailable: %s", e)
-        known = {
-            r.source_url
-            for r in db.query(Recipe).filter(Recipe.user_id == user_id).all()
-            if r.source_url
-        }
-        added, skipped, checked, log = [], 0, 0, []
-        blocked_hosts: set[str] = set()
-        per_host: dict[str, int] = {}
-        for url in urls:
-            if len(added) >= limit:
-                break
-            if url in known:
-                continue
-            host = urlparse(url).netloc
-            if host in blocked_hosts:
-                log.append(
-                    {
-                        "url": url,
-                        "outcome": "skipped",
-                        "detail": "host blocked us earlier in this run",
-                    }
-                )
-                continue
-            if (
-                _needs_browser(url)
-                and per_host.get(host, 0) >= MAX_BROWSER_PAGES_PER_HOST
-            ):
-                log.append(
-                    {
-                        "url": url,
-                        "outcome": "skipped",
-                        "detail": "per-run page cap for this site",
-                    }
-                )
-                continue
-            per_host[host] = per_host.get(host, 0) + 1
-            checked += 1
-            try:
-                html = await _fetch(url)
-            except Exception as e:  # noqa: BLE001
-                logger.info("fetch failed %s: %s", url, e)
-                skipped += 1
-                detail = str(e)[:120]
-                if "bot wall" in detail:
-                    blocked_hosts.add(
-                        host
-                    )  # stop knocking; a later run gets a fresh window
-                log.append({"url": url, "outcome": "fetch failed", "detail": detail})
-                continue
-            found = extract_recipe(html, url)
-            if not found:
-                skipped += 1
-                log.append({"url": url, "outcome": "no recipe found on page"})
-                continue
-            norm = await normaliser(found)
-            n_ess = sum(
-                1 for i in norm.get("ingredients", []) if i.get("essential", True)
-            )
-            if not norm.get("suitable", True) or n_ess > MAX_INGREDIENTS or n_ess == 0:
-                skipped += 1
-                log.append(
-                    {
-                        "url": url,
-                        "outcome": "not a fit",
-                        "title": found.title,
-                        "detail": f"{n_ess} essential · {norm.get('why', '')}"[:160],
-                    }
-                )
-                continue
-            recipe = upsert_candidate(db, user_id, found, norm)
-            if recipe:
-                added.append(
-                    {
-                        "id": recipe.id,
-                        "title": recipe.title,
-                        "source": recipe.source_site,
-                        "rating": recipe.rating,
-                        "ingredients": len(recipe.ingredients),
-                    }
-                )
-                log.append({"url": url, "outcome": "added", "title": recipe.title})
-            else:
-                log.append({"url": url, "outcome": "duplicate", "title": found.title})
-        return {
-            "added": added,
-            "skipped": skipped,
-            "checked": checked,
-            "log": log,
-            "mode": "crawl",
-        }
-    finally:
-        if session is not None:
-            await session.aclose()
-
-
-def _needs_browser(url: str) -> bool:
-    return "maangchi.com" in url
-
-
-# ---------------------------------------------------------------------------
-# 5. LLM web search (default path): the model browses and returns normalised recipes
-# ---------------------------------------------------------------------------
 
 DEFAULT_DISCOVERY_PROMPT = (
     "I cook rarely and meal-prep: dishes that batch for 2–4 days and reheat well in an oven or pan "
@@ -1109,6 +54,36 @@ DEFAULT_DISCOVERY_PROMPT = (
     "for muscle. I love Korean food — Maangchi is my go-to — and Japanese food. Things I already make: "
     "sundubu jjigae, dak galbi, hot pot udon, dak dori tang, galbi tang. Variety, but don't get too creative."
 )
+
+INGREDIENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "canonical purchasable name, lower case, e.g. 'chicken thighs'",
+        },
+        "quantity": {"type": "number"},
+        "unit": {"type": "string"},
+        "essential": {
+            "type": "boolean",
+            "description": "true only if the dish would not taste like itself without it",
+        },
+        "reason": {"type": "string", "description": "short"},
+        "category": {
+            "type": "string",
+            "description": "protein|produce|staple|ferment|dairy|other",
+        },
+        "shelf_stable": {"type": "boolean"},
+        "shelf_life_days": {"type": "integer"},
+        "preferred_store": {"type": "string", "description": "hmart|wf|weg"},
+        "est_price": {"type": "number", "description": "USD for one typical pack"},
+        "pack_label": {
+            "type": "string",
+            "description": "e.g. '3 lb', '500 g', 'bunch'",
+        },
+    },
+    "required": ["name", "essential", "category"],
+}
 
 SEARCH_SCHEMA = {
     "type": "object",
@@ -1129,7 +104,7 @@ SEARCH_SCHEMA = {
                     },
                     "rating": {
                         "type": "number",
-                        "description": "the page's own rating if shown, else null",
+                        "description": "the page's own rating if shown; omit if none",
                     },
                     "review_count": {"type": "integer"},
                     "cuisine": {"type": "string"},
@@ -1152,10 +127,9 @@ SEARCH_SCHEMA = {
                     "batch_ok": {"type": "boolean"},
                     "why": {
                         "type": "string",
-                        "description": "one line: why this fits the brief",
+                        "description": "one short line: why this fits the brief",
                     },
-                    "steps": {"type": "array", "items": {"type": "string"}},
-                    "ingredients": NORMALISE_SCHEMA["properties"]["ingredients"],
+                    "ingredients": {"type": "array", "items": INGREDIENT_SCHEMA},
                 },
                 "required": [
                     "title",
@@ -1175,37 +149,9 @@ SEARCH_SCHEMA = {
 }
 
 
-def _found_from_llm(r: dict) -> Found:
-    return Found(
-        url=str(r.get("source_url") or "").strip(),
-        title=str(r.get("title") or "").strip()[:160],
-        rating=float(r["rating"])
-        if isinstance(r.get("rating"), (int, float))
-        else None,
-        review_count=int(r["review_count"])
-        if isinstance(r.get("review_count"), int)
-        else None,
-        ingredients_raw=[str(i.get("name", "")) for i in r.get("ingredients", [])],
-        steps=[str(x) for x in (r.get("steps") or [])][:30],
-        prep_minutes=int(r.get("prep_minutes") or 0),
-        cook_minutes=int(r.get("cook_minutes") or 0),
-        servings=int(r.get("servings") or 4),
-        cuisine=(str(r.get("cuisine") or "").lower() or None),
-    )
-
-
-async def discover_with_llm_search(
-    db: Session,
-    user_id: int,
-    *,
-    limit: int = 6,
-    prompt: str | None = None,
-    searcher=None,
-) -> dict:
-    """Ask the model (with its web_search tool) for recipes that fit the brief, then upsert them.
-    `searcher` is injectable for tests; by default it is llm.structured_output with web_search."""
-    from app.models.food import FoodSettings
-
+def build_prompt(
+    db: Session, user_id: int, *, limit: int, prompt: str | None = None
+) -> tuple[str, str]:
     settings = db.query(FoodSettings).filter(FoodSettings.user_id == user_id).first()
     brief = prompt or (
         settings.discovery_prompt
@@ -1213,23 +159,21 @@ async def discover_with_llm_search(
         else DEFAULT_DISCOVERY_PROMPT
     )
     known = db.query(Recipe).filter(Recipe.user_id == user_id).all()
-    known_urls = {r.source_url for r in known if r.source_url}
-    known_titles = [r.title for r in known][:60]
+    known_titles = [r.title for r in known][:80]
     profile = fp.taste_profile(db, user_id, n=8)
     taste = (
         ", ".join(f"{p['label']} ({p['weight']:+.2f})" for p in profile) or "none yet"
     )
-
     system = (
         "You are a meal-prep recipe scout with web search. Find real recipe pages that match the owner's brief, "
-        "read each page, and return the recipes normalised for a planner. Prefer these sources in order: "
+        "open each page, and return the recipes normalised for a planner. Prefer these sources in order: "
         + ", ".join(SOURCE_PRIORITY)
-        + ". Only use pages you actually opened; copy the exact URL. Hard rules: at most "
-        f"{MAX_INGREDIENTS} essential ingredients, at most {MAX_MINUTES} minutes total, batchable, high protein. "
-        "Mark an ingredient essential only if the dish would not taste like itself without it; garnishes and "
-        "optional items are not essential. Use canonical purchasable ingredient names in lower case (e.g. 'chicken thighs'), "
-        "with a store guess (hmart for Korean/Japanese staples, wf for meat and fish, weg for produce) and a typical pack "
-        "label and USD price. Never invent ratings: null if the page shows none."
+        + f". Only return pages you actually opened; copy the exact URL. Hard rules: at most {MAX_INGREDIENTS} "
+        f"essential ingredients, at most {MAX_MINUTES} minutes total, batchable, high protein. Mark an ingredient "
+        "essential only if the dish would not taste like itself without it; garnishes and optional items are not. "
+        "Use canonical purchasable ingredient names in lower case (e.g. 'chicken thighs') with a store guess "
+        "(hmart for Korean/Japanese staples, wf for meat and fish, weg for produce), a typical pack label and a USD "
+        "price. Never invent ratings: omit rating if the page shows none. Keep every string short; no recipe steps."
     )
     user = (
         f"Brief from the owner:\n{brief}\n\n"
@@ -1237,60 +181,169 @@ async def discover_with_llm_search(
         f"Already in the catalogue — do not return these or close variants: {'; '.join(known_titles) or 'nothing yet'}\n\n"
         f"Return {limit} new recipes (fewer if the web offers fewer that fit)."
     )
-    if searcher is None:
-        from app.services.llm import REASONING, structured_output
+    return system, user
 
-        async def searcher(system_, user_):  # noqa: E306
-            return await structured_output(
-                system=system_,
-                user_prompt=user_,
-                tool_name="find_recipes",
-                tool_description="Return the recipes found.",
-                output_schema=SEARCH_SCHEMA,
-                model=REASONING,
-                max_tokens=6000,
-                tools=[{"type": "web_search"}],
-                reasoning_effort="medium",
-                timeout=300.0,
-                max_retries=1,
+
+async def default_searcher(system: str, user: str) -> dict:
+    from app.services.llm import REASONING, structured_output
+
+    return await structured_output(
+        system=system,
+        user_prompt=user,
+        tool_name="find_recipes",
+        tool_description="Return the recipes found.",
+        output_schema=SEARCH_SCHEMA,
+        model=REASONING,
+        max_tokens=16000,
+        tools=[{"type": "web_search"}],
+        reasoning_effort="medium",
+        timeout=420.0,
+        max_retries=1,
+    )
+
+
+def _slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return s[:70] or hashlib.sha1(title.encode()).hexdigest()[:10]
+
+
+def upsert_candidate(db: Session, user_id: int, r: dict) -> Recipe | None:
+    """Create a candidate recipe (and any missing ingredients) from one normalised entry."""
+    url = str(r.get("source_url") or "").strip()
+    title = str(r.get("title") or "").strip()[:160]
+    if (
+        db.query(Recipe)
+        .filter(Recipe.user_id == user_id, Recipe.source_url == url)
+        .first()
+    ):
+        return None
+    slug = _slug(title)
+    if db.query(Recipe).filter(Recipe.slug == slug).first():
+        slug = f"{slug}-{hashlib.sha1(url.encode()).hexdigest()[:6]}"
+    host = urlparse(url).netloc.replace("www.", "")
+    site = (r.get("source_site") or host.split(".")[0] or "web").lower()[:80]
+    rating = float(r["rating"]) if isinstance(r.get("rating"), (int, float)) else None
+    recipe = Recipe(
+        user_id=user_id,
+        slug=slug,
+        title=title,
+        source_url=url,
+        source_site=site,
+        rating=rating,
+        review_count=int(r["review_count"])
+        if isinstance(r.get("review_count"), int)
+        else None,
+        cuisine=(str(r.get("cuisine") or "").lower() or None),
+        protein_source=(str(r.get("protein_source") or "other").lower()),
+        prep_minutes=int(r.get("prep_minutes") or 0),
+        cook_minutes=int(r.get("cook_minutes") or 0),
+        servings=int(r.get("servings") or 4),
+        protein_g_per_serving=r.get("protein_g_per_serving"),
+        prep_days=int(r.get("prep_days") or 2),
+        reheat=(str(r.get("reheat") or "pan").lower()),
+        batch_ok=bool(r.get("batch_ok", True)),
+        status="candidate",
+        affinity=fp.COLD_START_AFFINITY,
+        hue=int(hashlib.sha1(title.encode()).hexdigest()[:2], 16) * 360 // 255,
+        notes=f"found via web search · {r.get('why', '')}".strip(),
+    )
+    db.add(recipe)
+    db.flush()
+    by_name = {i.name: i for i in db.query(Ingredient).all()}
+    ordered = sorted(
+        r.get("ingredients", []), key=lambda i: not i.get("essential", True)
+    )
+    for spec in ordered[:MAX_INGREDIENTS]:
+        name = (spec.get("name") or "").strip().lower()
+        if not name:
+            continue
+        ing = by_name.get(name)
+        if ing is None:
+            cat = spec.get("category") or "other"
+            store = (
+                spec.get("preferred_store")
+                if spec.get("preferred_store") in ("hmart", "wf", "weg")
+                else STORE_FOR_CATEGORY.get(cat, "hmart")
             )
+            ing = Ingredient(
+                name=name,
+                category=cat,
+                preferred_store=store,
+                quality_tier="high" if cat in ("protein", "produce") else "standard",
+                shelf_life_days=spec.get("shelf_life_days"),
+                shelf_stable=bool(spec.get("shelf_stable")),
+                package_sizes={
+                    store: {
+                        "label": spec.get("pack_label") or "1",
+                        "price": float(spec.get("est_price") or 4.99),
+                        "estimated": True,
+                    }
+                },
+            )
+            db.add(ing)
+            db.flush()
+            by_name[name] = ing
+            if ing.shelf_stable:  # new staples go through the pantry check rather than being bought blindly
+                db.add(PantryItem(user_id=user_id, ingredient_id=ing.id, state="some"))
+        db.add(
+            RecipeIngredient(
+                recipe_id=recipe.id,
+                ingredient_id=ing.id,
+                quantity=spec.get("quantity")
+                if isinstance(spec.get("quantity"), (int, float))
+                else None,
+                unit=(spec.get("unit") or None),
+                essential=bool(spec.get("essential", True)),
+                essential_reason=(spec.get("reason") or None),
+            )
+        )
+    db.commit()
+    return recipe
 
-    out = await searcher(system, user)
+
+async def discover(
+    db: Session,
+    user_id: int,
+    *,
+    limit: int = 6,
+    prompt: str | None = None,
+    searcher=None,
+) -> dict:
+    """One discovery pass. Returns {added, skipped, checked, log, mode}."""
+    system, user = build_prompt(db, user_id, limit=limit, prompt=prompt)
+    out = await (searcher or default_searcher)(system, user)
+    known_urls = {
+        r.source_url
+        for r in db.query(Recipe).filter(Recipe.user_id == user_id).all()
+        if r.source_url
+    }
     added, log = [], []
     for r in (out.get("recipes") or [])[: limit * 2]:
-        found = _found_from_llm(r)
-        if not found.url.startswith("http") or not found.title:
+        url = str(r.get("source_url") or "").strip()
+        title = str(r.get("title") or "").strip()
+        if not url.startswith("http") or not title:
             log.append(
-                {
-                    "url": found.url,
-                    "outcome": "skipped",
-                    "detail": "no usable URL/title",
-                }
+                {"url": url, "outcome": "skipped", "detail": "no usable URL/title"}
             )
             continue
-        if found.url in known_urls:
-            log.append({"url": found.url, "outcome": "duplicate", "title": found.title})
+        if url in known_urls:
+            log.append({"url": url, "outcome": "duplicate", "title": title})
             continue
-        norm = dict(r)
-        norm.setdefault("suitable", True)
-        n_ess = sum(1 for i in norm.get("ingredients", []) if i.get("essential", True))
-        if (
-            n_ess == 0
-            or n_ess > MAX_INGREDIENTS
-            or (found.prep_minutes + found.cook_minutes) > MAX_MINUTES
-        ):
+        n_ess = sum(1 for i in r.get("ingredients", []) if i.get("essential", True))
+        minutes = int(r.get("prep_minutes") or 0) + int(r.get("cook_minutes") or 0)
+        if n_ess == 0 or n_ess > MAX_INGREDIENTS or minutes > MAX_MINUTES:
             log.append(
                 {
-                    "url": found.url,
+                    "url": url,
                     "outcome": "not a fit",
-                    "title": found.title,
-                    "detail": f"{n_ess} essential · {found.prep_minutes + found.cook_minutes} min",
+                    "title": title,
+                    "detail": f"{n_ess} essential · {minutes} min",
                 }
             )
             continue
-        recipe = upsert_candidate(db, user_id, found, norm)
+        recipe = upsert_candidate(db, user_id, r)
         if recipe:
-            known_urls.add(found.url)
+            known_urls.add(url)
             added.append(
                 {
                     "id": recipe.id,
@@ -1302,14 +355,14 @@ async def discover_with_llm_search(
             )
             log.append(
                 {
-                    "url": found.url,
+                    "url": url,
                     "outcome": "added",
                     "title": recipe.title,
                     "detail": (r.get("why") or "")[:120],
                 }
             )
         else:
-            log.append({"url": found.url, "outcome": "duplicate", "title": found.title})
+            log.append({"url": url, "outcome": "duplicate", "title": title})
         if len(added) >= limit:
             break
     return {
@@ -1319,13 +372,3 @@ async def discover_with_llm_search(
         "log": log,
         "mode": "llm_search",
     }
-
-
-def discovery_mode() -> str:
-    """llm (default when an OpenAI key is set) | crawl (fetch + extract, no key needed)."""
-    import os
-
-    mode = os.getenv("FOOD_DISCOVERY", "llm")
-    if mode == "llm" and not os.getenv("OPENAI_API_KEY"):
-        return "crawl"
-    return mode
