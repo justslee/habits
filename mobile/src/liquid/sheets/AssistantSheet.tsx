@@ -223,9 +223,10 @@ function Composing({ moves }: { moves: boolean }) {
     return () => { breath.value = 0; };
   }, [moves, breath]);
 
+  // Scale only: the wrapper carries a fade-in, and animating opacity here too makes
+  // Reanimated warn that the two will fight over the same property.
   const orb = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + breath.value * 0.14 }],
-    opacity: 0.75 + breath.value * 0.25,
+    transform: [{ scale: 1 + breath.value * 0.16 }],
   }));
 
   return (

@@ -1070,7 +1070,9 @@ def shorten(p: dict, cap: int) -> dict:
                     e["sets"] -= 1
                     est -= 3
                     removed.append(f"one set of {e['name']}")
-    p["target_minutes"] = [max(20, cap - 10), cap]
+    # The window sits below the cap, never above it: a 15-minute cap once produced a
+    # "20-15 min" range because the floor ignored how short the day had become.
+    p["target_minutes"] = [min(cap, max(10, cap - 10)), cap]
     p["estimated_duration_minutes"] = min(est, cap)
     p["rules"] = [
         f"Capped at {cap} min: dropped {', '.join(removed) if removed else 'nothing'}. Keep the warm-up and needed rest; never make it up after."

@@ -44,6 +44,17 @@ def test_rest_and_golf_pins_free_the_day_and_swap_moves_sessions():
     assert abs((s3.date - THU).days) >= 2
 
 
+def test_shorten_keeps_the_window_below_the_cap():
+    """A very short day must not report a range that runs backwards."""
+    for cap in (10, 15, 20, 25, 30, 45, 70):
+        p = gp.prescribe(THU, "S3", first_event=datetime.date(2027, 4, 24))
+        short = gp.shorten(p, cap)
+        lo, hi = short["target_minutes"]
+        assert lo <= hi, f"cap {cap} produced {lo}-{hi}"
+        assert hi == cap
+        assert lo >= 10
+
+
 def test_shorten_drops_accessories_first_and_keeps_main_lifts():
     p = gp.prescribe(THU, "S3", first_event=datetime.date(2027, 4, 24))
     short = gp.shorten(p, 45)
