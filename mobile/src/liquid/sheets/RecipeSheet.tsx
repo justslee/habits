@@ -34,6 +34,8 @@ export function RecipeSheet({ recipe: initial }: { recipe: FoodRecipe }) {
   const [recipe, setRecipe] = useState<FoodRecipe>(initial);
   const [busy, setBusy] = useState(false);
   const method = recipe.method;
+  // A recipe you wrote down yourself has no source to summarise from or defer to.
+  const ownRecipe = !recipe.source_url && (!recipe.source_site || recipe.source_site === 'own');
 
   const load = useCallback(async (refresh = false) => {
     setBusy(true);
@@ -48,7 +50,15 @@ export function RecipeSheet({ recipe: initial }: { recipe: FoodRecipe }) {
   }, [recipe.id, toast]);
 
   // Fetch the method the first time this recipe is opened, then it is cached server-side.
-  useEffect(() => { if (!initial.method?.steps?.length) load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!initial.method?.steps?.length && !ownRecipe) load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const provenance = ownRecipe
+    ? 'Your own recipe, as you recorded it.'
+    : method?.source_note
+      ? `${method.source_note} The method is a summary; the original is the recipe.`
+      : `Quantities as recorded from ${title(recipe.source_site) || 'the source'}.`;
 
   const essential = recipe.ingredients.filter(i => i.essential);
   const optional = recipe.ingredients.filter(i => !i.essential);
@@ -120,7 +130,11 @@ export function RecipeSheet({ recipe: initial }: { recipe: FoodRecipe }) {
         </>
       ) : (
         <Notice icon="alert-circle-outline">
-          No method saved yet. {recipe.source_url ? 'Open the original below, or try again.' : 'This recipe has no source page recorded.'}
+          {ownRecipe
+            ? 'No method written down yet. Add the steps the next time you cook it.'
+            : recipe.source_url
+              ? 'No method saved yet. Open the original below, or try again.'
+              : 'No method saved yet. This recipe has no source page to read.'}
         </Notice>
       )}
 
@@ -149,10 +163,7 @@ export function RecipeSheet({ recipe: initial }: { recipe: FoodRecipe }) {
           </Small>
         </Pressable>
       ) : null}
-      <Small style={{ marginTop: 10 }}>
-        {method?.source_note ?? `Quantities as recorded from ${recipe.source_site ?? 'the source'}.`} The
-        method is a summary; the original is the recipe.
-      </Small>
+      <Small style={{ marginTop: 10 }}>{provenance}</Small>
       {method?.steps?.length ? (
         <Button full kind="quiet" label={busy ? 'Re-reading…' : 'Re-read the method'} disabled={busy} onPress={() => load(true)} />
       ) : recipe.source_url ? (
