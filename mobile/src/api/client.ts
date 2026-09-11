@@ -946,12 +946,17 @@ export interface TrainBlock { name: string; minutes: number; exercises: TrainExe
 export interface TrainPrescription {
   session: string; title: string; phase: string; phase_name: string; phase_notes?: string; week_kind: 'normal' | 'lighter' | 'tournament' | 'travel';
   rotation: 'A' | 'B'; target_minutes: [number, number]; budget: string; warmup: string[]; blocks: TrainBlock[];
-  run: { minutes: number; structure: string; intervals: number } | null; mobility: [string, string][]; rules: string[];
+  run: { minutes: number; structure: string; intervals?: number; miles?: number | null; intensity?: string } | null; mobility: [string, string][]; rules: string[];
+  estimated_duration_minutes?: number; day_note?: string | null; adjusted?: AdjustKind | null; shortened_to?: number;
 }
+export type AdjustKind = 'run' | 'rest' | 'golf' | 'swap' | 'move' | 'shorten';
 export interface TrainDay {
   date: string; weekday: string; session: string | null; label: string; travel: boolean; note: string | null; status: string | null; session_id: number | null;
+  adjusted?: AdjustKind | null; adjustment_id?: number | null; detail?: Record<string, any> | null; run_id?: number | null;
 }
-export interface TrainWeek { week_start: string; week_kind: string; rotation: string; phase: string; days: TrainDay[] }
+export interface TrainAdjustment { id: number; date: string; kind: AdjustKind; params: Record<string, any>; reason: string | null; summary: string | null; created_at: string | null }
+export interface TrainWeek { week_start: string; week_kind: string; rotation: string; phase: string; days: TrainDay[]; adjustments: TrainAdjustment[] }
+export interface AdjustResult { adjustment: TrainAdjustment | null; changes: string[]; note: string | null; week: TrainWeek; today: TrainToday }
 export interface TrainProgram {
   start: string; first_event: string; five_sessions: boolean;
   phase: { key: string; name: string; start: string; end: string; strength: string; running: string; rpe: string };
@@ -980,6 +985,12 @@ export function patchTrainSettings(p: { first_event_date?: string; five_sessions
 export interface RealtimeSession { client_secret: string; expires_at: number | null; model: string; voice: string; calls_url: string; context_chars: number }
 export function getRealtimeSession(): Promise<RealtimeSession> { return request('/api/v1/coach/realtime/session', { method: 'POST' }); }
 export function getCoachContext(): Promise<{ context: string }> { return request('/api/v1/coach/context'); }
-export function coachChat(message: string, history: { from: 'me' | 'coach'; text: string }[] = []): Promise<{ reply: string; model: string }> {
+export function coachChat(message: string, history: { from: 'me' | 'coach'; text: string }[] = []): Promise<{ reply: string; model: string; changes: string[]; adjustment_id: number | null }> {
   return request('/api/v1/coach/chat', { method: 'POST', body: JSON.stringify({ message, history }) });
 }
+
+// ---- Adaptive days: change a day, the week re-plans around it ----
+export interface AdjustInput { date?: string; text?: string; kind?: AdjustKind; miles?: number; minutes?: number; intensity?: 'easy' | 'moderate' | 'hard'; session?: string; target_date?: string }
+export function adjustTraining(p: AdjustInput): Promise<AdjustResult> { return request('/api/v1/train/adjust', { method: 'POST', body: JSON.stringify(p) }); }
+export function getTrainAdjustments(start?: string): Promise<TrainAdjustment[]> { return request(`/api/v1/train/adjustments${start ? `?start=${start}` : ''}`); }
+export function revertTrainAdjustment(id: number): Promise<AdjustResult> { return request(`/api/v1/train/adjustments/${id}`, { method: 'DELETE' }); }

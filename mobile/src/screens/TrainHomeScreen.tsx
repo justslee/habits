@@ -6,10 +6,10 @@
  * recent sessions, and navigation to deeper screens.
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, Animated,
+  RefreshControl,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,33 +18,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radius, fonts } from '../theme';
 import { haptic } from '../utils/haptics';
 import {
-  getRecentTraining, getWeekSummary, getTodayWorkout, getTodayRun,
-  getActivePlan, deleteWorkout, restoreWorkout, deleteRun, restoreRun,
-  TrainingItem, WeekSummary, WorkoutSession, TodayRunData, TrainingPlanData,
+  getRecentTraining, deleteWorkout, restoreWorkout, deleteRun, restoreRun, TrainingItem,
 } from '../api/client';
 import SwipeableRow from '../components/SwipeableRow';
 import UndoToast from '../components/UndoToast';
-import {
-  DAYS_OF_WEEK, WEEKLY_SCHEDULE, DAY_TYPE_COLORS, RUN_TYPE_COLORS, DAY_LABELS,
-} from '../constants/trainingSchedule';
 import ScreenBackground from '../components/ScreenBackground';
-import { formatPace } from '../utils/format';
-import { usePressScale } from '../hooks/usePressScale';
 import SegmentedSwitch from '../components/SegmentedSwitch';
 import CoachHero from '../components/CoachHero';
 import CoachSheet from '../components/CoachSheet';
 import Topbar from '../components/Topbar';
-import WorkoutStartCard from '../components/WorkoutStartCard';
 import SessionListCard from '../components/SessionListCard';
 import ProgramToday from '../components/ProgramToday';
+import ProgramWeek from '../components/ProgramWeek';
+import ProgramOverview from '../components/ProgramOverview';
 
-type Segment = 'today' | 'run' | 'lift' | 'plan';
+type Segment = 'today' | 'week' | 'program' | 'history';
 
 const SEGMENTS: { key: Segment; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'today', label: 'Today', icon: 'sunny-outline' },
-  { key: 'run',   label: 'Run',   icon: 'footsteps-outline' },
-  { key: 'lift',  label: 'Lift',  icon: 'barbell-outline' },
-  { key: 'plan',  label: 'Plan',  icon: 'calendar-outline' },
+  { key: 'today',   label: 'Today',   icon: 'sunny-outline' },
+  { key: 'week',    label: 'Week',    icon: 'calendar-outline' },
+  { key: 'program', label: 'Program', icon: 'golf-outline' },
+  { key: 'history', label: 'History', icon: 'time-outline' },
 ];
 
 export default function TrainHomeScreen({ navigation }: any) {
@@ -55,13 +49,8 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   // Data
   const [recentTraining, setRecentTraining] = useState<TrainingItem[]>([]);
-  const [weekSummary, setWeekSummary] = useState<WeekSummary | null>(null);
-  const [todayWorkout, setTodayWorkout] = useState<WorkoutSession | null>(null);
-  const [todayRun, setTodayRun] = useState<TodayRunData | null>(null);
-  const [activePlan, setActivePlan] = useState<TrainingPlanData | null>(null);
 
   const [coachOpen, setCoachOpen] = useState(false);
-  const heroScale = usePressScale(0.97);
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<{
@@ -71,18 +60,8 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [training, summary, workout, run, plan] = await Promise.allSettled([
-        getRecentTraining(14),
-        getWeekSummary(),
-        getTodayWorkout(),
-        getTodayRun(),
-        getActivePlan(),
-      ]);
+      const [training] = await Promise.allSettled([getRecentTraining(14)]);
       if (training.status === 'fulfilled') setRecentTraining(training.value);
-      if (summary.status === 'fulfilled') setWeekSummary(summary.value);
-      if (workout.status === 'fulfilled') setTodayWorkout(workout.value);
-      if (run.status === 'fulfilled') setTodayRun(run.value);
-      if (plan.status === 'fulfilled') setActivePlan(plan.value);
     } catch (err) {
       console.warn('TrainHome fetch error:', err);
     }
@@ -140,388 +119,59 @@ export default function TrainHomeScreen({ navigation }: any) {
 
   // --- Segment content ---
 
-  const renderLiftSegment = () => {
-    const todayVolume = (todayWorkout?.exercises ?? []).reduce(
-      (acc, ex) => acc + ((ex.weight ?? 0) * (ex.reps ?? 0)),
-      0,
-    );
-    const lastLift = liftItems[0];
-    const lastVolume = (() => {
-      const detail = (lastLift as any)?.detail as string | undefined;
-      if (!detail) return null;
-      const m = detail.match(/([\d,]+)\s*lb/);
-      return m ? Number(m[1].replace(/,/g, '')) : null;
-    })();
-
-    return (
+  const renderHistorySegment = () => (
     <>
-      {/* CoachHero with embedded last/target volume — canvas Lift view */}
       <View style={{ paddingHorizontal: spacing.md }}>
-        <CoachHero
-          pill={`${(todayWorkout?.day_type ?? 'PUSH').toUpperCase()} · TODAY`}
-          ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
-          line={
-            todayWorkout
-              ? <>{DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day. Top set is the lift that matters — <Text style={{ color: colors.accent }}>everything else is volume</Text>. Don't grind the accessories.</>
-              : <>No lift today. Mobility, walk, sleep — those are the work.</>
-          }
-          meta={todayWorkout ? `${(todayWorkout.exercises?.length ?? 0)} LIFTS · ~45 MIN` : undefined}
-          onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
-        >
-          {lastVolume != null && (
-            <View style={styles.liftVolumeGrid}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.liftVolumeLabel}>LAST · VOLUME</Text>
-                <Text style={styles.liftVolumeNum}>
-                  {lastVolume.toLocaleString()}
-                  <Text style={styles.liftVolumeUnit}> lb</Text>
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.liftVolumeLabel}>TARGET TODAY</Text>
-                <Text style={[styles.liftVolumeNum, { color: colors.accent }]}>
-                  {Math.round(lastVolume * 1.03).toLocaleString()}
-                  <Text style={[styles.liftVolumeUnit, { color: colors.accent, opacity: 0.7 }]}> lb</Text>
-                </Text>
-              </View>
-            </View>
-          )}
-        </CoachHero>
+        {liftItems.length > 0 ? (
+          <SessionListCard
+            sessions={liftItems.slice(0, 8).map(item => {
+              const dateStr = new Date(item.date + 'T12:00:00');
+              const detail = (item as any).detail as string | undefined;
+              const vol = detail?.match(/([\d,]+)\s*lb/)?.[1];
+              const lifts = detail?.match(/(\d+)\s*lifts?/)?.[1];
+              return {
+                id: item.id,
+                day: dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
+                when: dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                title: item.day_type && /^S\d$/.test(item.day_type) ? `Session ${item.day_type.slice(1)}` : item.day_type || 'Workout',
+                metrics: [vol ? `${vol} lb` : '—', lifts ? `${lifts} lifts` : '—', item.rpe != null ? `RPE ${item.rpe}` : '—'] as [string, string, string],
+                active: false,
+              };
+            })}
+            labels={['VOLUME', 'LIFTS', 'RPE']}
+            onPress={s => navigation?.navigate?.('WorkoutDetail', { sessionId: Number(s.id) })}
+          />
+        ) : (
+          <View style={styles.emptyState}>
+            <Ionicons name="barbell-outline" size={40} color={colors.textTertiary} />
+            <Text style={styles.emptyText}>No sessions yet</Text>
+            <Text style={styles.emptySubtext}>Start today's session from the Today tab</Text>
+          </View>
+        )}
+        {runItems.length > 0 && (
+          <View style={{ marginTop: spacing.md }}>
+            <Text style={[typography.eyebrow, { marginBottom: 6 }]}>RUNS</Text>
+            {runItems.slice(0, 8).map(item => (
+              <SwipeableRow key={`run-${item.id}`} onDelete={() => handleDelete(item)}>
+                <View style={styles.runRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.runTitle}>{item.label}</Text>
+                    <Text style={styles.runMeta}>{new Date(item.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {item.detail}</Text>
+                  </View>
+                  {item.rpe != null && <Text style={styles.runMeta}>RPE {item.rpe}</Text>}
+                </View>
+              </SwipeableRow>
+            ))}
+          </View>
+        )}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18, marginTop: spacing.md }}>
+          <TouchableOpacity style={styles.seeAllBtn} onPress={() => navigation?.navigate?.('WorkoutHistory')}><Text style={styles.seeAllText}>ALL SESSIONS</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.seeAllBtn} onPress={() => navigation?.navigate?.('RunHistory')}><Text style={styles.seeAllText}>ALL RUNS</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.seeAllBtn} onPress={() => navigation?.navigate?.('LogRun')}><Text style={styles.seeAllText}>LOG A RUN</Text></TouchableOpacity>
+        </View>
       </View>
-
-      {/* Open today's workout */}
-      {todayWorkout && (
-        <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}>
-          <TouchableOpacity
-            style={styles.openWorkoutBtn}
-            activeOpacity={0.85}
-            onPress={() => {
-              haptic.light();
-              todayWorkout.status === 'completed'
-                ? navigation?.navigate?.('WorkoutDetail', { sessionId: todayWorkout.id })
-                : navigation?.navigate?.('TodayWorkout');
-            }}
-          >
-            <Text style={styles.openWorkoutBtnText}>
-              {todayWorkout.status === 'completed' ? '▶ VIEW WORKOUT' : '▶ OPEN TODAY · LOG IT'}
-            </Text>
-            <Text style={[styles.openWorkoutBtnText, { opacity: 0.6 }]}>→</Text>
-          </TouchableOpacity>
-          {todayVolume > 0 && (
-            <Text style={styles.openWorkoutMeta}>
-              {todayVolume.toLocaleString()} LB LOGGED TODAY · {todayWorkout.exercises?.length ?? 0} SETS
-            </Text>
-          )}
-        </View>
-      )}
-
-      {/* Recent lifts as canvas-style session table */}
-      {liftItems.length > 0 ? (
-        <SessionListCard
-          sessions={liftItems.slice(0, 6).map(item => {
-            const dateStr = new Date(item.date + 'T12:00:00');
-            const dayShort = dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-            const monthDay = dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const detail = (item as any).detail as string | undefined;
-            const m = detail?.match(/([\d,]+)\s*lb/);
-            const vol = m ? m[1] : '—';
-            const lifts = detail?.match(/(\d+)\s*lifts?/)?.[1] ?? '—';
-            return {
-              id: item.id,
-              day: dayShort,
-              when: monthDay,
-              title: (DAY_LABELS as any)[item.day_type ?? ''] || item.day_type || 'Workout',
-              metrics: [`${vol} lb`, `${lifts} lifts`, item.rpe != null ? `RPE ${item.rpe}` : '—'] as [string, string, string],
-              active: false,
-            };
-          })}
-          labels={['VOLUME', 'LIFTS', 'TOP']}
-          onPress={s => navigation?.navigate?.('WorkoutDetail', { sessionId: Number(s.id) })}
-        />
-      ) : !loading ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="barbell-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No lifts yet</Text>
-          <Text style={styles.emptySubtext}>Open today's workout to log your first set</Text>
-        </View>
-      ) : null}
-
-      <TouchableOpacity
-        style={styles.seeAllBtn}
-        onPress={() => navigation?.navigate?.('WorkoutHistory')}
-      >
-        <Text style={styles.seeAllText}>SEE ALL HISTORY</Text>
-        <Ionicons name="arrow-forward" size={16} color={colors.accent} />
-      </TouchableOpacity>
     </>
-    );
-  };
-
-  const renderRunSegment = () => {
-    const planned = todayRun?.planned_run;
-    const runTypeColor = RUN_TYPE_COLORS[planned?.run_type || 'easy'] || colors.accent;
-    const runTitle = planned ? (
-      planned.run_type === 'easy' ? 'Easy run · Z2'
-      : planned.run_type === 'tempo' ? 'Tempo'
-      : planned.run_type === 'long' ? 'Long run'
-      : planned.run_type === 'intervals' ? 'Intervals'
-      : planned.run_type === 'recovery' ? 'Recovery'
-      : 'Run'
-    ) : 'Free run';
-    const distMi = planned?.target_distance_miles ?? null;
-    const paceFmt = planned?.target_pace_seconds != null ? formatPace(planned.target_pace_seconds) : null;
-    const hr = (planned as any)?.target_hr_max ?? 142;
-
-    return (
-    <>
-      {/* CoachHero with today's plan + Log-a-run entry */}
-      <View style={{ paddingHorizontal: spacing.md }}>
-        <CoachHero
-          pill={planned ? `${(planned.run_type || 'EASY').toUpperCase()} · Z2` : 'FREE RUN'}
-          ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
-          line={
-            planned
-              ? <>Today is your aerobic deposit — <Text style={{ color: colors.accent }}>{distMi ?? '—'}{distMi != null ? ' mi' : ''}{paceFmt ? ` at ${paceFmt}/mi` : ''}{hr ? `, HR ≤ ${hr}` : ''}</Text>. Breathe through the nose. Negative split if it feels easy. The point is showing up, not the pace.</>
-              : <>No planned run today. Free run if the body wants it; rest if it doesn't.</>
-          }
-          meta={planned ? `${distMi ?? '—'} MI · TARGET RPE 5` : 'RUN WHEN READY'}
-          onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
-        >
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => { haptic.medium(); navigation?.navigate?.('LogRun'); }}
-            style={[styles.runStartFlex, { backgroundColor: runTypeColor, marginTop: 14 }]}
-          >
-            <Text style={styles.runStartFlexText}>＋ LOG A RUN</Text>
-          </TouchableOpacity>
-        </CoachHero>
-      </View>
-
-      {/* Last run · splits — only if we have any runs */}
-      {runItems.length > 0 && (
-        <SessionListCard
-          sessions={runItems.slice(0, 6).map(item => {
-            const dateStr = new Date(item.date + 'T12:00:00');
-            const dayShort = dateStr.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-            const monthDay = dateStr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const dist = item.distance_miles != null ? `${item.distance_miles.toFixed(1)} mi` : '—';
-            // The training feed sends a preformatted pace string (workouts.py
-            // `pace_formatted`); there is no avg_pace_seconds on TrainingItem, so
-            // reading that always yielded '—'.
-            const pace = item.pace_formatted || '—';
-            return {
-              id: `r-${item.id}`,
-              day: dayShort,
-              when: monthDay,
-              title: (item.run_type || 'Run').replace(/^\w/, c => c.toUpperCase()),
-              metrics: [dist, pace, item.is_pr ? 'PR' : '—'] as [string, string, string],
-              active: false,
-              pr: !!item.is_pr,
-            };
-          })}
-          labels={['DISTANCE', 'PACE', 'NOTE']}
-          onPress={() => navigation?.navigate?.('RunHistory')}
-        />
-      )}
-
-      {runItems.length === 0 && !loading && (
-        <View style={styles.emptyState}>
-          <Ionicons name="footsteps-outline" size={48} color={colors.textTertiary} />
-          <Text style={styles.emptyText}>No runs yet</Text>
-          <Text style={styles.emptySubtext}>Tap START above to log your first one</Text>
-        </View>
-      )}
-
-      <TouchableOpacity
-        style={styles.seeAllBtn}
-        onPress={() => navigation?.navigate?.('RunHistory')}
-      >
-        <Text style={styles.seeAllText}>SEE ALL RUNS</Text>
-        <Ionicons name="arrow-forward" size={16} color={colors.accent} />
-      </TouchableOpacity>
-    </>
-    );
-  };
-
-  const renderPlanSegment = () => {
-    const today = new Date();
-    const todayDay = (today.getDay() + 6) % 7; // 0=Mon
-
-    const totalWeeks = activePlan?.total_weeks ?? 16;
-    const currentWeek = activePlan?.current_week ?? 1;
-
-    // Phase boundaries — same proportions as canvas (BASE 0-37.5%, BUILD 37.5-75%, PEAK 75-93.75%, TAPER 93.75-100%)
-    const phaseFor = (week: number) => {
-      const pct = (week - 1) / totalWeeks;
-      if (pct < 0.375) return 'BASE';
-      if (pct < 0.75)  return 'BUILD';
-      if (pct < 0.9375) return 'PEAK';
-      return 'TAPER';
-    };
-    const currentPhase = phaseFor(currentWeek);
-    const nextPhaseStartWeek = (() => {
-      const want =
-        currentPhase === 'BASE'  ? 'BUILD' :
-        currentPhase === 'BUILD' ? 'PEAK'  :
-        currentPhase === 'PEAK'  ? 'TAPER' : null;
-      if (!want) return null;
-      for (let w = currentWeek + 1; w <= totalWeeks; w++) {
-        if (phaseFor(w) === want) return w;
-      }
-      return null;
-    })();
-    const phaseTransition = nextPhaseStartWeek
-      ? `${currentPhase} → ${phaseFor(nextPhaseStartWeek)}`
-      : currentPhase;
-
-    const goalLabel = (activePlan?.goal_type || 'TRAINING')
-      .replace(/_/g, ' ')
-      .toUpperCase();
-
-    // Collect this-week workouts
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - todayDay);
-    weekStart.setHours(0, 0, 0, 0);
-    const completedByDay: Record<number, TrainingItem[]> = {};
-    recentTraining.forEach(item => {
-      const d = new Date(item.date + 'T12:00:00');
-      const dow = (d.getDay() + 6) % 7;
-      if (d >= weekStart) {
-        if (!completedByDay[dow]) completedByDay[dow] = [];
-        completedByDay[dow].push(item);
-      }
-    });
-
-    const getPlannedRun = (dayIdx: number) => {
-      if (!activePlan?.planned_runs) return null;
-      // Backend day_of_week is 0=Sun .. 6=Sat; canvas/UI day index 0=Mon .. 6=Sun.
-      // Convert: backendDow = (uiDow + 1) % 7
-      const backendDow = (dayIdx + 1) % 7;
-      return activePlan.planned_runs.find(
-        r => r.week_number === currentWeek && r.day_of_week === backendDow,
-      ) || null;
-    };
-
-    const GYM_LABELS_PLAN: Record<string, { workout: string; target: string }> = {
-      push:       { workout: 'Lift · PUSH', target: '60 min' },
-      pull:       { workout: 'Lift · PULL', target: '60 min' },
-      legs:       { workout: 'Lift · LEGS', target: '60 min' },
-      cardio:     { workout: 'Cardio',      target: '45 min' },
-      basketball: { workout: 'Basketball',  target: '60 min' },
-      rest:       { workout: 'Rest',        target: 'Mobility' },
-    };
-
-    const dayRows = [0, 1, 2, 3, 4, 5, 6].map(dayIdx => {
-      const dayName = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'][dayIdx];
-      const isToday = dayIdx === todayDay;
-      const completed = completedByDay[dayIdx] || [];
-      const done = completed.length > 0;
-      const run = getPlannedRun(dayIdx);
-      const gym = WEEKLY_SCHEDULE[dayIdx];
-      const gymInfo = GYM_LABELS_PLAN[gym?.type ?? 'rest'];
-
-      // Compose workout text and target
-      let workout = gymInfo.workout;
-      let target = gymInfo.target;
-      if (run) {
-        const runLabel = run.target_distance_miles
-          ? `${run.run_type === 'easy' ? 'Easy' : run.run_type === 'tempo' ? 'Tempo' : run.run_type === 'long' ? 'Long' : run.run_type === 'recovery' ? 'Recovery' : 'Run'} ${run.target_distance_miles}mi`
-          : `${run.run_type} run`;
-        if (gym?.type === 'rest') {
-          workout = runLabel;
-          target = run.target_pace_seconds ? formatPace(run.target_pace_seconds) + '/mi' : (run.target_duration_minutes ? `${run.target_duration_minutes} min` : 'Z2');
-        } else {
-          workout = `${runLabel} + ${gym.type.toUpperCase()}`;
-          target = isToday ? 'today' : (run.target_pace_seconds ? formatPace(run.target_pace_seconds) + '/mi' : target);
-        }
-      }
-      if (isToday && !done) target = 'today';
-
-      return { dayName, workout, target, done, isToday };
-    });
-
-    return (
-      <>
-        {/* CoachHero with embedded 16-week phase ribbon */}
-        <View style={{ paddingHorizontal: spacing.md }}>
-          <CoachHero
-            pill={`${goalLabel} · WK ${currentWeek}`}
-            ts={`COACH · ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
-            line={
-              activePlan
-                ? <>You're <Text style={{ color: colors.accent }}>{currentWeek} weeks into a {totalWeeks}-week block</Text>. {currentPhase} phase {nextPhaseStartWeek ? `transitions to ${phaseFor(nextPhaseStartWeek)} in week ${nextPhaseStartWeek}` : 'is the closing stretch — taper is the work now'}.</>
-                : <>No active plan yet. Build one when the goal is real.</>
-            }
-            meta={`WK ${currentWeek} / ${totalWeeks} · ${phaseTransition}`}
-            onPressAsk={() => { haptic.medium(); setCoachOpen(true); }}
-          >
-            {/* 16-cell phase ribbon */}
-            <View style={styles.planRibbon}>
-              {Array.from({ length: totalWeeks }).map((_, i) => {
-                const w = i + 1;
-                const isDone = w < currentWeek;
-                const isCurrent = w === currentWeek;
-                return (
-                  <View
-                    key={i}
-                    style={[
-                      styles.planRibbonCell,
-                      isDone     && { backgroundColor: colors.accent },
-                      isCurrent  && { backgroundColor: 'rgba(224,183,117,0.4)' },
-                      !isDone && !isCurrent && { backgroundColor: colors.line },
-                    ]}
-                  />
-                );
-              })}
-            </View>
-            <View style={styles.planRibbonLabels}>
-              <Text style={styles.planRibbonLabel}>BASE</Text>
-              <Text style={styles.planRibbonLabel}>BUILD</Text>
-              <Text style={styles.planRibbonLabel}>PEAK</Text>
-              <Text style={styles.planRibbonLabel}>TAPER</Text>
-            </View>
-          </CoachHero>
-        </View>
-
-        {/* "This week" section */}
-        <View style={styles.planSection}>
-          <Text style={styles.planSectionTitle}>This week</Text>
-          <Text style={styles.planSectionMore}>WK {currentWeek} / {totalWeeks}</Text>
-        </View>
-
-        {/* 7-day rows in a single card */}
-        <View style={styles.planDaysCard}>
-          {dayRows.map((d, i) => (
-            <View
-              key={d.dayName}
-              style={[
-                styles.planDayRow,
-                i > 0 && { borderTopWidth: 1, borderTopColor: colors.line },
-                d.isToday && { backgroundColor: 'rgba(224,183,117,0.06)' },
-              ]}
-            >
-              <Text style={[
-                styles.planDayName,
-                { color: d.isToday ? colors.accent : colors.textTertiary },
-              ]}>
-                {d.dayName}
-              </Text>
-              <Text numberOfLines={1} style={styles.planDayWorkout}>{d.workout}</Text>
-              <Text style={styles.planDayTarget}>{d.target}</Text>
-              <View style={[
-                styles.planDayDone,
-                d.done && { backgroundColor: colors.accent, borderColor: colors.accent },
-              ]}>
-                {d.done && <View style={styles.planDayDoneDot} />}
-              </View>
-            </View>
-          ))}
-        </View>
-      </>
-    );
-  };
-
-
+  );
 
   if (loading) {
     return (
@@ -568,9 +218,9 @@ export default function TrainHomeScreen({ navigation }: any) {
         {segment === 'today' && (
           <ProgramToday navigation={navigation} onAsk={() => { haptic.medium(); setCoachOpen(true); }} />
         )}
-        {segment === 'lift' && renderLiftSegment()}
-        {segment === 'run' && renderRunSegment()}
-        {segment === 'plan' && renderPlanSegment()}
+        {segment === 'week' && <ProgramWeek navigation={navigation} />}
+        {segment === 'program' && <ProgramOverview navigation={navigation} />}
+        {segment === 'history' && renderHistorySegment()}
       </ScrollView>
 
       <UndoToast
@@ -583,14 +233,8 @@ export default function TrainHomeScreen({ navigation }: any) {
       <CoachSheet
         visible={coachOpen}
         onClose={() => setCoachOpen(false)}
-        seed={
-          (segment === 'lift' || segment === 'today') && todayWorkout
-            ? `${DAY_LABELS[todayWorkout.day_type] || todayWorkout.day_type} day — what's the question?`
-            : segment === 'run' && todayRun?.planned_run
-              ? `${todayRun.planned_run.run_type} run today. What do you need?`
-              : "On the work — what's on your mind?"
-        }
-        workoutSessionId={(segment === 'lift' || segment === 'today') ? todayWorkout?.id : undefined}
+        seed="I've got today's session, the week and your last sets in front of me. Ask, or tell me what's changing — I'll re-plan the week."
+
       />
       </ScreenBackground>
     </GestureHandlerRootView>
@@ -599,6 +243,9 @@ export default function TrainHomeScreen({ navigation }: any) {
 
 
 const styles = StyleSheet.create({
+  runRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.line, marginBottom: 6 },
+  runTitle: { fontFamily: fonts.medium, fontSize: 13.5, color: colors.text },
+  runMeta: { fontFamily: fonts.mono, fontSize: 10.5, color: colors.textTertiary, marginTop: 2 },
   container: { flex: 1 },
 
   screenTitle: {

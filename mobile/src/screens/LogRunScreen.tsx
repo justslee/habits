@@ -31,14 +31,14 @@ function toInt(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export default function LogRunScreen({ navigation }: any) {
+export default function LogRunScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const [runDate, setRunDate] = useState(todayISO());
-  const [distance, setDistance] = useState('');
+  const [distance, setDistance] = useState(route?.params?.distance ? String(route.params.distance) : '');
   const [hours, setHours] = useState('');
   const [minutes, setMinutes] = useState('');
   const [seconds, setSeconds] = useState('');
-  const [runType, setRunType] = useState<string>('easy');
+  const [runType, setRunType] = useState<string>(route?.params?.runType || 'easy');
   const [rpe, setRpe] = useState<number | null>(null);
   const [elevation, setElevation] = useState('');
   const [notes, setNotes] = useState('');

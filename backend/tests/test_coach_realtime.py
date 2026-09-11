@@ -26,12 +26,15 @@ async def test_coach_context_and_token_without_key(db_session, monkeypatch):
 async def test_coach_chat_uses_program_context(db_session, monkeypatch):
     seen = {}
 
-    async def fake_generate_text(*, system, user_prompt, **kw):
+    async def fake_structured_output(*, system, user_prompt, **kw):
         seen["system"] = system
         seen["prompt"] = user_prompt
-        return "Trap bar at the bottom of the range, two reps left."
+        return {
+            "reply": "Trap bar at the bottom of the range, two reps left.",
+            "adjustment": None,
+        }
 
-    monkeypatch.setattr("app.routers.coach.generate_text", fake_generate_text)
+    monkeypatch.setattr("app.routers.coach.structured_output", fake_structured_output)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:

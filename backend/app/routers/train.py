@@ -8,6 +8,10 @@ POST  /api/v1/train/sessions/{id}/complete   RPE + minutes; applies double progr
 GET   /api/v1/train/log?start=         the copyable weekly log
 GET/POST/DELETE /api/v1/train/events   tournaments and important rounds
 PATCH /api/v1/train/settings
+POST  /api/v1/train/adjust             change a day (run outside / rest / golf / swap / move / shorten,
+                                       or free text the coach interprets); the week is re-planned around it
+GET   /api/v1/train/adjustments?start= your active changes for the week
+DELETE /api/v1/train/adjustments/{id}  undo one
 """
 
 from __future__ import annotations
@@ -21,15 +25,18 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.food import CalendarEvent
+from app.models.run import RunSession
 from app.models.user import User
 from app.models.workout import (
     ExerciseProfile,
     GolfEvent,
+    TrainingAdjustment,
     TrainingSettings,
     WorkoutSession,
 )
 from app.services import calendar_sync
 from app.services import golf_program as gp
+from app.services.llm import FAST, structured_output
 
 router = APIRouter(prefix="/api/v1/train", tags=["train"])
 
@@ -131,7 +138,44 @@ def _extra_lighter(s: TrainingSettings) -> list[datetime.date]:
     return out
 
 
-def _week(db: Session, user: User, ws: datetime.date) -> list[gp.DayPlan]:
+def _active_adjustments(
+    db: Session, user: User, ws: datetime.date
+) -> list[TrainingAdjustment]:
+    return (
+        db.query(TrainingAdjustment)
+        .filter(
+            TrainingAdjustment.user_id == user.id,
+            TrainingAdjustment.reverted_at.is_(None),
+            TrainingAdjustment.date >= ws,
+            TrainingAdjustment.date <= ws + datetime.timedelta(days=6),
+        )
+        .order_by(TrainingAdjustment.id)
+        .all()
+    )
+
+
+def _pins(db: Session, user: User, ws: datetime.date) -> dict[datetime.date, dict]:
+    """Your changes as planner pins. A 'move' pins the session on its target day and frees the source."""
+    pins: dict[datetime.date, dict] = {}
+    for a in _active_adjustments(db, user, ws):
+        params = json.loads(a.params or "{}")
+        base = {"kind": a.kind, "id": a.id, **params}
+        if a.kind == "move":
+            target = datetime.date.fromisoformat(params["target_date"])
+            pins[target] = {**base, "session": params.get("session")}
+            pins[a.date] = {
+                "kind": "rest",
+                "id": a.id,
+                "label": f"Free (moved {params.get('session')} to {target.strftime('%a')})",
+            }
+        else:
+            pins[a.date] = base
+    return pins
+
+
+def _week(
+    db: Session, user: User, ws: datetime.date, *, ignore_pins: bool = False
+) -> list[gp.DayPlan]:
     s = _settings(db, user)
     travel = set(
         calendar_sync.travel_days_between(
@@ -144,13 +188,37 @@ def _week(db: Session, user: User, ws: datetime.date) -> list[gp.DayPlan]:
         tournaments=_tournament_days(db, user),
         five_sessions=s.five_sessions,
         golf_days=_golf_days(db, user, ws),
+        pins=None if ignore_pins else _pins(db, user, ws),
+        not_before=datetime.date.today(),
     )
 
 
+def _runs_by_date(
+    db: Session, user: User, ws: datetime.date
+) -> dict[datetime.date, RunSession]:
+    rows = (
+        db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.run_date >= ws,
+            RunSession.run_date <= ws + datetime.timedelta(days=6),
+            RunSession.deleted_at.is_(None),
+        )
+        .all()
+    )
+    return {r.run_date: r for r in rows}
+
+
 def _day_out(
-    dp: gp.DayPlan, sessions_by_date: dict[datetime.date, WorkoutSession]
+    dp: gp.DayPlan,
+    sessions_by_date: dict[datetime.date, WorkoutSession],
+    runs_by_date: dict[datetime.date, RunSession] | None = None,
 ) -> dict:
     row = sessions_by_date.get(dp.date)
+    run = (runs_by_date or {}).get(dp.date)
+    status = row.status if row else None
+    if dp.session == "RUN" and run:
+        status = "completed"
     return {
         "date": dp.date.isoformat(),
         "weekday": WEEKDAYS[dp.date.weekday()],
@@ -158,8 +226,12 @@ def _day_out(
         "label": dp.label,
         "travel": dp.travel,
         "note": dp.note,
-        "status": (row.status if row else None),
+        "adjusted": dp.adjusted,
+        "adjustment_id": (dp.detail or {}).get("id"),
+        "detail": {k: v for k, v in (dp.detail or {}).items() if k != "id"} or None,
+        "status": status,
         "session_id": (row.id if row else None),
+        "run_id": (run.id if run else None),
         "minutes": (
             row.duration_minutes if row and hasattr(row, "duration_minutes") else None
         ),
@@ -252,6 +324,7 @@ def week(start: datetime.date | None = None, db: Session = Depends(get_db)):
     s = _settings(db, user)
     return {
         "week_start": ws.isoformat(),
+        "adjustments": [_adjustment_out(a) for a in _active_adjustments(db, user, ws)],
         "week_kind": "lighter"
         if gp.is_lighter_week(ws, _extra_lighter(s))
         else (
@@ -261,23 +334,38 @@ def week(start: datetime.date | None = None, db: Session = Depends(get_db)):
         ),
         "rotation": gp.rotation_week(ws),
         "phase": gp.phase_for(ws, _first_event(db, user, s)).name,
-        "days": [_day_out(dp, by_date) for dp in days],
+        "days": [_day_out(dp, by_date, _runs_by_date(db, user, ws)) for dp in days],
     }
 
 
 def _prescription_for(db: Session, user: User, d: datetime.date) -> dict | None:
     s = _settings(db, user)
-    dp = next((x for x in _week(db, user, gp.week_start(d)) if x.date == d), None)
+    week = _week(db, user, gp.week_start(d))
+    dp = next((x for x in week if x.date == d), None)
     if dp is None or dp.session is None:
         return None
-    return gp.prescribe(
-        d,
-        dp.session,
-        first_event=_first_event(db, user, s),
-        lighter=gp.is_lighter_week(d, _extra_lighter(s)),
-        five_sessions=s.five_sessions,
-        profiles=_profiles(db, user),
-    )
+    fe = _first_event(db, user, s)
+    lighter = gp.is_lighter_week(d, _extra_lighter(s))
+    if dp.session == "RUN":
+        p = gp.run_prescription(d, dp.detail or {}, first_event=fe, lighter=lighter)
+    else:
+        p = gp.prescribe(
+            d,
+            dp.session,
+            first_event=fe,
+            lighter=lighter,
+            five_sessions=s.five_sessions,
+            profiles=_profiles(db, user),
+        )
+        prev = next((x for x in week if x.date == d - datetime.timedelta(days=1)), None)
+        if prev and prev.session == "RUN" and gp._big_run(prev.detail or {}):
+            p = gp.after_run(p)
+        if dp.adjusted == "shorten" and (dp.detail or {}).get("minutes"):
+            p = gp.shorten(p, int(dp.detail["minutes"]))
+    if dp.note:
+        p["day_note"] = dp.note
+    p["adjusted"] = dp.adjusted
+    return p
 
 
 def _flatten_for_logger(p: dict) -> list[dict]:
@@ -345,6 +433,11 @@ def start_today(db: Session = Depends(get_db)):
     if not p:
         raise HTTPException(
             status_code=422, detail="Nothing scheduled today — rest, golf or mobility."
+        )
+    if p["session"] == "RUN":
+        raise HTTPException(
+            status_code=422,
+            detail="Today is your outdoor run — log it from the run screen when you're back.",
         )
     plan = {**p, "exercises": _flatten_for_logger(p)}
     row = WorkoutSession(
@@ -589,3 +682,234 @@ def patch_settings(payload: SettingsIn, db: Session = Depends(get_db)):
         "five_sessions": s.five_sessions,
         "extra_lighter_weeks": _extra_lighter(s),
     }
+
+
+# --- adjustments: change a day, re-plan the week ------------------------------
+
+ADJUST_KINDS = ("run", "rest", "golf", "swap", "move", "shorten")
+
+ADJUST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {
+            "type": "string",
+            "enum": list(ADJUST_KINDS) + ["none"],
+            "description": "run = an outdoor run instead of the gym; rest = take the day off; golf = playing golf instead; "
+            "swap = do a different program session today (S1..S5); move = move today's session to another date; "
+            "shorten = keep the session but cap the minutes; none = no change requested",
+        },
+        "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD of the day being changed",
+        },
+        "miles": {"type": ["number", "null"]},
+        "minutes": {
+            "type": ["integer", "null"],
+            "description": "run minutes, or the cap for shorten",
+        },
+        "intensity": {
+            "type": ["string", "null"],
+            "enum": ["easy", "moderate", "hard", None],
+        },
+        "session": {
+            "type": ["string", "null"],
+            "enum": ["S1", "S2", "S3", "S4", "S5", None],
+        },
+        "target_date": {
+            "type": ["string", "null"],
+            "description": "for move: YYYY-MM-DD",
+        },
+        "note": {"type": "string", "description": "one short line back to the athlete"},
+    },
+    "required": ["kind", "date", "note"],
+}
+
+
+class AdjustIn(BaseModel):
+    date: datetime.date | None = None
+    text: str | None = None  # free text; interpreted by the coach when kind is missing
+    kind: str | None = None
+    miles: float | None = None
+    minutes: int | None = None
+    intensity: str | None = None
+    session: str | None = None
+    target_date: datetime.date | None = None
+
+
+def _adjustment_out(a: TrainingAdjustment) -> dict:
+    return {
+        "id": a.id,
+        "date": a.date.isoformat(),
+        "kind": a.kind,
+        "params": json.loads(a.params or "{}"),
+        "reason": a.reason,
+        "summary": a.summary,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+
+
+async def parse_adjustment(
+    db: Session, user: User, text: str, d: datetime.date
+) -> dict:
+    """Turn 'today I'm running 6 miles instead of the gym' into a structured change."""
+    week = _week(db, user, gp.week_start(d))
+    plan_lines = "\n".join(
+        f"  {x.date.isoformat()} {x.date.strftime('%a')}: {x.session or 'rest'} — {x.label}"
+        for x in week
+    )
+    prompt = (
+        f"Today is {d.isoformat()} ({d.strftime('%A')}). This week's plan:\n{plan_lines}\n\n"
+        f"The athlete says: {text}\n\n"
+        "Return the single change they are asking for. If they name no date, use today. "
+        "Distances in miles; if they give time only, use minutes. 'Skip' or 'off' = rest. "
+        "If they only ask a question and request no change, kind = none."
+    )
+    return await structured_output(
+        system="You convert an athlete's message about today's training into one structured change to their plan.",
+        user_prompt=prompt,
+        tool_name="submit_adjustment",
+        tool_description="The structured change",
+        output_schema=ADJUST_SCHEMA,
+        model=FAST,
+        max_tokens=400,
+    )
+
+
+def apply_adjustment(
+    db: Session,
+    user: User,
+    *,
+    d: datetime.date,
+    kind: str,
+    params: dict,
+    reason: str | None,
+) -> tuple[TrainingAdjustment, list[str]]:
+    """Record the change, replacing any active change on that date, and describe the re-planned week."""
+    if kind not in ADJUST_KINDS:
+        raise HTTPException(status_code=422, detail=f"Unknown adjustment kind {kind!r}")
+    params = {k: v for k, v in params.items() if v is not None}
+    if kind == "swap" and params.get("session") not in gp.SESSIONS:
+        raise HTTPException(status_code=422, detail="swap needs a session S1–S5")
+    if kind == "shorten" and not params.get("minutes"):
+        raise HTTPException(status_code=422, detail="shorten needs minutes")
+    ws = gp.week_start(d)
+    before = _week(db, user, ws)
+    if kind == "move":
+        if not params.get("target_date"):
+            raise HTTPException(status_code=422, detail="move needs target_date")
+        src = next((x for x in before if x.date == d), None)
+        if not src or src.session not in gp.SESSIONS:
+            raise HTTPException(status_code=422, detail="Nothing on that day to move")
+        params["session"] = src.session
+        target = datetime.date.fromisoformat(str(params["target_date"]))
+        if gp.week_start(target) != ws:
+            raise HTTPException(status_code=422, detail="Move within the same week")
+        params["target_date"] = target.isoformat()
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    for old in _active_adjustments(db, user, ws):
+        if old.date == d:
+            old.reverted_at = now
+    row = TrainingAdjustment(
+        user_id=user.id,
+        date=d,
+        kind=kind,
+        params=json.dumps(params),
+        reason=reason,
+    )
+    db.add(row)
+    db.flush()
+    after = _week(db, user, ws)
+    changes = gp.describe_change(before, after)
+    row.summary = " · ".join(changes)
+    db.commit()
+    return row, changes
+
+
+def _adjust_response(
+    db: Session,
+    user: User,
+    row: TrainingAdjustment | None,
+    changes: list[str],
+    note: str | None = None,
+) -> dict:
+    ws = gp.week_start(row.date if row else datetime.date.today())
+    return {
+        "adjustment": _adjustment_out(row) if row else None,
+        "changes": changes,
+        "note": note,
+        "week": week(start=ws, db=db),
+        "today": today(db=db),
+    }
+
+
+@router.post("/adjust")
+async def adjust(payload: AdjustIn, db: Session = Depends(get_db)):
+    user = _user(db)
+    d = payload.date or datetime.date.today()
+    if d < datetime.date.today():
+        raise HTTPException(status_code=422, detail="That day is already behind you")
+    kind = payload.kind
+    params = {
+        "miles": payload.miles,
+        "minutes": payload.minutes,
+        "intensity": payload.intensity,
+        "session": payload.session,
+        "target_date": payload.target_date.isoformat() if payload.target_date else None,
+    }
+    note = None
+    if not kind:
+        if not (payload.text or "").strip():
+            raise HTTPException(status_code=422, detail="Say what you want to change")
+        try:
+            parsed = await parse_adjustment(db, user, payload.text.strip(), d)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502, detail=f"Coach unavailable: {str(e)[:200]}"
+            )
+        note = parsed.get("note")
+        if parsed.get("kind") in (None, "none"):
+            return _adjust_response(db, user, None, ["No change made."], note)
+        kind = parsed["kind"]
+        if parsed.get("date"):
+            d = datetime.date.fromisoformat(parsed["date"])
+        params = {
+            "miles": parsed.get("miles"),
+            "minutes": parsed.get("minutes"),
+            "intensity": parsed.get("intensity"),
+            "session": parsed.get("session"),
+            "target_date": parsed.get("target_date"),
+        }
+    row, changes = apply_adjustment(
+        db, user, d=d, kind=kind, params=params, reason=payload.text
+    )
+    return _adjust_response(db, user, row, changes, note)
+
+
+@router.get("/adjustments")
+def list_adjustments(start: datetime.date | None = None, db: Session = Depends(get_db)):
+    user = _user(db)
+    ws = gp.week_start(start or datetime.date.today())
+    return [_adjustment_out(a) for a in _active_adjustments(db, user, ws)]
+
+
+@router.delete("/adjustments/{adjustment_id}")
+def revert_adjustment(adjustment_id: int, db: Session = Depends(get_db)):
+    user = _user(db)
+    row = (
+        db.query(TrainingAdjustment)
+        .filter(
+            TrainingAdjustment.id == adjustment_id,
+            TrainingAdjustment.user_id == user.id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No such change")
+    ws = gp.week_start(row.date)
+    before = _week(db, user, ws)
+    row.reverted_at = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    db.flush()
+    after = _week(db, user, ws)
+    changes = gp.describe_change(before, after)
+    db.commit()
+    return _adjust_response(db, user, None, changes, "Undone.")

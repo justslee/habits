@@ -92,3 +92,16 @@ Mon 35–45 min strength (trap bar 2 × 3–4; DB bench and row 2 × 6; Pallof 2
 Baseline in September, review monthly after a lighter week; substitute checks for normal sets. Log main-lift load/reps/reps left, pull-up reps or pulldown load, unilateral stability, best of 3 controlled broad jumps once familiar, driver speed if available, easy-run duration and recovery, mobility range, readiness (sleep, soreness, energy, golf quality). Adjustment rule: two consecutive down sessions, soreness that changes the swing, or loads suddenly feeling much harder → halve accessory sets and replace intervals with easy cardio for that week.
 
 The weekly log lives at `GET /api/v1/train/log` and on the Train tab.
+
+## 11. Adaptive days (you change a day, the week re-plans)
+
+Any future day can be changed from the Today card, the Week segment, the six-week outlook, the coach chat, or the live voice coach ("I'm running 6 miles outside instead of the gym"). Kinds: **run** (miles/minutes/intensity), **rest**, **golf**, **swap** (do S1–S5 today), **move** (to another day this week), **shorten** (cap the minutes). One active change per day; the newest replaces the old; every change can be undone.
+
+How the planner reacts (`golf_program.plan_week` with `pins`):
+
+- The session that was on that day moves to the nearest free day still this week, never into the past, keeping lower-body sessions (S1, S3) 48 h apart. If there is no free day it is dropped, not stacked.
+- A run of 3+ miles or 30+ minutes counts as the week's running: Session 5 is dropped that week, the next day's Session 2 run block becomes 15 min easy (no intervals), and a lower-body session the next day carries a "heavy legs — hold loads, RPE 7" note.
+- **shorten** drops accessories first (the plan's omit-first exercises, then from the end of the session), then one set from the main lifts; warm-up and rests stay.
+- A run day's prescription is the run itself (structure by intensity) plus the daily mobility; log it from the run screen and the day shows ✓.
+
+Endpoints: `POST /api/v1/train/adjust` (structured or `text` the coach interprets), `GET /api/v1/train/adjustments`, `DELETE /api/v1/train/adjustments/{id}`. The coach's `adjust_training` tool (text chat and OpenAI Realtime voice) calls the same code.

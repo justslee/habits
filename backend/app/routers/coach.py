@@ -22,9 +22,15 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.workout import WorkoutSession
-from app.routers.train import _prescription_for, _user, _week
+from app.routers.train import (
+    ADJUST_KINDS,
+    _prescription_for,
+    _user,
+    _week,
+    apply_adjustment,
+)
 from app.services import golf_program as gp
-from app.services.llm import FAST, generate_text
+from app.services.llm import FAST, structured_output
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
 
@@ -76,7 +82,9 @@ def build_context(db: Session) -> str:
     lines.append(
         "THIS WEEK: "
         + ", ".join(
-            f"{d.date.strftime('%a')} {d.session or 'rest'}{' (travel)' if d.travel else ''}"
+            f"{d.date.strftime('%a')} {d.session or 'rest'}"
+            + (f" [{d.label}]" if d.adjusted else "")
+            + (" (travel)" if d.travel else "")
             for d in week
         )
     )
@@ -99,8 +107,41 @@ COACH_STYLE = (
     "Be brief and direct — one or two sentences unless asked for more. Coach the plan as written: doses, rest, RPE, the 70-minute cap, "
     "power before strength, control before load. Give the next set's load from the double-progression rule when asked. "
     "If something hurts sharply or increasingly, stop that exercise. Never suggest medicine-ball throws or tosses. "
-    "You can hear the owner; answer in the same language they use. Do not narrate the whole plan unprompted."
+    "You can hear the owner; answer in the same language they use. Do not narrate the whole plan unprompted. "
+    "When the owner tells you they are changing a day (running outside instead of the gym, resting, playing golf, "
+    "doing a different session, moving a session, or cutting the time), call adjust_training so the rest of the week "
+    "is re-planned around it, then tell them in one sentence what moved."
 )
+
+ADJUST_TOOL = {
+    "type": "function",
+    "name": "adjust_training",
+    "description": "Change one planned training day; the app re-plans the rest of the week (moves the displaced session, keeps lower-body sessions 48h apart, drops Session 5 when a real run covers it).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": list(ADJUST_KINDS),
+                "description": "run | rest | golf | swap | move | shorten",
+            },
+            "date": {"type": "string", "description": "YYYY-MM-DD; omit for today"},
+            "miles": {"type": "number", "description": "run distance"},
+            "minutes": {
+                "type": "integer",
+                "description": "run minutes, or the time cap for shorten",
+            },
+            "intensity": {"type": "string", "enum": ["easy", "moderate", "hard"]},
+            "session": {
+                "type": "string",
+                "enum": ["S1", "S2", "S3", "S4", "S5"],
+                "description": "for swap",
+            },
+            "target_date": {"type": "string", "description": "for move: YYYY-MM-DD"},
+        },
+        "required": ["kind"],
+    },
+}
 
 
 class SessionOut(BaseModel):
@@ -126,6 +167,8 @@ async def realtime_session(db: Session = Depends(get_db)):
             "model": REALTIME_MODEL,
             "instructions": COACH_STYLE + "\n\nCURRENT CONTEXT:\n" + context,
             "audio": {"output": {"voice": REALTIME_VOICE}},
+            "tools": [ADJUST_TOOL],
+            "tool_choice": "auto",
         }
     }
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -172,13 +215,51 @@ class ChatIn(BaseModel):
 class ChatOut(BaseModel):
     reply: str
     model: str
+    changes: list[str] = []
+    adjustment_id: int | None = None
+
+
+CHAT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reply": {
+            "type": "string",
+            "description": "the coach's reply, plain sentences",
+        },
+        "adjustment": {
+            "type": ["object", "null"],
+            "description": "set only when the athlete is telling you they are changing a day",
+            "properties": {
+                "kind": {"type": "string", "enum": list(ADJUST_KINDS)},
+                "date": {
+                    "type": ["string", "null"],
+                    "description": "YYYY-MM-DD; null = today",
+                },
+                "miles": {"type": ["number", "null"]},
+                "minutes": {"type": ["integer", "null"]},
+                "intensity": {
+                    "type": ["string", "null"],
+                    "enum": ["easy", "moderate", "hard", None],
+                },
+                "session": {
+                    "type": ["string", "null"],
+                    "enum": ["S1", "S2", "S3", "S4", "S5", None],
+                },
+                "target_date": {"type": ["string", "null"]},
+            },
+            "required": ["kind"],
+        },
+    },
+    "required": ["reply", "adjustment"],
+}
 
 
 @router.post("/chat", response_model=ChatOut)
 async def chat(payload: ChatIn, db: Session = Depends(get_db)):
-    """Program-aware text chat: same context and style as the live voice coach."""
+    """Program-aware text chat. If you tell the coach you're changing a day, the week is re-planned."""
     if not payload.message.strip():
         raise HTTPException(status_code=422, detail="Empty message")
+    user = _user(db)
     context = build_context(db)
     turns = "\n".join(
         f"{'ATHLETE' if t.get('from') == 'me' else 'COACH'}: {t.get('text', '')}"
@@ -190,15 +271,45 @@ async def chat(payload: ChatIn, db: Session = Depends(get_db)):
         + f"ATHLETE SAYS: {payload.message.strip()}"
     )
     try:
-        reply = await generate_text(
+        out = await structured_output(
             system=COACH_STYLE
-            + " This is a text chat; plain sentences, no markdown headers.",
+            + " This is a text chat; plain sentences, no markdown headers. "
+            "Fill `adjustment` only when the athlete states a change to a day (not for questions).",
             user_prompt=prompt,
+            tool_name="submit_coach_reply",
+            tool_description="Reply, plus the day change if one was stated",
+            output_schema=CHAT_SCHEMA,
             model=FAST,
-            max_tokens=600,
+            max_tokens=700,
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(
             status_code=502, detail=f"Coach unavailable: {str(e)[:200]}"
         )
-    return ChatOut(reply=reply.strip(), model=FAST)
+    reply = str(out.get("reply") or "").strip()
+    adj = out.get("adjustment")
+    changes: list[str] = []
+    adj_id = None
+    if isinstance(adj, dict) and adj.get("kind") in ADJUST_KINDS:
+        d = (
+            datetime.date.fromisoformat(adj["date"])
+            if adj.get("date")
+            else datetime.date.today()
+        )
+        try:
+            row, changes = apply_adjustment(
+                db,
+                user,
+                d=d,
+                kind=adj["kind"],
+                params={
+                    k: adj.get(k)
+                    for k in ("miles", "minutes", "intensity", "session", "target_date")
+                },
+                reason=payload.message.strip(),
+            )
+            adj_id = row.id
+            reply += "\n\nUpdated your week: " + " · ".join(changes)
+        except HTTPException as e:
+            reply += f"\n\n(I couldn't apply that change: {e.detail})"
+    return ChatOut(reply=reply, model=FAST, changes=changes, adjustment_id=adj_id)

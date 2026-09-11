@@ -7,12 +7,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors, fonts, radius, spacing, typography } from '../theme';
-import { getCoachContext, getRealtimeSession } from '../api/client';
+import { adjustTraining, getCoachContext, getRealtimeSession } from '../api/client';
 import { haptic } from '../utils/haptics';
 import ScreenBackground from '../components/ScreenBackground';
 import { rtc } from '../lib/rtc';
 
-type Line = { who: 'you' | 'coach'; text: string };
+type Line = { who: 'you' | 'coach' | 'app'; text: string };
 type State = 'idle' | 'connecting' | 'live' | 'error';
 
 export default function CoachVoiceScreen() {
@@ -71,6 +71,22 @@ export default function CoachVoiceScreen() {
             partial.current = '';
           } else if (ev.type === 'conversation.item.input_audio_transcription.completed' && ev.transcript) {
             push('you', ev.transcript);
+          } else if (ev.type === 'response.function_call_arguments.done' && ev.name === 'adjust_training') {
+            // the coach decided to change a day: apply it on the Mac, hand the result back, let the coach confirm out loud
+            (async () => {
+              let output: string;
+              try {
+                const args = JSON.parse(ev.arguments || '{}');
+                const r = await adjustTraining(args);
+                output = JSON.stringify({ ok: true, changes: r.changes, note: r.note });
+                push('app', `Week re-planned: ${r.changes.join(' · ')}`);
+              } catch (err: any) {
+                output = JSON.stringify({ ok: false, error: String(err?.message || err).slice(0, 200) });
+                push('app', `Could not apply that change: ${String(err?.message || err).slice(0, 120)}`);
+              }
+              channel.send(JSON.stringify({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: ev.call_id, output } }));
+              channel.send(JSON.stringify({ type: 'response.create' }));
+            })();
           } else if (ev.type === 'error') {
             setError(ev.error?.message || 'realtime error');
           }
@@ -118,12 +134,12 @@ export default function CoachVoiceScreen() {
 
         <ScrollView style={s.transcript} contentContainerStyle={{ paddingBottom: 140 }}>
           {lines.map((l, i) => (
-            <View key={i} style={[s.line, l.who === 'you' && s.lineYou]}>
-              <Text style={s.who}>{l.who === 'you' ? 'YOU' : 'COACH'}</Text>
+            <View key={i} style={[s.line, l.who === 'you' && s.lineYou, l.who === 'app' && s.lineApp]}>
+              <Text style={s.who}>{l.who === 'you' ? 'YOU' : l.who === 'app' ? 'PLAN' : 'COACH'}</Text>
               <Text style={s.lineText}>{l.text}</Text>
             </View>
           ))}
-          {!lines.length && live && <Text style={s.help}>Say something like "what's my trap-bar load today?" or "I only have 50 minutes".</Text>}
+          {!lines.length && live && <Text style={s.help}>Say "what's my trap-bar load today?", "I only have 50 minutes", or "I'm running 6 miles outside instead of the gym" — the coach re-plans the week for you.</Text>}
         </ScrollView>
       </View>
     </ScreenBackground>
@@ -146,6 +162,7 @@ const s = StyleSheet.create({
   transcript: { flex: 1, marginTop: 14 },
   line: { backgroundColor: colors.card, borderRadius: 12, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: colors.line },
   lineYou: { backgroundColor: colors.input },
+  lineApp: { borderColor: colors.accent },
   who: { fontFamily: fonts.mono, fontSize: 9, letterSpacing: 1.2, color: colors.textTertiary, marginBottom: 3 },
   lineText: { fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 19 },
 });
