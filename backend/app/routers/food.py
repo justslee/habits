@@ -252,6 +252,9 @@ class PlanOut(BaseModel):
     meals: list[MealOut]
     covered_days: int
     open_days: int
+    # How many recipes the cycle has to build from. Zero means there is nothing to lay out,
+    # so the screen can send you back to choose instead of offering a build that must fail.
+    kept: int = 0
 
 
 def _plan_out(c: MealCycle) -> PlanOut:
@@ -273,6 +276,7 @@ def _plan_out(c: MealCycle) -> PlanOut:
         meals=meals,
         covered_days=covered,
         open_days=max(0, fp.eating_days(c) - covered),
+        kept=sum(1 for sw in c.swipes if sw.decision == "keep"),
     )
 
 
@@ -495,7 +499,10 @@ def build_plan(cycle_id: int, db: Session = Depends(get_db)):
     user = _user(db)
     cycle = _cycle(db, user, cycle_id)
     if not fp.kept_recipes(db, cycle):
-        raise HTTPException(status_code=422, detail="Keep at least one meal first")
+        raise HTTPException(
+            status_code=422,
+            detail="Nothing to build from. Choose some meals first.",
+        )
     fp.layout_plan(db, cycle)
     return _plan_out(cycle)
 

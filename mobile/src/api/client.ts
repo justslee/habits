@@ -698,6 +698,7 @@ export interface FoodPlan {
   meals: FoodMeal[];
   covered_days: number;
   open_days: number;
+  kept: number;
 }
 
 export interface PantryEntry {

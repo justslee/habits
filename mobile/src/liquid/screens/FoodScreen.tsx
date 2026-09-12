@@ -120,6 +120,8 @@ export default function FoodScreen({ navigation }: any) {
 function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) {
   const { c } = useTheme();
   const ready = !!plan?.meals?.length;
+  // With a cycle running but nothing chosen, the blocker is the meals, not the pantry.
+  const needsMeals = !!cycle && !ready && (plan?.kept ?? 0) === 0;
   const covered = plan?.covered_days ?? 0;
   const eating = cycle?.eating_days ?? 0;
 
@@ -147,7 +149,7 @@ function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) 
           <Badge>{ready ? 'Plan ready' : cycle ? 'In progress' : 'Next grocery run'}</Badge>
         </View>
         <Subtitle style={{ marginTop: 12 }}>
-          {ready ? 'Your kitchen is covered.' : cycle ? `${eating} days to feed you.` : 'Two weeks, sorted.'}
+          {ready ? 'Your kitchen is covered.' : needsMeals ? 'Pick a few meals.' : cycle ? `${eating} days to feed you.` : 'Two weeks, sorted.'}
         </Subtitle>
         <Body style={{ marginTop: 8 }}>
           {cycle
@@ -161,9 +163,14 @@ function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) 
         ) : null}
         <Button
           full
-          label={ready ? 'See your plan' : cycle ? 'Continue your plan' : busy ? 'Starting…' : 'Plan my groceries'}
+          label={
+            ready ? 'See your plan'
+              : needsMeals ? 'Find my meals'
+                : cycle ? 'Continue your plan'
+                  : busy ? 'Starting…' : 'Plan my groceries'
+          }
           disabled={busy}
-          onPress={() => (ready ? go('plan') : cycle ? go('pantry') : startCycle())}
+          onPress={() => (ready ? go('plan') : needsMeals ? go('deck') : cycle ? go('pantry') : startCycle())}
         />
       </Panel>
 
@@ -392,16 +399,57 @@ function PlanView({ cycle, plan, go, load }: any) {
   const make = useCallback(async () => {
     if (!cycle) return;
     setBusy(true);
-    try { await buildPlan(cycle.id); await load(); } catch { toast.show('Could not build the plan.'); }
-    finally { setBusy(false); }
+    try {
+      await buildPlan(cycle.id);
+      await load();
+    } catch (err: any) {
+      const why = String(err?.message ?? err)
+        .replace(/^API \d+:\s*/, '')
+        .replace(/^\{"detail":"|"\}$/g, '')
+        .trim();
+      toast.show(why.slice(0, 140) || 'Could not build the plan.');
+    } finally {
+      setBusy(false);
+    }
   }, [cycle, load, toast]);
 
   if (!plan?.meals?.length) {
+    // Dropping every meal empties the pool, and a build with nothing to lay out can only fail.
+    // Offer the deck instead of a button that cannot work.
+    const empty = (plan?.kept ?? 0) === 0;
     return (
       <>
         <FlowTop step="03 · Your two-week plan" onBack={() => go('deck')} />
-        <Title>Ready when{'\n'}<Em>you are.</Em></Title>
-        <Button full label={busy ? 'Building…' : 'Build the plan'} disabled={busy} style={{ marginTop: 22 }} onPress={make} />
+        {empty ? (
+          <>
+            <Title>Nothing to{'\n'}<Em>plan yet.</Em></Title>
+            <Body style={{ marginTop: 14 }}>
+              You have no meals chosen for this cycle. Pick a few and the plan lays itself out
+              around your travel and your nights out.
+            </Body>
+            <Button
+              full
+              label="Find my meals"
+              iconAfter="arrow-forward"
+              style={{ marginTop: 22 }}
+              onPress={() => go('deck')}
+            />
+          </>
+        ) : (
+          <>
+            <Title>Ready when{'\n'}<Em>you are.</Em></Title>
+            <Body style={{ marginTop: 14 }}>
+              {plan?.kept} recipe{plan?.kept === 1 ? '' : 's'} chosen, waiting to be laid out.
+            </Body>
+            <Button
+              full
+              label={busy ? 'Building…' : 'Build the plan'}
+              disabled={busy}
+              style={{ marginTop: 22 }}
+              onPress={make}
+            />
+          </>
+        )}
       </>
     );
   }
