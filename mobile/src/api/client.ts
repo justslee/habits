@@ -997,7 +997,7 @@ export function createLiveSession(sdp: string): Promise<LiveSession> {
 }
 export function getCoachContext(): Promise<{ context: string }> { return request('/api/v1/coach/context'); }
 export function coachChat(message: string, history: { from: 'me' | 'coach'; text: string }[] = []): Promise<{ reply: string; model: string; changes: string[]; adjustment_id: number | null }> {
-  return request('/api/v1/coach/chat', { method: 'POST', body: JSON.stringify({ message, history }) });
+  return request('/api/v1/coach/chat', { method: 'POST', body: JSON.stringify({ message, history }), timeoutMs: 90_000 });
 }
 
 // ---- Adaptive days: change a day, the week re-plans around it ----

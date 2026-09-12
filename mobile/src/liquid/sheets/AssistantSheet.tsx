@@ -52,10 +52,27 @@ const PROMPTS: Record<string, string[]> = {
   Daily: ['I only have 30 minutes', 'What matters most today?'],
 };
 
+/** Turn whatever the request threw into a sentence worth showing. Never empty. */
+function explain(err: any): string {
+  const raw = String(err?.message ?? err ?? '').trim();
+  const status = raw.match(/^API (\d+)/)?.[1];
+  const body = raw
+    .replace(/^API \d+:\s*/, '')
+    .replace(/^\{"detail":"|"\}$/g, '')
+    .trim();
+  if (body) return body.slice(0, 200);
+  if (status === '401') return 'The server rejected the app\u2019s key. Check Me \u2192 Server.';
+  if (status) return `The server answered ${status} with no message.`;
+  if (/abort/i.test(raw)) return 'That took too long and timed out. Try again.';
+  return raw ? raw.slice(0, 200) : 'That could not reach the server.';
+}
+
 interface Turn {
   from: 'me' | 'coach';
   text: string;
   changes?: string[];
+  /** The ask did not go through. Shown as a failure rather than as something the coach said. */
+  failed?: boolean;
 }
 
 export function AssistantSheet({ tab, onChanged }: { tab: string; onChanged?: () => void }) {
@@ -95,13 +112,13 @@ export function AssistantSheet({ tab, onChanged }: { tab: string; onChanged?: ()
     setTurns(prev => [...prev, { from: 'me', text: message }]);
     try {
       const r = await coachChat(message, history);
-      setTurns(prev => [...prev, { from: 'coach', text: r.reply, changes: r.changes }]);
+      const reply = (r.reply ?? '').trim();
+      setTurns(prev => [...prev, reply
+        ? { from: 'coach', text: reply, changes: r.changes }
+        : { from: 'coach', text: 'The coach answered with nothing. Try asking again.', failed: true }]);
       if (r.changes?.length) { feel.light(); onChanged?.(); }
     } catch (err: any) {
-      const clean = String(err?.message ?? err)
-        .replace(/^API \d+: /, '')
-        .replace(/^\{"detail":"|"\}$/g, '');
-      setTurns(prev => [...prev, { from: 'coach', text: clean }]);
+      setTurns(prev => [...prev, { from: 'coach', text: explain(err), failed: true }]);
     } finally {
       setBusy(false);
     }
@@ -178,17 +195,27 @@ function Bubble({ turn, index, moves }: { turn: Turn; index: number; moves: bool
         </View>
       ) : null}
       <View style={{ flex: 1, alignItems: mine ? 'flex-end' : 'flex-start' }}>
-        {turn.text ? (
-        <View
-          style={[
-            s.bubble,
-            mine
-              ? { backgroundColor: c.soft, borderBottomRightRadius: 7 }
-              : { backgroundColor: c.panel2, borderBottomLeftRadius: 7 },
-          ]}
-        >
-          <Body style={{ color: c.fg }}>{turn.text}</Body>
-        </View>
+        {/* A bubble is hidden only when the change line below says it instead. A turn must
+            never render as nothing, which is how a failed ask used to look like silence. */}
+        {turn.text || !changes.length ? (
+          <View
+            style={[
+              s.bubble,
+              mine
+                ? { backgroundColor: c.soft, borderBottomRightRadius: 7 }
+                : { backgroundColor: c.panel2, borderBottomLeftRadius: 7 },
+              turn.failed && { backgroundColor: 'transparent', borderWidth: 1, borderColor: c.line },
+            ]}
+          >
+            {turn.failed ? (
+              <View style={s.failed}>
+                <Ionicons name="alert-circle-outline" size={15} color={c.muted} />
+                <Small style={{ flex: 1 }}>{turn.text}</Small>
+              </View>
+            ) : (
+              <Body style={{ color: c.fg }}>{turn.text}</Body>
+            )}
+          </View>
         ) : null}
         {changes.length ? (
           <View style={s.changes}>
@@ -411,6 +438,7 @@ const s = StyleSheet.create({
   thinking: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 15 },
   dot: { width: 5, height: 5, borderRadius: 3 },
   changes: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 7, paddingHorizontal: 4 },
+  failed: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
   prompts: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 18 },
   chip: { borderWidth: 1, borderRadius: radius.chip, paddingHorizontal: 13, paddingVertical: 9, minHeight: 38, justifyContent: 'center' },
