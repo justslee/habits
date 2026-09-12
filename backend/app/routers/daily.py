@@ -355,6 +355,11 @@ def delete_habit(habit_id: int, db: Session = Depends(get_db)):
     habit = db.query(DailyHabit).filter(DailyHabit.id == habit_id).first()
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
+    # Its record goes with it. Leaving the logs behind would orphan rows that point at a
+    # habit that no longer exists and quietly inflate any count built from them.
+    db.query(DailyHabitLog).filter(DailyHabitLog.habit_id == habit.id).delete(
+        synchronize_session=False
+    )
     db.delete(habit)
     db.commit()
     return {"ok": True}

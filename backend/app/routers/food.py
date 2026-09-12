@@ -524,6 +524,69 @@ def mark_cooked(
     return _plan_out(cycle)
 
 
+class SwapIn(BaseModel):
+    recipe_id: int
+
+
+@router.post("/cycles/{cycle_id}/meals/{meal_id}/swap", response_model=PlanOut)
+def swap_meal(
+    cycle_id: int, meal_id: int, payload: SwapIn, db: Session = Depends(get_db)
+):
+    """Put a different recipe in this slot, keeping the day and the portions.
+
+    A plan you cannot change is a plan you abandon, so the slot survives and only the dish
+    moves. A meal already cooked stays as the record of what was actually eaten.
+    """
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    meal = (
+        db.query(CycleMeal)
+        .filter(CycleMeal.id == meal_id, CycleMeal.cycle_id == cycle.id)
+        .first()
+    )
+    if not meal:
+        raise HTTPException(status_code=404, detail="Meal not found")
+    if meal.status == "cooked":
+        raise HTTPException(
+            status_code=409, detail="That one is already cooked; it stays as it happened"
+        )
+    recipe = db.query(Recipe).filter(Recipe.id == payload.recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    if any(
+        m.recipe_id == recipe.id and m.id != meal.id for m in cycle.meals
+    ):
+        raise HTTPException(
+            status_code=409, detail=f"{recipe.title} is already in this plan"
+        )
+    meal.recipe_id = recipe.id
+    db.commit()
+    db.refresh(cycle)
+    return _plan_out(cycle)
+
+
+@router.delete("/cycles/{cycle_id}/meals/{meal_id}", response_model=PlanOut)
+def remove_meal(cycle_id: int, meal_id: int, db: Session = Depends(get_db)):
+    """Drop a meal from the plan. The days it covered become open days again."""
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    meal = (
+        db.query(CycleMeal)
+        .filter(CycleMeal.id == meal_id, CycleMeal.cycle_id == cycle.id)
+        .first()
+    )
+    if not meal:
+        raise HTTPException(status_code=404, detail="Meal not found")
+    if meal.status == "cooked":
+        raise HTTPException(
+            status_code=409, detail="That one is already cooked; it stays as it happened"
+        )
+    db.delete(meal)
+    db.commit()
+    db.refresh(cycle)
+    return _plan_out(cycle)
+
+
 @router.post("/cycles/{cycle_id}/complete", response_model=CycleOut)
 def complete_cycle(cycle_id: int, db: Session = Depends(get_db)):
     user = _user(db)

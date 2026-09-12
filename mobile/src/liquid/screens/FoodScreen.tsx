@@ -19,7 +19,8 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import {
   Bag, BagsResponse, CartTask, FoodCycle, FoodDeck, FoodPlan, FoodRecipe, PantryEntry, SpendSummary,
   approveBags, approveCart, buildBags, buildPlan, createCycle, getBags, getCarts, getCurrentCycle,
-  getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart, putPantry, runCart, swipeCard,
+  getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart, putPantry, removeCycleMeal,
+  runCart, swapCycleMeal, swipeCard,
 } from '../../api/client';
 import { useTheme } from '../theme';
 import { useRefreshOn } from '../refresh';
@@ -28,7 +29,7 @@ import { T, m } from '../motion';
 import { feel } from '../haptics';
 import { Screen } from '../ui/Screen';
 import { Body, Em, Eyebrow, Small, Subtitle, Title } from '../ui/Text';
-import { Button, InlineButton, Options } from '../ui/Button';
+import { Button, IconButton, InlineButton, Options } from '../ui/Button';
 import { Badge, CalendarNote, Coverage, DetailRow, FlowTop, Notice, Panel, Section, TopBar } from '../ui/Surfaces';
 import { Bowl } from '../ui/Sculpture';
 import { useSheet } from '../ui/Sheet';
@@ -459,6 +460,15 @@ function PlanView({ cycle, plan, go, load }: any) {
               label="Details"
               onPress={() => sheet.open(meal.recipe.title, () => <RecipeSheet recipe={meal.recipe} />)}
             />
+            <IconButton
+              icon="ellipsis-horizontal"
+              accessibilityLabel={`Change ${meal.recipe.title}`}
+              background={c.panel2}
+              haptic="soft"
+              onPress={() => sheet.open(meal.recipe.title, () => (
+                <MealSheet cycle={cycle} meal={meal} plan={plan} onDone={load} />
+              ))}
+            />
           </View>
         ))}
       </View>
@@ -466,6 +476,115 @@ function PlanView({ cycle, plan, go, load }: any) {
       <Small>Batch in two sessions. Freeze later-week portions.</Small>
       <Button full label="Find my groceries" iconAfter="arrow-forward" style={{ marginTop: 22 }} onPress={() => go('bags')} />
     </>
+  );
+}
+
+/**
+ * One planned meal, and what you can do about it.
+ *
+ * A plan you cannot change is a plan you abandon, so a slot can take a different dish or go
+ * away entirely. Anything already cooked stays as the record of what was actually eaten, which
+ * is why those offer nothing to change.
+ */
+/** Recipe sources disagree about capitalising cuisines; the list should not. */
+const cap = (v?: string | null) => (v ? v.replace(/^./, ch => ch.toUpperCase()) : '');
+
+function MealSheet({
+  cycle, meal, plan, onDone,
+}: {
+  cycle: FoodCycle;
+  meal: any;
+  plan: FoodPlan;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const sheet = useSheet();
+  const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [book, setBook] = useState<FoodRecipe[]>([]);
+  const cooked = meal.status === 'cooked';
+  const inPlan = new Set(plan.meals.map((m: any) => m.recipe.id));
+
+  useEffect(() => {
+    if (!picking || book.length) return;
+    getFoodRecipes().then(setBook).catch(() => toast.show('Could not load your recipes.'));
+  }, [picking, book.length, toast]);
+
+  const act = useCallback(async (run: () => Promise<unknown>, said: string) => {
+    setBusy(true);
+    try {
+      await run();
+      feel.light();
+      toast.show(said);
+      sheet.close();
+      onDone();
+    } catch (err: any) {
+      toast.show(String(err?.message ?? err).replace(/^API \d+: /, '').replace(/^\{"detail":"|"\}$/g, '').slice(0, 140) || 'That didn\u2019t save.');
+      setBusy(false);
+    }
+  }, [onDone, sheet, toast]);
+
+  if (cooked) {
+    return (
+      <View>
+        <Body>Cooked already. It stays as the record of what you actually ate.</Body>
+        <Button full kind="quiet" label="Close" style={{ marginTop: 20 }} onPress={sheet.close} />
+      </View>
+    );
+  }
+
+  if (picking) {
+    const choices = book.filter(r => !inPlan.has(r.id));
+    return (
+      <View>
+        <Body>Pick what goes in this slot instead. It keeps the same day and portions.</Body>
+        {!book.length ? <Small style={{ marginTop: 16 }}>Loading your recipes\u2026</Small> : null}
+        {book.length && !choices.length ? (
+          <Notice icon="alert-circle-outline">Every recipe you have is already in this plan.</Notice>
+        ) : null}
+        {choices.map((r, i) => (
+          <DetailRow
+            key={r.id}
+            label={r.title}
+            sub={[cap(r.cuisine), `${r.total_minutes} min`].filter(Boolean).join(' · ')}
+            value={r.times_cooked ? `cooked ${r.times_cooked}\u00d7` : 'new'}
+            onPress={busy ? undefined : () => act(() => swapCycleMeal(cycle.id, meal.id, r.id), `${r.title} it is.`)}
+            last={i === choices.length - 1}
+          />
+        ))}
+        <Button full kind="quiet" label="Back" style={{ marginTop: 18 }} onPress={() => setPicking(false)} />
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      <Body>
+        {meal.servings} portions
+        {meal.days_covered?.length ? `, covering ${meal.days_covered.length} day${meal.days_covered.length === 1 ? '' : 's'}` : ''}.
+      </Body>
+      <View style={{ marginTop: 20, gap: 4 }}>
+        <Button full label="Cook something else" haptic="light" onPress={() => { feel.selection(); setPicking(true); }} />
+        {confirming ? (
+          <>
+            <Notice icon="alert-circle-outline">
+              Dropping this frees the days it covered. You can fill them from your recipe book.
+            </Notice>
+            <Button
+              full
+              kind="secondary"
+              label={busy ? 'Dropping\u2026' : 'Yes, drop it'}
+              disabled={busy}
+              onPress={() => act(() => removeCycleMeal(cycle.id, meal.id), 'Dropped from the plan.')}
+            />
+            <Button full kind="quiet" label="Keep it" onPress={() => setConfirming(false)} />
+          </>
+        ) : (
+          <Button full kind="quiet" label="Drop it from the plan" onPress={() => { feel.selection(); setConfirming(true); }} />
+        )}
+      </View>
+    </View>
   );
 }
 

@@ -741,6 +741,14 @@ export function buildPlan(cycleId: number): Promise<FoodPlan> {
 export function getPlan(cycleId: number): Promise<FoodPlan> {
   return request(`/api/v1/food/cycles/${cycleId}/plan`);
 }
+/** Put a different recipe in a planned slot, keeping its day and portions. */
+export function swapCycleMeal(cycleId: number, mealId: number, recipeId: number): Promise<FoodPlan> {
+  return request(`/api/v1/food/cycles/${cycleId}/meals/${mealId}/swap`, { method: 'POST', body: JSON.stringify({ recipe_id: recipeId }) });
+}
+/** Drop a meal from the plan; the days it covered open up again. */
+export function removeCycleMeal(cycleId: number, mealId: number): Promise<FoodPlan> {
+  return request(`/api/v1/food/cycles/${cycleId}/meals/${mealId}`, { method: 'DELETE' });
+}
 export function markCooked(cycleId: number, mealId: number, input: { cooked: boolean; rating?: number }): Promise<FoodPlan> {
   return request(`/api/v1/food/cycles/${cycleId}/meals/${mealId}/cooked`, { method: 'POST', body: JSON.stringify(input) });
 }
@@ -1034,6 +1042,12 @@ export function updateTodo(id: number, p: { text?: string; estimated_minutes?: n
 }
 export function deleteTodo(id: number): Promise<unknown> { return request(`/api/v1/daily/todos/${id}`, { method: 'DELETE' }); }
 export function deleteHabit(id: number): Promise<unknown> { return request(`/api/v1/daily/habits/${id}`, { method: 'DELETE' }); }
+export function createHabit(p: { name: string; icon?: string | null; color?: string | null }): Promise<HabitData> {
+  return request('/api/v1/daily/habits', { method: 'POST', body: JSON.stringify(p) });
+}
+export function updateHabit(id: number, p: { name?: string; icon?: string | null; color?: string | null }): Promise<HabitData> {
+  return request(`/api/v1/daily/habits/${id}`, { method: 'PUT', body: JSON.stringify(p) });
+}
 
 // ---- Speak ----
 export interface SpeakingSessionData {

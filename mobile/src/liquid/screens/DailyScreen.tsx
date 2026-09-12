@@ -13,8 +13,8 @@ import Animated from 'react-native-reanimated';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   DailySummaryData, HabitData, TodoData, TrainToday,
-  PillarStats, completeTodo, createTodo, deleteTodo, getDailySummary, getDashboardStats,
-  getTrainToday, startTrainToday, toggleHabitToday, updateTodo,
+  PillarStats, completeTodo, createHabit, createTodo, deleteHabit, deleteTodo, getDailySummary,
+  getDashboardStats, getTrainToday, startTrainToday, toggleHabitToday, updateHabit, updateTodo,
 } from '../../api/client';
 import { useTheme } from '../theme';
 import { useRefreshOn } from '../refresh';
@@ -24,7 +24,7 @@ import { Screen } from '../ui/Screen';
 import { Body, DailyTitle, Em, Eyebrow, Small, Subtitle } from '../ui/Text';
 import { fonts as liquidFonts, radius } from '../tokens';
 import { Button, IconButton, InlineButton, Options } from '../ui/Button';
-import { Hero, HeroActions, Hint, Section, TopBar } from '../ui/Surfaces';
+import { Hero, HeroActions, Hint, Notice, Section, TopBar } from '../ui/Surfaces';
 import { SwipeRow } from '../ui/SwipeRow';
 import { useSheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
@@ -108,23 +108,19 @@ export default function DailyScreen({ navigation }: any) {
 
   const options = useCallback((habit: HabitData) => {
     sheet.open(habit.name, () => (
-      <View>
-        <Body>
-          {habit.completed_today ? 'Done today.' : 'An easy action for today.'}
-          {habit.current_streak ? `  ${habit.current_streak}-day streak, ${habit.total_completions} in total.` : ''}
-        </Body>
-        <View style={{ marginTop: 22, gap: 4 }}>
-          <Button
-            full
-            label={habit.completed_today ? 'Mark incomplete' : 'Mark complete'}
-            haptic="light"
-            onPress={() => { sheet.close(); toggle(habit); }}
-          />
-          <Button full kind="quiet" label="Close" onPress={sheet.close} />
-        </View>
-      </View>
+      <RitualSheet
+        habit={habit}
+        onToggle={() => { sheet.close(); toggle(habit); }}
+        onDone={() => { sheet.close(); load(); }}
+      />
     ));
-  }, [sheet, toggle]);
+  }, [sheet, toggle, load]);
+
+  const addRitual = useCallback(() => {
+    sheet.open('A new ritual.', () => (
+      <RitualSheet onDone={() => { sheet.close(); load(); }} />
+    ));
+  }, [sheet, load]);
 
   // The endpoint toggles, so the same tap marks something done and undoes it.
   const toggleTodo = useCallback(async (t: TodoData) => {
@@ -226,7 +222,15 @@ export default function DailyScreen({ navigation }: any) {
         </HeroActions>
       </Hero>
 
-      <Section title="Daily rituals" trailing={<Small>{done} of {habits.length} done</Small>} />
+      <Section
+        title="Daily rituals"
+        trailing={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <Small>{done} of {habits.length} done</Small>
+            <InlineButton label="Add" icon="add" onPress={addRitual} />
+          </View>
+        }
+      />
       {habits.map(h => (
         <SwipeRow
           key={h.id}
@@ -357,6 +361,116 @@ function AddTodoSheet({ onAdded }: { onAdded: () => void }) {
 }
 
 /** The whole list, when today holds more than one thing. */
+/**
+ * A ritual, up close: rename it, mark it, or remove it.
+ *
+ * Removing takes its record with it rather than leaving logs pointing at something that no
+ * longer exists, so it asks once before it does. With no habit passed, the same sheet creates
+ * one, which keeps naming a ritual and renaming it the same small form.
+ */
+function RitualSheet({
+  habit, onToggle, onDone,
+}: {
+  habit?: HabitData;
+  onToggle?: () => void;
+  onDone: () => void;
+}) {
+  const { c } = useTheme();
+  const toast = useToast();
+  const [name, setName] = useState(habit?.name ?? '');
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const clean = name.trim();
+  const renamed = !!habit && clean.length > 0 && clean !== habit.name;
+
+  const save = useCallback(async () => {
+    if (!clean || busy) return;
+    setBusy(true);
+    try {
+      if (habit) await updateHabit(habit.id, { name: clean });
+      else await createHabit({ name: clean });
+      feel.light();
+      onDone();
+    } catch (err: any) {
+      toast.show(String(err?.message ?? err).replace(/^API \d+: /, '').slice(0, 120) || 'That didn’t save.');
+      setBusy(false);
+    }
+  }, [clean, busy, habit, onDone, toast]);
+
+  const remove = useCallback(async () => {
+    if (!habit || busy) return;
+    setBusy(true);
+    try {
+      await deleteHabit(habit.id);
+      feel.soft();
+      onDone();
+    } catch (err: any) {
+      toast.show(String(err?.message ?? err).replace(/^API \d+: /, '').slice(0, 120) || 'That didn’t save.');
+      setBusy(false);
+    }
+  }, [habit, busy, onDone, toast]);
+
+  return (
+    <View>
+      {habit ? (
+        <Body>
+          {habit.completed_today ? 'Done today.' : 'An easy action for today.'}
+          {habit.total_completions
+            ? `  ${habit.current_streak}-day streak, ${habit.total_completions} in total.`
+            : '  No record yet.'}
+        </Body>
+      ) : (
+        <Body>Small enough to do on your worst day.</Body>
+      )}
+
+      <Small style={{ marginTop: 18, marginBottom: 6 }}>What you’ll do</Small>
+      <TextInput
+        style={[s.ritualName, { backgroundColor: c.bg, borderColor: c.line, color: c.fg }]}
+        value={name}
+        onChangeText={setName}
+        placeholder="Read 3 articles"
+        placeholderTextColor={c.muted}
+        autoFocus={!habit}
+        returnKeyType="done"
+        onSubmitEditing={save}
+      />
+
+      <View style={{ marginTop: 20, gap: 4 }}>
+        {habit && !renamed ? (
+          <Button
+            full
+            label={habit.completed_today ? 'Mark incomplete' : 'Mark complete'}
+            haptic="light"
+            onPress={onToggle}
+          />
+        ) : (
+          <Button
+            full
+            label={busy ? 'Saving…' : habit ? 'Save the new name' : 'Add this ritual'}
+            haptic="light"
+            disabled={!clean || busy}
+            onPress={save}
+          />
+        )}
+
+        {habit ? (
+          confirming ? (
+            <>
+              <Notice icon="alert-circle-outline">
+                Removing “{habit.name}” takes its record with it. This cannot be undone.
+              </Notice>
+              <Button full kind="secondary" label={busy ? 'Removing…' : 'Yes, remove it'} disabled={busy} onPress={remove} />
+              <Button full kind="quiet" label="Keep it" onPress={() => setConfirming(false)} />
+            </>
+          ) : (
+            <Button full kind="quiet" label="Remove this ritual" onPress={() => { feel.selection(); setConfirming(true); }} />
+          )
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 function TodoListSheet({ todos, onChanged }: { todos: TodoData[]; onChanged: () => void }) {
   const { c } = useTheme();
   const toast = useToast();
@@ -407,6 +521,10 @@ function TodoListSheet({ todos, onChanged }: { todos: TodoData[]; onChanged: () 
 }
 
 const s = StyleSheet.create({
+  ritualName: {
+    borderWidth: 1, borderRadius: radius.button, paddingHorizontal: 14, paddingVertical: 13,
+    fontFamily: liquidFonts.regular, fontSize: 16, minHeight: 48,
+  },
   task: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingVertical: 18, paddingHorizontal: 1, minHeight: 68 },
   taskCheck: { width: 30, alignItems: 'center', justifyContent: 'center' },
   taskText: { fontFamily: liquidFonts.medium, fontSize: 16, lineHeight: 22 },

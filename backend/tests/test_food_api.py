@@ -205,3 +205,57 @@ async def test_cooked_promotes_candidate_and_cycle_completion_decays(db_session)
             "weights decay toward zero"
         )
         assert (await client.get("/api/v1/food/cycles/current")).json() is None
+
+
+@pytest.mark.asyncio
+async def test_a_planned_meal_can_be_swapped_or_dropped(db_session):
+    """A plan you cannot change is a plan you abandon."""
+    async with _client() as client:
+        cycle = await _start_cycle(client, travel=0, eat_out=0)
+        cid = cycle["id"]
+        deck = (await client.get(f"/api/v1/food/cycles/{cid}/deck")).json()
+        while not deck["enough"] and deck["cards"]:
+            deck = (
+                await client.post(
+                    f"/api/v1/food/cycles/{cid}/swipe",
+                    json={"recipe_id": deck["cards"][0]["id"], "decision": "keep"},
+                )
+            ).json()
+        plan = (await client.post(f"/api/v1/food/cycles/{cid}/plan")).json()
+        assert len(plan["meals"]) >= 2
+        meal = plan["meals"][0]
+        in_plan = {m["recipe"]["id"] for m in plan["meals"]}
+
+        # Swapping keeps the slot and only changes the dish.
+        other = (await client.get("/api/v1/food/recipes")).json()
+        spare = next(r for r in other if r["id"] not in in_plan)
+        after = (
+            await client.post(
+                f"/api/v1/food/cycles/{cid}/meals/{meal['id']}/swap",
+                json={"recipe_id": spare["id"]},
+            )
+        ).json()
+        swapped = next(m for m in after["meals"] if m["id"] == meal["id"])
+        assert swapped["recipe"]["id"] == spare["id"]
+        assert swapped["days_covered"] == meal["days_covered"]
+        assert len(after["meals"]) == len(plan["meals"])
+
+        # The same dish twice in one plan is refused.
+        dup = await client.post(
+            f"/api/v1/food/cycles/{cid}/meals/{after['meals'][1]['id']}/swap",
+            json={"recipe_id": spare["id"]},
+        )
+        assert dup.status_code == 409
+
+        # Dropping one frees the days it held.
+        before_open = after["open_days"]
+        dropped = (
+            await client.delete(f"/api/v1/food/cycles/{cid}/meals/{meal['id']}")
+        ).json()
+        assert len(dropped["meals"]) == len(after["meals"]) - 1
+        assert dropped["open_days"] > before_open
+        assert await_missing(dropped, meal["id"])
+
+
+def await_missing(plan: dict, meal_id: int) -> bool:
+    return all(m["id"] != meal_id for m in plan["meals"])
