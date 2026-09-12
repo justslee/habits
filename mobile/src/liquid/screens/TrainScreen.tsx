@@ -121,7 +121,7 @@ export default function TrainScreen({ navigation }: any) {
           onHistory={() => setSeg('history')}
         />
       ) : seg === 'week' ? (
-        <WeekView week={week} onAdjust={adjust} />
+        <WeekView current={week} onAdjust={adjust} />
       ) : seg === 'program' ? (
         <ProgramView
           program={program} events={events} openPhase={openPhase} setOpenPhase={setOpenPhase}
@@ -390,17 +390,71 @@ function GoalLine({ title, sub, onPress, first }: { title: string; sub: string; 
 
 // --- Week -------------------------------------------------------------------
 
-function WeekView({ week, onAdjust }: { week: TrainWeek | null; onAdjust: (d: string, day: TrainDay) => void }) {
+/**
+ * The week, and the weeks around it.
+ *
+ * Travel is the reason this moves. A trip three weeks out already has mobility on it and the
+ * sessions already shuffled around it, but none of that is worth anything if you can only ever
+ * see the week you are standing in.
+ */
+function WeekView({
+  current, onAdjust,
+}: {
+  current: TrainWeek | null;
+  onAdjust: (d: string, day: TrainDay) => void;
+}) {
   const { c } = useTheme();
+  const toast = useToast();
   const todayIso = new Date().toISOString().slice(0, 10);
+  const [offset, setOffset] = useState(0);
+  const [week, setWeek] = useState<TrainWeek | null>(current);
+  const [loading, setLoading] = useState(false);
+
+  // Offset zero is whatever the screen already loaded, so this week costs no request.
+  useEffect(() => {
+    if (offset === 0) { setWeek(current); return; }
+    const base = current?.week_start;
+    if (!base) return;
+    const start = new Date(`${base}T00:00:00`);
+    start.setDate(start.getDate() + offset * 7);
+    setLoading(true);
+    getTrainWeek(start.toISOString().slice(0, 10))
+      .then(setWeek)
+      .catch(() => toast.show('Could not load that week.'))
+      .finally(() => setLoading(false));
+  }, [offset, current, toast]);
+
   if (!week) return <Body>Loading the week…</Body>;
+
+  const away = week.days.filter(d => d.travel).length;
+  const step = (by: number) => { feel.selection(); setOffset(o => o + by); };
+  const title =
+    offset === 0 ? 'This week' : offset === 1 ? 'Next week' : offset === -1 ? 'Last week'
+      : offset > 0 ? `${offset} weeks ahead` : `${-offset} weeks back`;
 
   return (
     <>
       <Title>A week{'\n'}<Em>that fits.</Em></Title>
-      <Body style={{ marginTop: 12 }}>
-        Week of {prettyDate(week.week_start)} · {week.week_kind} week · rotation {week.rotation}
+
+      <View style={s.weekNav}>
+        <IconButton icon="chevron-back" accessibilityLabel="The week before" background={c.panel2} haptic="none" onPress={() => step(-1)} />
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Animated.Text style={[s.goalTitle, { color: c.fg }]} numberOfLines={1}>{title}</Animated.Text>
+          <Small>{prettyDate(week.week_start)}{loading ? ' · loading…' : ''}</Small>
+        </View>
+        <IconButton icon="chevron-forward" accessibilityLabel="The week after" background={c.panel2} haptic="none" onPress={() => step(1)} />
+      </View>
+
+      <Body style={{ marginTop: 14 }}>
+        {week.week_kind} week · rotation {week.rotation}
+        {away ? ` · ${away} day${away === 1 ? '' : 's'} away` : ''}
       </Body>
+      {away ? (
+        <Notice icon="airplane-outline">
+          Travelling {away} day{away === 1 ? '' : 's'} this week. Those days carry the 8-minute
+          mobility routine only, and the sessions have already moved around them.
+        </Notice>
+      ) : null}
 
       <View style={{ marginTop: 20 }}>
         {week.days.map(d => {
@@ -612,6 +666,7 @@ const s = StyleSheet.create({
   navLabel: { fontFamily: fonts.regular, fontSize: 12 },
 
   weekStrip: { flexDirection: 'row', gap: 3, marginBottom: 20 },
+  weekNav: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20 },
   day: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 18, gap: 8, minHeight: 65, justifyContent: 'center' },
   dayNum: { fontFamily: fonts.medium, fontSize: 15 },
 

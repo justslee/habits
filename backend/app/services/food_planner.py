@@ -108,6 +108,32 @@ def kept_recipes(db: Session, cycle: MealCycle) -> list[Recipe]:
     return [by_id[i] for i in ids if i in by_id]
 
 
+def set_in_pool(db: Session, cycle: MealCycle, recipe_id: int, wanted: bool) -> None:
+    """Add or remove a recipe from this cycle's pool, teaching the taste model nothing.
+
+    Editing a plan is not a verdict on the food. Recording a drop as a "skip" would move the
+    preference weights as though the dish had been rejected in the deck, so the swipe is simply
+    removed instead, and a recipe swapped in is recorded as kept without any learning step.
+    The deck remains the only place taste is learned.
+    """
+    existing = next((sw for sw in cycle.swipes if sw.recipe_id == recipe_id), None)
+    if wanted:
+        if existing:
+            existing.decision = "keep"
+        else:
+            db.add(
+                Swipe(
+                    cycle_id=cycle.id,
+                    recipe_id=recipe_id,
+                    decision="keep",
+                    position=len(cycle.swipes),
+                )
+            )
+    elif existing:
+        db.delete(existing)
+    db.flush()
+
+
 def coverage(kept: list[Recipe]) -> int:
     return sum(r.prep_days or 0 for r in kept)
 

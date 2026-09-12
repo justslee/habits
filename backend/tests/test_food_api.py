@@ -6,7 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models.food import MealCycle, PreferenceWeight, Recipe
+from app.models.food import MealCycle, PreferenceWeight, Recipe, Swipe
 from app.services import food_planner as fp
 
 
@@ -259,3 +259,62 @@ async def test_a_planned_meal_can_be_swapped_or_dropped(db_session):
 
 def await_missing(plan: dict, meal_id: int) -> bool:
     return all(m["id"] != meal_id for m in plan["meals"])
+
+
+@pytest.mark.asyncio
+async def test_rebuilding_the_plan_respects_what_you_dropped(db_session):
+    """Dropping then rebuilding used to put the dish straight back."""
+    async with _client() as client:
+        cycle = await _start_cycle(client, travel=0, eat_out=0)
+        cid = cycle["id"]
+        deck = (await client.get(f"/api/v1/food/cycles/{cid}/deck")).json()
+        while not deck["enough"] and deck["cards"]:
+            deck = (
+                await client.post(
+                    f"/api/v1/food/cycles/{cid}/swipe",
+                    json={"recipe_id": deck["cards"][0]["id"], "decision": "keep"},
+                )
+            ).json()
+        plan = (await client.post(f"/api/v1/food/cycles/{cid}/plan")).json()
+        dropped_id = plan["meals"][0]["recipe"]["id"]
+
+        await client.delete(f"/api/v1/food/cycles/{cid}/meals/{plan['meals'][0]['id']}")
+        rebuilt = (await client.post(f"/api/v1/food/cycles/{cid}/plan")).json()
+        assert dropped_id not in {m["recipe"]["id"] for m in rebuilt["meals"]}, (
+            "a dish you dropped must not come back when the plan is rebuilt"
+        )
+
+        # Dropping is not a verdict on the food, so it leaves no "skip" behind to be read
+        # later as a dislike.
+        skips = [sw for sw in db_session.query(Swipe).all() if sw.decision == "skip"]
+        assert not any(sw.recipe_id == dropped_id for sw in skips)
+
+
+@pytest.mark.asyncio
+async def test_rebuilding_the_plan_respects_what_you_swapped_in(db_session):
+    async with _client() as client:
+        cycle = await _start_cycle(client, travel=0, eat_out=0)
+        cid = cycle["id"]
+        deck = (await client.get(f"/api/v1/food/cycles/{cid}/deck")).json()
+        while not deck["enough"] and deck["cards"]:
+            deck = (
+                await client.post(
+                    f"/api/v1/food/cycles/{cid}/swipe",
+                    json={"recipe_id": deck["cards"][0]["id"], "decision": "keep"},
+                )
+            ).json()
+        plan = (await client.post(f"/api/v1/food/cycles/{cid}/plan")).json()
+        was = plan["meals"][0]["recipe"]["id"]
+        in_plan = {m["recipe"]["id"] for m in plan["meals"]}
+        spare = next(
+            r for r in (await client.get("/api/v1/food/recipes")).json()
+            if r["id"] not in in_plan
+        )
+        await client.post(
+            f"/api/v1/food/cycles/{cid}/meals/{plan['meals'][0]['id']}/swap",
+            json={"recipe_id": spare["id"]},
+        )
+        rebuilt = (await client.post(f"/api/v1/food/cycles/{cid}/plan")).json()
+        ids = {m["recipe"]["id"] for m in rebuilt["meals"]}
+        assert spare["id"] in ids, "the dish you chose must survive a rebuild"
+        assert was not in ids, "the dish you replaced must not come back"

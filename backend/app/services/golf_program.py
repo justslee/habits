@@ -843,10 +843,13 @@ def plan_week(
                 out.append(pp)
             elif d < PROGRAM_START:
                 out.append(DayPlan(d, None, "Before the programme starts", travel=d in travel_days))
-            elif d == PROGRAM_START and d not in travel_days:
-                out.append(DayPlan(d, "S1", SESSIONS["S1"]["title"], travel=False))
+            elif d in travel_days:
+                # Away days carry mobility only, the same as in any other week.
+                out.append(DayPlan(d, "MOB", "Travel · 8-min mobility", travel=True))
+            elif d == PROGRAM_START:
+                out.append(DayPlan(d, "S1", SESSIONS["S1"]["title"]))
             else:
-                out.append(DayPlan(d, None, "Rest or golf", travel=d in travel_days))
+                out.append(DayPlan(d, None, "Rest or golf"))
         return out
 
     t = tournament_in_week(ws, tournaments)

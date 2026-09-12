@@ -559,6 +559,9 @@ def swap_meal(
         raise HTTPException(
             status_code=409, detail=f"{recipe.title} is already in this plan"
         )
+    # The pool follows the plan, so rebuilding later keeps the choice instead of undoing it.
+    fp.set_in_pool(db, cycle, meal.recipe_id, False)
+    fp.set_in_pool(db, cycle, recipe.id, True)
     meal.recipe_id = recipe.id
     db.commit()
     db.refresh(cycle)
@@ -581,6 +584,9 @@ def remove_meal(cycle_id: int, meal_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=409, detail="That one is already cooked; it stays as it happened"
         )
+    # Take it out of the pool too. Otherwise rebuilding the plan puts it straight back, which
+    # is what made dropping a meal feel like it had not worked.
+    fp.set_in_pool(db, cycle, meal.recipe_id, False)
     db.delete(meal)
     db.commit()
     db.refresh(cycle)
