@@ -28,6 +28,7 @@ import { DetailRow, Hero, HeroActions, Hint, Notice, Panel, Section, Switch, Top
 import { useSheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { AdjustSheet } from '../sheets/AdjustSheet';
+import { RunSheet } from '../sheets/RunSheet';
 import { prettyDate } from '../ui/Chart';
 
 type Seg = 'today' | 'week' | 'program' | 'history';
@@ -116,7 +117,11 @@ export default function TrainScreen({ navigation }: any) {
             feel.light();
             applied(r);
           }}
-          onLogRun={() => navigation.navigate('Daily')}
+          onLogRun={() =>
+            sheet.open('Your run.', () => (
+              <RunSheet plan={today?.prescription?.run ?? null} onDone={load} />
+            ))
+          }
           onProgram={() => setSeg('program')}
           onHistory={() => setSeg('history')}
         />
