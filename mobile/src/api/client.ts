@@ -861,6 +861,13 @@ export function approveCart(taskId: number, biometric: boolean): Promise<{ cart:
 export function placeCart(taskId: number, token: string): Promise<CartTask> {
   return request(`/api/v1/food/carts/${taskId}/place`, { method: 'POST', body: JSON.stringify({ token }) });
 }
+/** The cart page as the shopper last saw it; `stamp` busts the image cache when it changes. */
+export function cartScreenshotSource(taskId: number, stamp?: string) {
+  return {
+    uri: `${API_URL}/api/v1/food/carts/${taskId}/screenshot${stamp ? `?v=${encodeURIComponent(stamp)}` : ''}`,
+    headers: API_KEY ? { 'X-API-Key': API_KEY } : undefined,
+  };
+}
 export function confirmPlaced(taskId: number, merchantOrderId?: string): Promise<CartTask> {
   return request(`/api/v1/food/carts/${taskId}/confirm-placed`, { method: 'POST', body: JSON.stringify({ merchant_order_id: merchantOrderId ?? null }) });
 }

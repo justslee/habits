@@ -20,8 +20,10 @@ GET    /api/v1/food/taste
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1010,6 +1012,19 @@ def run_cart(task_id: int, db: Session = Depends(get_db)):
         t.status = "queued"
     cart_service.run_task(db, t, store_adapters.adapter_for(t.store))
     return _cart_out(db, user, t)
+
+
+@router.get("/carts/{task_id}/screenshot")
+def cart_screenshot(task_id: int, db: Session = Depends(get_db)):
+    """The cart page as the shopper last saw it."""
+    user = _user(db)
+    t = _task(db, user, task_id)
+    if not t.screenshot_path:
+        raise HTTPException(status_code=404, detail="No screenshot for this cart")
+    path = Path(t.screenshot_path).resolve()
+    if not path.is_file() or store_adapters.SCREENSHOT_DIR.resolve() not in path.parents:
+        raise HTTPException(status_code=404, detail="No screenshot for this cart")
+    return FileResponse(path, media_type="image/png")
 
 
 class ApproveIn(BaseModel):

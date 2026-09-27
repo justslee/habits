@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "shop-browser": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.82",
+        "--browser", "chrome",
+        "--user-data-dir", "${HOME}/Library/Application Support/Habits/chrome-profile",
+        "--output-dir", "${HOME}/Library/Application Support/Habits/carts",
+        "--viewport-size", "1280x900"
+      ]
+    }
+  }
+}
