@@ -32,6 +32,7 @@ from app.db.seed_food import seed_food
 from app.models.food import CycleMeal, MealCycle, PantryItem, Recipe, RecipeIngredient
 from app.models.user import User
 from app.services import food_planner as fp
+from app.services import plan_layout
 from app.services import recipe_method as recipe_method_service
 
 router = APIRouter(prefix="/api/v1/food", tags=["food"])
@@ -184,6 +185,7 @@ class CycleOut(BaseModel):
     eat_out_days: int
     eating_days: int
     deck_size: int
+    notes: str | None = None  # an imported plan's own guidance (order, freezing, source)
 
 
 def _cycle_out(c: MealCycle) -> CycleOut:
@@ -197,6 +199,7 @@ def _cycle_out(c: MealCycle) -> CycleOut:
         eat_out_days=c.eat_out_days,
         eating_days=fp.eating_days(c),
         deck_size=len(c.deck or []),
+        notes=c.notes,
     )
 
 
@@ -280,6 +283,10 @@ def _plan_out(c: MealCycle) -> PlanOut:
         open_days=max(0, fp.eating_days(c) - covered),
         kept=sum(1 for sw in c.swipes if sw.decision == "keep"),
     )
+
+
+class ReorderIn(BaseModel):
+    meal_ids: list[int] = Field(min_length=1)
 
 
 class CookedIn(BaseModel):
@@ -513,6 +520,18 @@ def build_plan(cycle_id: int, db: Session = Depends(get_db)):
 def get_plan(cycle_id: int, db: Session = Depends(get_db)):
     user = _user(db)
     return _plan_out(_cycle(db, user, cycle_id))
+
+
+@router.post("/cycles/{cycle_id}/reorder", response_model=PlanOut)
+def reorder_plan(cycle_id: int, payload: ReorderIn, db: Session = Depends(get_db)):
+    """Change the order batches are eaten in. Dates follow; cooked or started ones stay put."""
+    user = _user(db)
+    cycle = _cycle(db, user, cycle_id)
+    try:
+        plan_layout.reorder(db, cycle, payload.meal_ids, datetime.date.today())
+    except plan_layout.ReorderError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return _plan_out(cycle)
 
 
 @router.post("/cycles/{cycle_id}/meals/{meal_id}/cooked", response_model=PlanOut)

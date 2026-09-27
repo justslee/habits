@@ -53,7 +53,14 @@ def refresh_travel(db: Session, user_id: int, cycle: MealCycle) -> bool:
         return False
     cycle.travel_days = fresh
     db.commit()
-    if cycle.status == "planned" and all(m.status == "planned" for m in cycle.meals):
+    # Only a plan built from the deck can be re-laid from it; an imported plan has no swipes
+    # to rebuild from, and re-laying it would erase it.
+    built_from_deck = any(sw.decision == "keep" for sw in cycle.swipes)
+    if (
+        cycle.status == "planned"
+        and built_from_deck
+        and all(m.status == "planned" for m in cycle.meals)
+    ):
         fp.layout_plan(db, cycle)
     return True
 
