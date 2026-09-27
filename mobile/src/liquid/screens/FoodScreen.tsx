@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Linking, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useFocusEffect } from '@react-navigation/native';
@@ -18,8 +18,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import {
   Bag, BagsResponse, CartTask, FoodCycle, FoodDeck, FoodPlan, FoodRecipe, PantryEntry, SpendSummary,
-  approveBags, approveCart, buildBags, buildPlan, createCycle, getBags, getCarts, getCurrentCycle,
-  getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart, putPantry, removeCycleMeal,
+  approveBags, approveCart, buildBags, buildPlan, cartScreenshotSource, confirmPlaced, createCycle,
+  getBags, getCarts, getCurrentCycle, getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart,
+  putPantry, removeCycleMeal,
   runCart, swapCycleMeal, swipeCard,
 } from '../../api/client';
 import { useTheme } from '../theme';
@@ -706,27 +707,56 @@ function Review({ cycle, bags, carts, store, go, load }: any) {
   const [busy, setBusy] = useState(false);
   const bag: Bag | undefined = bags?.bags?.[store];
   const cart: CartTask | undefined = carts?.find((t: CartTask) => t.store === bag?.store) ?? carts?.[0];
+  // The shopper on the Mac filled this cart in your store account; you check out in the store's app.
+  const storeApp = cart?.checkout_via === 'store_app';
 
-  // Approving the bags is what creates the cart tasks; running one fills in the real basket.
+  // Approving the bags is what creates the cart tasks; running one fills in the real basket,
+  // or, with the shopper, asks it to fill this store's cart.
   const prepare = useCallback(async () => {
     if (!cycle || !bag) return;
     setBusy(true);
     try {
       await approveBags(cycle.id);
       const tasks = await getCarts(cycle.id);
-      const mine = tasks.find(t => t.store === bag.store) ?? tasks[0];
-      if (mine && mine.status === 'queued') await runCart(mine.id);
+      let mine = tasks.find(t => t.store === bag.store) ?? tasks[0];
+      if (mine && ['queued', 'failed', 'rejected'].includes(mine.status)) mine = await runCart(mine.id);
       await load();
-      toast.show('Cart built. Review every item before approving.');
+      toast.show(mine?.status === 'needs_review'
+        ? 'Cart built. Review every item before approving.'
+        : 'The shopper is filling it on your Mac. You’ll get a notification.');
     } catch (err: any) {
       toast.show(String(err?.message ?? err).replace(/^API \d+: /, ''));
     } finally { setBusy(false); }
   }, [cycle, bag, load, toast]);
 
+  // The shopper works out of band; keep the screen current while it does.
+  const waiting = !!cart && (cart.status === 'building' || cart.status === 'placing' || (cart.status === 'queued' && cart.requested));
+  useEffect(() => {
+    if (!waiting) return;
+    const id = setInterval(() => { load(); }, 15000);
+    return () => clearInterval(id);
+  }, [waiting, load]);
+
   const approve = useCallback(() => {
     if (!cart) return;
     sheet.open('One order.\nOnly with you.', () => (
-      <ApprovalSheet cart={cart} onDone={async () => { await load(); go('receipt'); }} />
+      <ApprovalSheet cart={cart} onDone={async (after: CartTask) => {
+        await load();
+        if (after.status === 'placed') go('receipt');
+      }} />
+    ));
+  }, [cart, sheet, load, go]);
+
+  const openStore = useCallback(async () => {
+    if (!cart?.cart_url) return;
+    try { await Linking.openURL(cart.cart_url); }
+    catch { toast.show('Could not open the store.'); }
+  }, [cart, toast]);
+
+  const placedIt = useCallback(() => {
+    if (!cart) return;
+    sheet.open('Placed it?\nLog it once.', () => (
+      <PlacedSheet cart={cart} onDone={async () => { await load(); go('receipt'); }} />
     ));
   }, [cart, sheet, load, go]);
 
@@ -741,15 +771,16 @@ function Review({ cycle, bags, carts, store, go, load }: any) {
 
   const lines = cart?.cart_lines ?? [];
   const total = cart?.cart_total ?? (bag.goods_total + bag.delivery_fee);
+  const storeName = storeAppName(cart);
 
   return (
     <>
       <FlowTop step="05 · Review before paying" onBack={() => go('bags')} />
-      <Badge icon="bag-handle-outline">{cart ? `Cart ${cart.status.replace('_', ' ')}` : 'Not built yet'} · {bag.name}</Badge>
+      <Badge icon="bag-handle-outline">{cart && !(storeApp && cart.status === 'queued' && !cart.requested) ? `Cart ${cart.status.replace('_', ' ')}` : 'Not built yet'} · {bag.name}</Badge>
       <Title style={{ marginTop: 18 }}>Your basket.{'\n'}<Em>Your call.</Em></Title>
 
       <Animated.Text style={[s.money, { color: c.fg }]}>{money(total)}</Animated.Text>
-      <Small>One delivery · all-in total</Small>
+      <Small>{!storeApp ? 'One delivery · all-in total' : lines.length ? 'Cart total · delivery, fees and tax at checkout' : 'Estimate · the shopper fills the real cart'}</Small>
 
       <Panel style={{ marginVertical: 20, paddingVertical: 4, paddingHorizontal: 18 }}>
         {(lines.length ? lines : bag.items.map(it => ({
@@ -761,22 +792,109 @@ function Review({ cycle, bags, carts, store, go, load }: any) {
           </View>
         ))}
         <View style={[s.moneyRow, { borderTopWidth: 1, borderTopColor: c.line, paddingVertical: 16 }]}>
-          <Body style={{ flex: 1, color: c.fg }}>Total to approve</Body>
+          <Body style={{ flex: 1, color: c.fg }}>{!storeApp ? 'Total to approve' : lines.length ? 'Cart total' : 'Estimate'}</Body>
           <Body style={{ color: c.fg, fontFamily: fonts.medium }}>{money(total)}</Body>
         </View>
       </Panel>
 
-      <Notice icon="shield-checkmark-outline">
-        Approval covers this basket once. A change to items, delivery or price needs your review again.
-      </Notice>
-
-      {!cart || cart.status === 'queued' || cart.status === 'building' ? (
-        <Button full label={busy ? 'Building…' : 'Build this cart'} disabled={busy} onPress={prepare} />
+      {storeApp ? (
+        <Notice icon="storefront-outline">
+          The shopper fills this cart in your {storeName} account. You check out with {storeName} yourself; Habits never places the order.
+        </Notice>
       ) : (
+        <Notice icon="shield-checkmark-outline">
+          Approval covers this basket once. A change to items, delivery or price needs your review again.
+        </Notice>
+      )}
+
+      {cart?.screenshot_path ? (
+        <Image
+          source={cartScreenshotSource(cart.id, cart.events?.[cart.events.length - 1]?.ts)}
+          resizeMode="contain"
+          style={[s.shot, { borderColor: c.line }]}
+        />
+      ) : null}
+      {cart?.error ? <Notice icon="alert-circle-outline">{cart.error}</Notice> : null}
+
+      {cart?.status === 'building' ? (
+        <Button full label="The shopper is filling your cart…" disabled onPress={() => {}} />
+      ) : cart?.status === 'queued' && cart.requested && storeApp ? (
+        <Button full label="Queued. The shopper starts shortly…" disabled onPress={() => {}} />
+      ) : cart?.status === 'placing' ? (
+        <Button full label="Re-checking the total…" disabled onPress={() => {}} />
+      ) : cart?.status === 'needs_review' && storeApp ? (
+        <>
+          <Button full label={`Check out in ${storeName}`} iconAfter="open-outline" disabled={!cart.cart_url} onPress={openStore} />
+          <Button full kind="quiet" label="I placed the order" onPress={placedIt} />
+        </>
+      ) : cart?.status === 'awaiting_human' ? (
+        <>
+          <Notice icon="desktop-outline">
+            Checkout is open on the Mac with the total re-checked. Press Place Order there, then tell the app.
+          </Notice>
+          <Button full label="I placed the order" onPress={placedIt} />
+        </>
+      ) : cart?.status === 'needs_review' ? (
         <Button full label="Review payment approval" iconAfter="arrow-forward" onPress={approve} />
+      ) : cart?.status === 'placed' ? (
+        <Button full label="See the order" iconAfter="arrow-forward" onPress={() => go('receipt')} />
+      ) : (
+        <Button full label={busy ? 'Building…' : cart?.status === 'failed' ? 'Try again' : 'Build this cart'} disabled={busy} onPress={prepare} />
       )}
       <Button full kind="quiet" label="Change store" onPress={() => go('bags')} />
     </>
+  );
+}
+
+/** The store's own name for its app, read from where the cart lives. */
+function storeAppName(cart?: CartTask): string {
+  const url = cart?.cart_url ?? '';
+  if (url.includes('doordash.com')) return 'DoorDash';
+  if (url.includes('amazon.com')) return 'Amazon';
+  if (url.includes('hmart.com')) return 'H Mart';
+  return cart?.name ?? 'the store';
+}
+
+/** You placed the order yourself; log what the store charged so the ledger is right. */
+function PlacedSheet({ cart, onDone }: { cart: CartTask; onDone: () => void }) {
+  const { c } = useTheme();
+  const sheet = useSheet();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [text, setText] = useState(cart.cart_total != null ? cart.cart_total.toFixed(2) : '');
+
+  const save = useCallback(async () => {
+    const total = parseFloat(text.replace(/[^0-9.]/g, ''));
+    setBusy(true);
+    try {
+      await confirmPlaced(cart.id, undefined, Number.isFinite(total) && total > 0 ? total : undefined);
+      feel.success();
+      sheet.close();
+      onDone();
+    } catch (err: any) {
+      toast.show(String(err?.message ?? err).replace(/^API \d+: /, ''));
+    } finally { setBusy(false); }
+  }, [cart, text, sheet, toast, onDone]);
+
+  return (
+    <View>
+      <Body>What did {storeAppName(cart)} charge, all in? It goes in the kitchen ledger.</Body>
+      <View style={[s.totalField, { backgroundColor: c.bg, borderColor: c.line }]}>
+        <Body style={{ color: c.muted }}>$</Body>
+        <TextInput
+          style={[s.totalInput, { color: c.fg }]}
+          value={text}
+          onChangeText={setText}
+          keyboardType="decimal-pad"
+          returnKeyType="done"
+          selectTextOnFocus
+          placeholder="0.00"
+          placeholderTextColor={c.muted}
+        />
+      </View>
+      <Button full label={busy ? 'Saving…' : 'Log the order'} disabled={busy} onPress={save} />
+      <Button full kind="quiet" label="Not yet" onPress={sheet.close} />
+    </View>
   );
 }
 
@@ -785,7 +903,7 @@ function Review({ cycle, bags, carts, store, go, load }: any) {
  * short-lived single-use token bound to this basket, and placing consumes it. Device
  * authentication is required and an uncertain result never becomes a second order.
  */
-function ApprovalSheet({ cart, onDone }: { cart: CartTask; onDone: () => void }) {
+function ApprovalSheet({ cart, onDone }: { cart: CartTask; onDone: (after: CartTask) => void }) {
   const { c } = useTheme();
   const sheet = useSheet();
   const toast = useToast();
@@ -809,10 +927,10 @@ function ApprovalSheet({ cart, onDone }: { cart: CartTask; onDone: () => void })
       }
       if (!ok) { setBusy(false); return; }
       const { token } = await approveCart(cart.id, true);
-      await placeCart(cart.id, token);
+      const after = await placeCart(cart.id, token);
       feel.success();
       sheet.close();
-      onDone();
+      onDone(after);
     } catch (err: any) {
       toast.show(String(err?.message ?? err).replace(/^API \d+: /, ''));
     } finally { setBusy(false); }
@@ -846,7 +964,7 @@ function Receipt({ carts, go }: any) {
       </View>
       <Title>Taken care of.{'\n'}<Em>Back to your day.</Em></Title>
       <Body style={{ marginTop: 12 }}>
-        {placed ? 'Order placed. Spending updates when the receipt is confirmed.' : 'Nothing placed yet.'}
+        {placed ? (placed.order?.placed_by === 'human' ? 'Order placed and logged in the kitchen ledger.' : 'Order placed. Spending updates when the receipt is confirmed.') : 'Nothing placed yet.'}
       </Body>
       {placed ? (
         <Panel style={{ marginVertical: 20, paddingVertical: 4, paddingHorizontal: 18 }}>
@@ -905,6 +1023,9 @@ function Spend({ spend, go }: any) {
 
 const s = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  shot: { width: '100%', aspectRatio: 1280 / 900, borderRadius: radius.button, borderWidth: 1, marginBottom: 16 },
+  totalField: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.button, paddingHorizontal: 16, paddingVertical: 10, marginVertical: 18 },
+  totalInput: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 28 },
 
   cover: { borderRadius: 24, overflow: 'hidden', paddingVertical: 18, paddingHorizontal: 20, minHeight: 163, marginTop: 19, marginBottom: 16 },
   bowl: { position: 'absolute', right: -32, top: 22 },

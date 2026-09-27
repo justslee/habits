@@ -19,6 +19,7 @@ import os
 import secrets
 from dataclasses import dataclass
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.food import (
@@ -69,8 +70,14 @@ def _event(task: CartTask, event: str, detail: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 
+# In agent mode Habits never places orders; this is the answer to any attempt.
+STORE_APP_CHECKOUT = "Check out in the store's app, then tap “I placed the order”."
+
+
 def executor_mode() -> str:
-    """dry_run (default: simulate carts from bag prices) | playwright (real browser adapters)."""
+    """dry_run (default: simulate carts from bag prices) | playwright (scripted browser
+    adapters) | agent (a Claude Code shopper fills the cart; the owner checks out in the
+    store's app; see scripts/shopper.py)."""
     return os.getenv("FOOD_EXECUTOR", "dry_run")
 
 
@@ -117,6 +124,14 @@ def create_tasks_for_cycle(
 def run_task(db: Session, task: CartTask, adapter) -> CartTask:
     """Build the cart with the adapter and stop in needs_review."""
     if task.status not in ("queued", "failed", "rejected"):
+        return task
+    if getattr(adapter, "deferred", False):
+        # The shopper fills it out of band and reports through report_cart. Only carts the
+        # owner asked for are filled: a cycle's other bags get tasks too.
+        task.status = "queued"
+        task.requested_at = _now()
+        _event(task, "requested", "queued for the shopper")
+        db.commit()
         return task
     task.status = "building"
     task.attempts = (task.attempts or 0) + 1
@@ -180,6 +195,8 @@ def _check_caps(
 def approve_task(
     db: Session, user_id: int, task: CartTask, *, biometric: bool
 ) -> OrderApproval:
+    if executor_mode() == "agent":
+        raise GateError(STORE_APP_CHECKOUT)
     if task.status != "needs_review":
         raise GateError(f"Cart is {task.status}, not awaiting review.")
     if task.cart_total is None:
@@ -239,6 +256,8 @@ def place_task(
     db: Session, user_id: int, task: CartTask, token: str, adapter
 ) -> CartTask:
     """Place the order (or, supervised, park on Place Order and hand over to the human)."""
+    if getattr(adapter, "deferred", False):
+        raise GateError(STORE_APP_CHECKOUT)
     if task.status not in ("approved", "placing"):
         raise GateError(f"Cart is {task.status}; approve it first.")
     settings = ensure_food_settings(db, user_id)
@@ -250,21 +269,7 @@ def place_task(
     db.commit()
 
     live_total = round(float(adapter.read_total(task.bag)), 2)
-    if abs(live_total - approval.approved_total) > settings.total_tolerance:
-        task.status = "needs_review"
-        task.cart_total = live_total
-        approval.revoked = True
-        _event(
-            task,
-            "total_drift",
-            f"approved {approval.approved_total:.2f} vs live {live_total:.2f} · re-approve",
-        )
-        db.commit()
-        raise GateError(
-            f"Cart total moved from ${approval.approved_total:.2f} to ${live_total:.2f}. Approve again."
-        )
-
-    _check_caps(db, settings, merchant, task, live_total)
+    _verify_live_total(db, settings, merchant, task, approval, live_total)
 
     if task.supervised:
         adapter.prepare_place_order(task.bag)
@@ -284,17 +289,126 @@ def place_task(
     return task
 
 
+def _verify_live_total(
+    db: Session,
+    settings: FoodSettings,
+    merchant: MerchantAccount | None,
+    task: CartTask,
+    approval: OrderApproval,
+    live_total: float,
+) -> None:
+    """Right before Place Order: the live total must match what was approved, and the caps
+    must still hold. Drift sends the cart back to review with the approval revoked."""
+    if abs(live_total - approval.approved_total) > settings.total_tolerance:
+        task.status = "needs_review"
+        task.cart_total = live_total
+        approval.revoked = True
+        _event(
+            task,
+            "total_drift",
+            f"approved {approval.approved_total:.2f} vs live {live_total:.2f} · re-approve",
+        )
+        db.commit()
+        raise GateError(
+            f"Cart total moved from ${approval.approved_total:.2f} to ${live_total:.2f}. Approve again."
+        )
+    _check_caps(db, settings, merchant, task, live_total)
+
+
 def confirm_human_placed(
-    db: Session, user_id: int, task: CartTask, merchant_order_id: str | None
+    db: Session,
+    user_id: int,
+    task: CartTask,
+    merchant_order_id: str | None,
+    total: float | None = None,
 ) -> CartTask:
-    if task.status != "awaiting_human":
+    """The owner placed the order themselves: pressed Place Order on the Mac (supervised
+    browser modes) or checked out in the store's app (agent mode). `total` is what the store
+    actually charged; the cart total is only the pre-checkout estimate."""
+    ready = (
+        ("awaiting_human", "needs_review")
+        if executor_mode() == "agent"
+        else ("awaiting_human",)
+    )
+    if task.status not in ready:
         raise GateError(f"Cart is {task.status}, not awaiting your confirmation.")
     merchant = ensure_merchants(db, user_id).get(task.store)
     placed = PlacedResult(
         merchant_order_id=merchant_order_id or f"{task.store.upper()}-{task.id}",
-        total=float(task.cart_total or 0),
+        total=float(total if total and total > 0 else (task.cart_total or 0)),
     )
     _record_order(db, task, placed, placed_by="human", merchant=merchant)
+    return task
+
+
+# ---------------------------------------------------------------------------
+# Shopper (FOOD_EXECUTOR=agent)
+#
+# A Claude Code session on the Mac fills the cart in the owner's store account and talks
+# to these through scripts/shopper.py. Nothing here buys: the owner reviews the cart in the
+# app, checks out in the store's own app, and confirms with confirm_human_placed.
+# ---------------------------------------------------------------------------
+
+
+def shopper_work(db: Session):
+    """Carts that need the browser: requested and queued, or left mid-build."""
+    return db.query(CartTask).filter(
+        or_(
+            and_(CartTask.status == "queued", CartTask.requested_at.is_not(None)),
+            CartTask.status == "building",
+        )
+    )
+
+
+def next_shopper_task(db: Session) -> CartTask | None:
+    """The oldest cart that needs the browser. A task left in `building` by a shopper that
+    died mid-run comes back, so the next session resumes it."""
+    task = shopper_work(db).order_by(CartTask.id).first()
+    if task and task.status == "queued":
+        task.status = "building"
+        task.attempts = (task.attempts or 0) + 1
+        _event(task, "building", f"attempt {task.attempts} via shopper")
+        db.commit()
+    return task
+
+
+def report_cart(
+    db: Session,
+    task: CartTask,
+    lines: list[dict],
+    total: float,
+    screenshot_path: str | None,
+    cart_url: str | None,
+) -> CartTask:
+    if task.status != "building":
+        raise GateError(f"Cart is {task.status}, not being built.")
+    if not lines:
+        raise GateError("A cart needs at least one line.")
+    for line in lines:
+        if not line.get("name") or line.get("line_total") is None:
+            raise GateError("Every line needs a name and a line_total.")
+    if total <= 0:
+        raise GateError("The cart total must be read from the cart page.")
+    if cart_url and not cart_url.startswith("https://"):
+        raise GateError("cart_url must be the store's https page.")
+    task.cart_lines = lines
+    task.cart_total = round(float(total), 2)
+    task.screenshot_path = screenshot_path
+    task.cart_url = cart_url
+    task.status = "needs_review"
+    task.error = None
+    _event(task, "needs_review", f"{len(lines)} lines · total {task.cart_total:.2f}")
+    db.commit()
+    return task
+
+
+def report_failure(db: Session, task: CartTask, error: str) -> CartTask:
+    if task.status != "building":
+        raise GateError(f"Cart is {task.status}; nothing is in flight.")
+    task.status = "failed"
+    task.error = error[:500]
+    _event(task, "shopper_failed", task.error)
+    db.commit()
     return task
 
 

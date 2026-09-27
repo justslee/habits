@@ -7,7 +7,11 @@ Two families:
     logged into each store once. Selectors are per-store config and MUST be tuned on the
     first supervised runs; nothing here places an order without the gate in cart_service.
 
-Select with FOOD_EXECUTOR=dry_run|playwright.
+  * ShopperAdapter — a marker: a Claude Code shopper session fills the cart in the owner's
+    store account out of band (scripts/shopper.py, .claude/skills/shop). The API only queues
+    work for it; the owner checks out in the store's own app.
+
+Select with FOOD_EXECUTOR=dry_run|playwright|agent.
 """
 
 from __future__ import annotations
@@ -245,8 +249,18 @@ class PlaywrightAdapter:
         )
 
 
+class ShopperAdapter:
+    """Cart work happens in the shopper session; cart_service queues it instead of calling in,
+    and refuses to place anything."""
+
+    name = "agent"
+    deferred = True
+
+
 def adapter_for(store: str, mode: str | None = None):
     mode = mode or os.getenv("FOOD_EXECUTOR", "dry_run")
+    if mode == "agent":
+        return ShopperAdapter()
     if mode == "playwright":
         return PlaywrightAdapter(store)
     return DryRunAdapter()
