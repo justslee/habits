@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -23,6 +24,7 @@ from app.schemas.workout import (
     WorkoutSessionResponse,
 )
 from app.services.progressive_overload import update_profile_after_session
+from app.services.session_progression import apply_progression
 from app.services.workout_chat import process_chat_message
 
 router = APIRouter(prefix="/api/v1/workouts", tags=["workouts"])
@@ -248,8 +250,10 @@ def add_exercise_log(
         distance_miles=payload.distance_miles,
     )
     db.add(log)
-    session.status = "in_progress"
+    if session.status == "planned":
+        session.status = "in_progress"
     db.commit()
+    _after_edit(db, session)
     db.refresh(log)
 
     return ExerciseLogResponse(
@@ -265,6 +269,223 @@ def add_exercise_log(
         duration_minutes=log.duration_minutes,
         distance_miles=log.distance_miles,
     )
+
+
+# --- editing a session -----------------------------------------------------------
+#
+# Anything about a session can change, during it or after: a set's numbers, sets past the
+# plan, movements added, renamed (swapped) or removed. A movement is known by its name, so
+# movements that were logged but never planned (older sessions, extras) edit the same way.
+# Edits to a finished session re-run its progression, so a corrected set counts.
+
+
+class ExerciseLogPatch(BaseModel):
+    weight: Optional[float] = Field(default=None, ge=0)
+    reps: Optional[int] = Field(default=None, ge=0)
+    rpe: Optional[float] = Field(default=None, ge=1, le=10)
+    is_warmup: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class MovementIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    sets: int = Field(default=3, ge=1, le=20)
+    reps: str = Field(default="8", min_length=1, max_length=20)
+    weight: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = None
+
+
+class MovementPatch(BaseModel):
+    name: str = Field(min_length=1, max_length=100)  # the movement to change
+    new_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    sets: Optional[int] = Field(default=None, ge=1, le=20)
+    reps: Optional[str] = Field(default=None, min_length=1, max_length=20)
+
+
+def _live_session(db: Session, session_id: int) -> WorkoutSession:
+    session = (
+        db.query(WorkoutSession)
+        .filter(WorkoutSession.id == session_id, WorkoutSession.deleted_at.is_(None))
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+def _after_edit(db: Session, session: WorkoutSession) -> None:
+    """A finished session's progression follows its edits."""
+    if session.status == "completed":
+        apply_progression(db, session.user_id, session)
+        db.commit()
+
+
+def _plan_of(session: WorkoutSession) -> dict:
+    try:
+        return json.loads(session.ai_plan) if session.ai_plan else {}
+    except ValueError:
+        return {}
+
+
+def _logs_named(session: WorkoutSession, name: str) -> list[ExerciseLog]:
+    return [e for e in session.exercises if e.exercise_name.lower() == name.lower()]
+
+
+def _renumber(session: WorkoutSession, name: str) -> None:
+    for n, log in enumerate(
+        sorted(_logs_named(session, name), key=lambda e: (e.set_number, e.id)), start=1
+    ):
+        log.set_number = n
+
+
+def _find_log(session: WorkoutSession, log_id: int) -> ExerciseLog:
+    log = next((e for e in session.exercises if e.id == log_id), None)
+    if log is None:
+        raise HTTPException(status_code=404, detail="Set not found")
+    return log
+
+
+@router.patch("/{session_id}/exercises/{log_id}", response_model=WorkoutSessionResponse)
+def update_exercise_log(
+    session_id: int,
+    log_id: int,
+    payload: ExerciseLogPatch,
+    db: Session = Depends(get_db),
+):
+    """Change a logged set: weight, reps, effort, warm-up or notes."""
+    session = _live_session(db, session_id)
+    log = _find_log(session, log_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(log, field, value)
+    db.commit()
+    _after_edit(db, session)
+    db.refresh(session)
+    return _session_to_response(session)
+
+
+@router.delete(
+    "/{session_id}/exercises/{log_id}", response_model=WorkoutSessionResponse
+)
+def delete_exercise_log(session_id: int, log_id: int, db: Session = Depends(get_db)):
+    """Remove one set. The movement's remaining sets are numbered 1..n again."""
+    session = _live_session(db, session_id)
+    log = _find_log(session, log_id)
+    name = log.exercise_name
+    session.exercises.remove(log)  # delete-orphan: the row goes
+    _renumber(session, name)
+    db.commit()
+    _after_edit(db, session)
+    db.refresh(session)
+    return _session_to_response(session)
+
+
+@router.post("/{session_id}/movements", response_model=WorkoutSessionResponse)
+def add_movement(session_id: int, payload: MovementIn, db: Session = Depends(get_db)):
+    """Add a movement the plan didn't have. It joins the session's list straight away."""
+    session = _live_session(db, session_id)
+    plan = _plan_of(session)
+    exercises = plan.setdefault("exercises", [])
+    name = payload.name.strip()
+    if any(e["name"].lower() == name.lower() for e in exercises) or _logs_named(
+        session, name
+    ):
+        raise HTTPException(
+            status_code=422, detail=f"{name} is already in this session"
+        )
+    exercises.append(
+        {
+            "name": name,
+            "sets": payload.sets,
+            "reps": payload.reps.strip(),
+            "weight": payload.weight,
+            "notes": payload.notes,
+            "kind": "extra",
+            "block": "Added",
+            "added": True,
+        }
+    )
+    session.ai_plan = json.dumps(plan)
+    db.commit()
+    db.refresh(session)
+    return _session_to_response(session)
+
+
+@router.patch("/{session_id}/movements", response_model=WorkoutSessionResponse)
+def update_movement(
+    session_id: int, payload: MovementPatch, db: Session = Depends(get_db)
+):
+    """Rename (swap) a movement, or change its target sets and reps for this session."""
+    session = _live_session(db, session_id)
+    plan = _plan_of(session)
+    exercises = plan.setdefault("exercises", [])
+    entry = next(
+        (e for e in exercises if e["name"].lower() == payload.name.lower()), None
+    )
+    logs = _logs_named(session, payload.name)
+    if entry is None and not logs:
+        raise HTTPException(
+            status_code=404, detail=f"{payload.name} isn't in this session"
+        )
+    if entry is None and (payload.sets is not None or payload.reps is not None):
+        # a movement that was only ever logged gets targets of its own
+        entry = {
+            "name": logs[0].exercise_name,
+            "sets": len(logs),
+            "reps": "",
+            "weight": None,
+            "kind": "extra",
+            "block": "Added",
+            "added": True,
+        }
+        exercises.append(entry)
+    new_name = (payload.new_name or "").strip()
+    if new_name and new_name != payload.name:
+        clash = new_name.lower() != payload.name.lower() and (
+            any(e["name"].lower() == new_name.lower() for e in exercises)
+            or _logs_named(session, new_name)
+        )
+        if clash:
+            raise HTTPException(
+                status_code=422, detail=f"{new_name} is already in this session"
+            )
+        if entry is not None:
+            entry["name"] = new_name
+        for log in logs:
+            log.exercise_name = new_name
+    if entry is not None:
+        if payload.sets is not None:
+            entry["sets"] = payload.sets
+        if payload.reps is not None:
+            entry["reps"] = payload.reps.strip()
+    if entry is not None:  # the plan only changes when it holds this movement
+        session.ai_plan = json.dumps(plan)
+    db.commit()
+    _after_edit(db, session)
+    db.refresh(session)
+    return _session_to_response(session)
+
+
+@router.delete("/{session_id}/movements", response_model=WorkoutSessionResponse)
+def remove_movement(
+    session_id: int, name: str = Query(..., min_length=1), db: Session = Depends(get_db)
+):
+    """Take a movement out of this session, with any sets logged for it."""
+    session = _live_session(db, session_id)
+    plan = _plan_of(session)
+    exercises = plan.get("exercises", [])
+    kept = [e for e in exercises if e["name"].lower() != name.lower()]
+    logs = _logs_named(session, name)
+    if len(kept) == len(exercises) and not logs:
+        raise HTTPException(status_code=404, detail=f"{name} isn't in this session")
+    if len(kept) != len(exercises):
+        plan["exercises"] = kept
+        session.ai_plan = json.dumps(plan)
+    for log in logs:
+        session.exercises.remove(log)
+    db.commit()
+    _after_edit(db, session)
+    db.refresh(session)
+    return _session_to_response(session)
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)

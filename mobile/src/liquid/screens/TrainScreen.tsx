@@ -133,7 +133,10 @@ export default function TrainScreen({ navigation }: any) {
           onFive={async (v: boolean) => { await patchTrainSettings({ five_sessions: v }); load(); }}
         />
       ) : (
-        <HistoryView history={history} />
+        <HistoryView
+          history={history}
+          onOpen={(item: TrainingItem) => navigation.navigate('Session', { sessionId: item.id })}
+        />
       )}
     </Screen>
   );
@@ -640,14 +643,20 @@ function ProgramView({ program, events, openPhase, setOpenPhase, onFive }: any) 
 
 // --- History ----------------------------------------------------------------
 
-function HistoryView({ history }: { history: TrainingItem[] }) {
+function HistoryView({ history, onOpen }: { history: TrainingItem[]; onOpen: (item: TrainingItem) => void }) {
   const { c } = useTheme();
   return (
     <>
       <Title>Work done.{'\n'}<Em>Progress kept.</Em></Title>
-      <Body style={{ marginTop: 12, marginBottom: 8 }}>Recent sessions and runs</Body>
+      <Body style={{ marginTop: 12, marginBottom: 8 }}>Recent sessions and runs. Tap a session to see or change it.</Body>
       {history.length ? history.map(item => (
-        <View key={`${item.type}-${item.id}`} style={[s.weekRow, { borderBottomColor: c.line }]}>
+        <Pressable
+          key={`${item.type}-${item.id}`}
+          accessibilityRole={item.type === 'workout' ? 'button' : undefined}
+          disabled={item.type !== 'workout'}
+          onPress={() => { feel.selection(); onOpen(item); }}
+          style={[s.weekRow, { borderBottomColor: c.line }]}
+        >
           <View style={{ width: 44 }}>
             <Small>{prettyDate(item.date)}</Small>
           </View>
@@ -658,7 +667,8 @@ function HistoryView({ history }: { history: TrainingItem[] }) {
             <Small style={{ marginTop: 2 }} numberOfLines={1}>{item.detail}</Small>
           </View>
           {item.rpe != null ? <Small>RPE {item.rpe}</Small> : <Ionicons name="checkmark" size={16} color={c.green} />}
-        </View>
+          {item.type === 'workout' ? <Ionicons name="chevron-forward" size={15} color={c.muted} /> : null}
+        </Pressable>
       )) : <Body>Nothing logged yet.</Body>}
     </>
   );

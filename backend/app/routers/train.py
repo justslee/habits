@@ -36,6 +36,7 @@ from app.models.workout import (
 )
 from app.services import calendar_sync
 from app.services import golf_program as gp
+from app.services.session_progression import apply_progression
 from app.services.llm import FAST, structured_output
 
 router = APIRouter(prefix="/api/v1/train", tags=["train"])
@@ -470,48 +471,7 @@ def complete(session_id: int, payload: CompleteIn, db: Session = Depends(get_db)
     )
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
-    plan = json.loads(row.ai_plan) if row.ai_plan else {}
-    logged: dict[str, list[dict]] = {}
-    for e in row.exercises:
-        if e.deleted_at:
-            continue
-        logged.setdefault(e.exercise_name.lower(), []).append(
-            {"weight": e.weight, "reps": e.reps, "rpe": e.rpe, "is_warmup": e.is_warmup}
-        )
-    decisions = []
-    for ex in plan.get("exercises", []):
-        sets = logged.get(ex["name"].lower())
-        if not sets or ex.get("kind") not in ("main", "accessory"):
-            continue
-        prescribed = {
-            "name": ex["name"],
-            "sets": ex["sets"],
-            "reps": str(ex["reps"]).replace("/side", ""),
-        }
-        nxt = gp.progression_after(prescribed, sets)
-        if not nxt:
-            continue
-        prof = (
-            db.query(ExerciseProfile)
-            .filter(
-                ExerciseProfile.user_id == user.id,
-                ExerciseProfile.exercise_name == ex["name"],
-            )
-            .first()
-        )
-        if prof is None:
-            prof = ExerciseProfile(
-                user_id=user.id, exercise_name=ex["name"], muscle_group="golf"
-            )
-            db.add(prof)
-        prof.current_working_weight = nxt["weight"]
-        prof.progression_status = (
-            "progressing"
-            if "+" in nxt["note"]
-            else ("stalled" if "missed" in nxt["note"] else "progressing")
-        )
-        prof.last_progression_date = row.session_date
-        decisions.append({"exercise": ex["name"], **nxt})
+    decisions = apply_progression(db, user.id, row)
     row.status = "completed"
     if payload.overall_rpe is not None:
         row.overall_rpe = payload.overall_rpe

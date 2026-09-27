@@ -248,6 +248,9 @@ export interface DepthProgressionPoint {
 // Workout types
 
 export interface ExerciseLogData {
+  /** Present on sets read back from the server. */
+  id?: number;
+  exercise_order?: number;
   exercise_name: string;
   set_number: number;
   weight?: number;
@@ -298,6 +301,42 @@ export function getTodayWorkout(): Promise<WorkoutSession> {
 
 export function getWorkoutSession(sessionId: number): Promise<WorkoutSession> {
   return request(`/api/v1/workouts/${sessionId}`);
+}
+
+/** Change a logged set; returns the whole session. */
+export function updateExerciseLog(
+  sessionId: number,
+  logId: number,
+  patch: { weight?: number | null; reps?: number | null; rpe?: number | null; is_warmup?: boolean; notes?: string | null },
+): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/exercises/${logId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+/** Remove a logged set; the movement's other sets are renumbered. */
+export function deleteExerciseLog(sessionId: number, logId: number): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/exercises/${logId}`, { method: 'DELETE' });
+}
+
+/** Add a movement the plan didn't have. */
+export function addMovement(
+  sessionId: number,
+  m: { name: string; sets?: number; reps?: string; weight?: number | null },
+): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/movements`, { method: 'POST', body: JSON.stringify(m) });
+}
+
+/** Rename (swap) a movement or change its target sets and reps for this session. */
+export function updateMovement(
+  sessionId: number,
+  name: string,
+  patch: { new_name?: string; sets?: number; reps?: string },
+): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/movements`, { method: 'PATCH', body: JSON.stringify({ name, ...patch }) });
+}
+
+/** Take a movement out of the session, with its sets. */
+export function removeMovement(sessionId: number, name: string): Promise<WorkoutSession> {
+  return request(`/api/v1/workouts/${sessionId}/movements?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
 export function addExerciseLog(
