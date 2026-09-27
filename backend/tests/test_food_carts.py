@@ -251,7 +251,7 @@ async def test_reject_reopens_bag_and_revokes_approvals(db_session):
         assert r.status_code == 403
 
 
-# --- agent executor: the shopper session builds carts out of band -------------------
+# --- agent executor: the shopper fills carts, the owner checks out in the store's app -----
 
 
 async def _shopper_cycle(client, monkeypatch):
@@ -261,7 +261,17 @@ async def _shopper_cycle(client, monkeypatch):
     return cycle, carts[0]
 
 
-def _build(db_session, task_id, total=42.5):
+def _request(db_session, task_id):
+    """The phone's "Build this cart"."""
+    task = db_session.get(CartTask, task_id)
+    cart_service.run_task(db_session, task, store_adapters.ShopperAdapter())
+    return task
+
+
+def _fill(
+    db_session, task_id, total=42.5, cart_url="https://www.hmart.com/checkout/cart/"
+):
+    _request(db_session, task_id)
     task = cart_service.next_shopper_task(db_session)
     assert task.id == task_id and task.status == "building"
     cart_service.report_cart(
@@ -270,8 +280,33 @@ def _build(db_session, task_id, total=42.5):
         [{"name": "eggs", "product": "Large Eggs 12ct", "qty": 1, "line_total": total}],
         total,
         None,
+        cart_url,
     )
     return task
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_fills_only_the_carts_the_owner_asked_for(
+    db_session, monkeypatch
+):
+    async with _client() as client:
+        cycle = await _bagged_cycle(
+            client, slugs=("dak-galbi", "galbi-tang", "salmon-teriyaki", "oyakodon")
+        )
+        monkeypatch.setenv("FOOD_EXECUTOR", "agent")
+        carts = (await client.get(f"/api/v1/food/cycles/{cycle['id']}/carts")).json()
+        assert len(carts) >= 2, "needs more than one store to prove the point"
+        assert all(c["status"] == "queued" and not c["requested"] for c in carts)
+        assert cart_service.next_shopper_task(db_session) is None
+
+        chosen = carts[-1]
+        r = await client.post(f"/api/v1/food/carts/{chosen['id']}/run")
+        assert r.json()["requested"] is True
+        task = cart_service.next_shopper_task(db_session)
+        assert task.id == chosen["id"] and task.status == "building"
+        assert cart_service.next_shopper_task(db_session).id == chosen["id"]  # resumes
+        others = [db_session.get(CartTask, c["id"]) for c in carts[:-1]]
+        assert all(t.status == "queued" and t.requested_at is None for t in others)
 
 
 @pytest.mark.asyncio
@@ -280,24 +315,50 @@ async def test_agent_mode_queues_carts_and_the_shopper_fills_them(
 ):
     async with _client() as client:
         _, cart = await _shopper_cycle(client, monkeypatch)
-        assert cart["status"] == "queued"
+        assert cart["status"] == "queued" and cart["checkout_via"] == "store_app"
         # the phone's "Build this cart" leaves it for the shopper instead of building inline
         r = await client.post(f"/api/v1/food/carts/{cart['id']}/run")
         assert r.json()["status"] == "queued"
 
-        task = _build(db_session, cart["id"])
+        task = _fill(
+            db_session,
+            cart["id"],
+            cart_url="https://www.doordash.com/store/wegmans-123/",
+        )
         assert task.status == "needs_review" and task.cart_total == 42.5
+        out = (await client.get(f"/api/v1/food/cycles/{task.cycle_id}/carts")).json()
+        mine = next(c for c in out if c["id"] == cart["id"])
+        assert mine["cart_url"] == "https://www.doordash.com/store/wegmans-123/"
         # a report for a cart that isn't being built is refused
         with pytest.raises(cart_service.GateError, match="not being built"):
             cart_service.report_cart(
-                db_session, task, [{"name": "x", "line_total": 1}], 1, None
+                db_session, task, [{"name": "x", "line_total": 1}], 1, None, None
             )
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_cart_url_must_be_the_store_page(db_session, monkeypatch):
+    async with _client() as client:
+        _, cart = await _shopper_cycle(client, monkeypatch)
+        _request(db_session, cart["id"])
+        task = cart_service.next_shopper_task(db_session)
+        with pytest.raises(cart_service.GateError, match="https"):
+            cart_service.report_cart(
+                db_session,
+                task,
+                [{"name": "eggs", "line_total": 4}],
+                4,
+                None,
+                "javascript:alert(1)",
+            )
+        assert task.status == "building"
 
 
 @pytest.mark.asyncio
 async def test_agent_mode_failed_build_requeues_from_the_phone(db_session, monkeypatch):
     async with _client() as client:
         _, cart = await _shopper_cycle(client, monkeypatch)
+        _request(db_session, cart["id"])
         task = cart_service.next_shopper_task(db_session)
         cart_service.report_failure(db_session, task, "hmart: signed out")
         assert task.status == "failed" and task.error == "hmart: signed out"
@@ -306,77 +367,48 @@ async def test_agent_mode_failed_build_requeues_from_the_phone(db_session, monke
 
 
 @pytest.mark.asyncio
-async def test_agent_mode_place_hands_off_then_parks_for_the_human(
-    db_session, monkeypatch
-):
+async def test_agent_mode_never_places_orders(db_session, monkeypatch):
     async with _client() as client:
         _, cart = await _shopper_cycle(client, monkeypatch)
-        _build(db_session, cart["id"])
+        _fill(db_session, cart["id"])
         await client.patch("/api/v1/food/settings", json={"ordering_enabled": True})
-        token = (
-            await client.post(
-                f"/api/v1/food/carts/{cart['id']}/approve", json={"biometric": True}
-            )
-        ).json()["token"]
-        placed = (
-            await client.post(
-                f"/api/v1/food/carts/{cart['id']}/place", json={"token": token}
-            )
-        ).json()
-        assert placed["status"] == "placing"
-        # the token is spent at hand-off
         r = await client.post(
-            f"/api/v1/food/carts/{cart['id']}/place", json={"token": token}
+            f"/api/v1/food/carts/{cart['id']}/approve", json={"biometric": True}
         )
-        assert r.status_code == 403
-
-        db_session.expire_all()
-        task = cart_service.next_shopper_task(db_session)
-        assert task.id == cart["id"] and task.status == "placing"
-        cart_service.report_checkout(db_session, 1, task, 42.5)
-        assert task.status == "awaiting_human"
-        nxt = cart_service.next_shopper_task(db_session)
-        assert nxt is None or nxt.id != cart["id"]
-
-        done = (
-            await client.post(
-                f"/api/v1/food/carts/{cart['id']}/confirm-placed", json={}
-            )
-        ).json()
-        assert done["status"] == "placed" and done["order"]["placed_by"] == "human"
+        assert r.status_code == 403 and "store's app" in r.json()["detail"]
+        r = await client.post(
+            f"/api/v1/food/carts/{cart['id']}/place", json={"token": "x"}
+        )
+        assert r.status_code == 403 and "store's app" in r.json()["detail"]
+        assert db_session.query(OrderApproval).count() == 0
+        assert db_session.query(Order).count() == 0
 
 
 @pytest.mark.asyncio
-async def test_agent_mode_checkout_drift_and_stale_approval_reopen_review(
-    db_session, monkeypatch
-):
+async def test_agent_mode_owner_confirms_a_store_app_order(db_session, monkeypatch):
     async with _client() as client:
-        _, cart = await _shopper_cycle(client, monkeypatch)
-        _build(db_session, cart["id"])
-        await client.patch("/api/v1/food/settings", json={"ordering_enabled": True})
+        cycle, cart = await _shopper_cycle(client, monkeypatch)
+        # nothing to confirm before the shopper has filled the cart
+        r = await client.post(
+            f"/api/v1/food/carts/{cart['id']}/confirm-placed", json={}
+        )
+        assert r.status_code == 403
 
-        async def approve_and_place():
-            token = (
-                await client.post(
-                    f"/api/v1/food/carts/{cart['id']}/approve", json={"biometric": True}
-                )
-            ).json()["token"]
+        _fill(db_session, cart["id"], total=42.5)
+        done = (
             await client.post(
-                f"/api/v1/food/carts/{cart['id']}/place", json={"token": token}
+                f"/api/v1/food/carts/{cart['id']}/confirm-placed",
+                json={"total": 57.3, "merchant_order_id": "DD-9"},
             )
-            db_session.expire_all()
-            return db_session.get(CartTask, cart["id"])
-
-        task = await approve_and_place()
-        with pytest.raises(cart_service.GateError, match="moved"):
-            cart_service.report_checkout(db_session, 1, task, 60.0)
-        assert task.status == "needs_review" and task.cart_total == 60.0
-
-        task = await approve_and_place()
-        a = db_session.query(OrderApproval).order_by(OrderApproval.id.desc()).first()
-        a.used_at = a.used_at - datetime.timedelta(hours=2)
-        db_session.commit()
-        with pytest.raises(cart_service.GateError, match="stale"):
-            cart_service.report_checkout(db_session, 1, task, 60.0)
-        assert task.status == "needs_review"
-        assert task.events[-1]["event"] == "gate_refused"
+        ).json()
+        assert done["status"] == "placed"
+        assert done["order"]["total"] == 57.3 and done["order"]["placed_by"] == "human"
+        # once only
+        r = await client.post(
+            f"/api/v1/food/carts/{cart['id']}/confirm-placed", json={}
+        )
+        assert r.status_code == 403
+        assert db_session.query(Order).count() == 1
+        # the placed cart stays in the cycle's list, so the receipt can show it
+        listed = (await client.get(f"/api/v1/food/cycles/{cycle['id']}/carts")).json()
+        assert any(c["id"] == cart["id"] and c["status"] == "placed" for c in listed)

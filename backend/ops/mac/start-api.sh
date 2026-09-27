@@ -25,6 +25,9 @@ set -a
 set +a
 export DATABASE_URL="${DATABASE_URL:-sqlite:///$HABITS_HOME/mastery.db}"
 export HABITS_SECRETS_DISABLED=1
+# On the Mac, carts are filled by the Claude Code shopper (com.habits.shopper); the owner
+# checks out in the store's app. Nothing in agent mode can place an order.
+export FOOD_EXECUTOR="${FOOD_EXECUTOR:-agent}"
 
 cd "$BACKEND"
 # shellcheck disable=SC1091

@@ -7,7 +7,7 @@
 # Creates:
 #   ~/Library/Application Support/Habits/{env,mastery.db}   config + data (never in git)
 #   ~/srv/habits                                             deploy clone tracking origin/main
-#   ~/Library/LaunchAgents/com.habits.{api,deploy,watchdog,backup}.plist
+#   ~/Library/LaunchAgents/com.habits.{api,deploy,watchdog,backup,shopper}.plist
 #   ~/Library/Logs/habits/
 #
 # Then, once: tailscale serve --bg --https=443 http://127.0.0.1:8000
@@ -56,6 +56,9 @@ echo "    $DATABASE_URL"
 
 echo "==> 4b. web app"
 bash "$HERE/build-web.sh" || echo "    web build failed (see ~/Library/Logs/habits/web-build.log); continuing"
+
+echo "==> 4c. shopper"
+command -v tmux >/dev/null || /opt/homebrew/bin/brew install tmux
 
 echo "==> 5. launchd agents"
 chmod +x "$HERE"/*.sh

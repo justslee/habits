@@ -364,6 +364,10 @@ class CartTask(Base, TimestampMixin):
     )  # as read back from the store page
     cart_total: Mapped[float | None] = mapped_column(Float, nullable=True)
     screenshot_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # agent mode: when the owner asked for this cart (only requested carts are filled), and
+    # the store page holding it, opened in the store's app to check out
+    requested_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    cart_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     idempotency_key: Mapped[str] = mapped_column(

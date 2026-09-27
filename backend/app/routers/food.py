@@ -928,6 +928,11 @@ class CartOut(BaseModel):
     events: list[dict]
     approval_expires_at: datetime.datetime | None
     order: dict | None
+    # "store_app": the shopper filled the cart in the owner's account; check out at cart_url
+    # in the store's own app. "habits": approve in the app (dry-run and scripted-browser modes).
+    checkout_via: str
+    cart_url: str | None
+    requested: bool  # agent mode: the owner asked for this cart, so the shopper will fill it
 
 
 def _cart_out(db: Session, user: User, t: CartTask) -> CartOut:
@@ -943,11 +948,12 @@ def _cart_out(db: Session, user: User, t: CartTask) -> CartOut:
         .first()
     )
     order = db.query(Order).filter(Order.cart_task_id == t.id).first()
+    merchant = merchants.get(t.store)
     return CartOut(
         id=t.id,
         bag_id=t.bag_id,
         store=t.store,
-        name=merchants[t.store].name if t.store in merchants else t.store,
+        name=merchant.name if merchant else t.store,
         status=t.status,
         supervised=t.supervised,
         cart_lines=t.cart_lines or [],
@@ -966,6 +972,13 @@ def _cart_out(db: Session, user: User, t: CartTask) -> CartOut:
         }
         if order
         else None,
+        checkout_via="store_app"
+        if cart_service.executor_mode() == "agent"
+        else "habits",
+        cart_url=t.cart_url
+        or store_adapters.STORE_CONFIG.get(t.store, {}).get("cart")
+        or (merchant.site_url if merchant else None),
+        requested=t.requested_at is not None,
     )
 
 
@@ -993,14 +1006,21 @@ def _gate(fn):
 
 @router.get("/cycles/{cycle_id}/carts", response_model=list[CartOut])
 def list_carts(cycle_id: int, run: bool = True, db: Session = Depends(get_db)):
-    """Carts for the cycle. Creates queued tasks for approved bags and, in dry-run mode, builds them inline."""
+    """Carts for the cycle. Creates queued tasks for approved bags and, in dry-run mode, builds them inline.
+    Returns every cart in the cycle, placed ones included (their bags are `ordered`, not `approved`)."""
     user = _user(db)
     cycle = _cycle(db, user, cycle_id)
-    tasks = cart_service.create_tasks_for_cycle(db, user.id, cycle)
+    new = cart_service.create_tasks_for_cycle(db, user.id, cycle)
     if run and cart_service.executor_mode() == "dry_run":
-        for t in tasks:
+        for t in new:
             if t.status == "queued":
                 cart_service.run_task(db, t, store_adapters.adapter_for(t.store))
+    tasks = (
+        db.query(CartTask)
+        .filter(CartTask.cycle_id == cycle.id)
+        .order_by(CartTask.id)
+        .all()
+    )
     return [_cart_out(db, user, t) for t in tasks]
 
 
@@ -1067,6 +1087,7 @@ def place_cart(task_id: int, payload: PlaceIn, db: Session = Depends(get_db)):
 
 class ConfirmIn(BaseModel):
     merchant_order_id: str | None = None
+    total: float | None = Field(default=None, ge=0)  # what the store charged, all in
 
 
 @router.post("/carts/{task_id}/confirm-placed", response_model=CartOut)
@@ -1075,7 +1096,7 @@ def confirm_placed(task_id: int, payload: ConfirmIn, db: Session = Depends(get_d
     t = _task(db, user, task_id)
     _gate(
         lambda: cart_service.confirm_human_placed(
-            db, user.id, t, payload.merchant_order_id
+            db, user.id, t, payload.merchant_order_id, payload.total
         )
     )
     return _cart_out(db, user, t)

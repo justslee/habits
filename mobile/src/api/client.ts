@@ -832,6 +832,11 @@ export interface CartTask {
   events: CartEvent[];
   approval_expires_at: string | null;
   order: { merchant_order_id: string | null; total: number; placed_at: string; placed_by: string; delivery_window: string | null } | null;
+  /** store_app: the shopper filled the cart in your store account; check out at cart_url. */
+  checkout_via: 'store_app' | 'habits';
+  cart_url: string | null;
+  /** You asked for this cart, so the shopper will fill it. */
+  requested: boolean;
 }
 export interface FoodSettingsData {
   discovery_prompt: string | null;
@@ -868,8 +873,12 @@ export function cartScreenshotSource(taskId: number, stamp?: string) {
     headers: API_KEY ? { 'X-API-Key': API_KEY } : undefined,
   };
 }
-export function confirmPlaced(taskId: number, merchantOrderId?: string): Promise<CartTask> {
-  return request(`/api/v1/food/carts/${taskId}/confirm-placed`, { method: 'POST', body: JSON.stringify({ merchant_order_id: merchantOrderId ?? null }) });
+/** You placed the order yourself; `total` is what the store charged, all in. */
+export function confirmPlaced(taskId: number, merchantOrderId?: string, total?: number): Promise<CartTask> {
+  return request(`/api/v1/food/carts/${taskId}/confirm-placed`, {
+    method: 'POST',
+    body: JSON.stringify({ merchant_order_id: merchantOrderId ?? null, total: total ?? null }),
+  });
 }
 export function rejectCart(taskId: number, reason?: string): Promise<CartTask> {
   return request(`/api/v1/food/carts/${taskId}/reject`, { method: 'POST', body: JSON.stringify({ reason: reason ?? null }) });

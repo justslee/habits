@@ -4,13 +4,13 @@ Runs on the Mac against the live database (use ops/mac/shopper.sh, which loads t
 
     shopper.sh wait                  block until a cart needs the browser, then exit
     shopper.sh next                  claim the next cart; prints the job as JSON
-    shopper.sh cart ID < cart.json   report a built cart: {"lines": [...], "total": 0.0, "screenshot": "/abs.png"}
-    shopper.sh checkout ID --total X report the re-read total before checkout; exit 2 = stop
-    shopper.sh fail ID "reason"      give up on the current step
+    shopper.sh cart ID < cart.json   report a filled cart:
+                                     {"lines": [...], "total": 0.0, "screenshot": "/abs.png", "cart_url": "https://..."}
+    shopper.sh fail ID "reason"      give up on this cart
     shopper.sh status                carts in flight
 
-Nothing here approves or places an order. Approval happens on the phone with Face ID, and in
-agent mode every order is parked for the human to press Place Order (cart_service).
+Nothing here places an order. The owner reviews the cart in the Habits app and checks out in
+the store's own app (cart_service refuses to place anything in agent mode).
 """
 
 from __future__ import annotations
@@ -61,7 +61,6 @@ def _job(db, task: CartTask) -> dict:
     bag = task.bag
     job = {
         "id": task.id,
-        "phase": "build" if task.status == "building" else "checkout",
         "store": task.store,
         "store_name": merchant.name if merchant else task.store,
         "store_home": cfg.get("home") or (merchant.site_url if merchant else None),
@@ -71,29 +70,25 @@ def _job(db, task: CartTask) -> dict:
         "attempt": task.attempts,
         "last_error": task.error,
     }
-    if job["phase"] == "build":
-        job["items"] = [
-            {
-                k: i.get(k)
-                for k in (
-                    "name",
-                    "packs",
-                    "pack_label",
-                    "product_query",
-                    "unit_price",
-                    "line_total",
-                )
-            }
-            for i in (bag.items or [])
-        ]
-        job["bag_estimate"] = round(
-            sum(i.get("line_total") or 0 for i in bag.items or [])
-            + (bag.delivery_fee or 0),
-            2,
-        )
-    else:
-        job["approved_total"] = task.cart_total
-        job["approved_lines"] = task.cart_lines
+    job["items"] = [
+        {
+            k: i.get(k)
+            for k in (
+                "name",
+                "packs",
+                "pack_label",
+                "product_query",
+                "unit_price",
+                "line_total",
+            )
+        }
+        for i in (bag.items or [])
+    ]
+    job["bag_estimate"] = round(
+        sum(i.get("line_total") or 0 for i in bag.items or [])
+        + (bag.delivery_fee or 0),
+        2,
+    )
     return job
 
 
@@ -102,11 +97,7 @@ def cmd_wait(args) -> int:
     while True:
         db = SessionLocal()
         try:
-            n = (
-                db.query(CartTask)
-                .filter(CartTask.status.in_(cart_service.SHOPPER_WORK))
-                .count()
-            )
+            n = cart_service.shopper_work(db).count()
         finally:
             db.close()
         if n:
@@ -147,6 +138,7 @@ def cmd_cart(args) -> int:
                 payload.get("lines") or [],
                 float(payload.get("total") or 0),
                 payload.get("screenshot"),
+                payload.get("cart_url"),
             )
         except cart_service.GateError as e:
             _out({"ok": False, "reason": str(e)})
@@ -154,38 +146,10 @@ def cmd_cart(args) -> int:
         _push(
             db,
             task,
-            "Cart ready to review",
-            f"{len(task.cart_lines)} items · ${task.cart_total:.2f}. Approve with Face ID when it looks right.",
+            "Cart ready",
+            f"{len(task.cart_lines)} items · ${task.cart_total:.2f} before fees. Review it, then check out in the store's app.",
         )
         _out({"ok": True, "status": task.status, "total": task.cart_total})
-        return 0
-    finally:
-        db.close()
-
-
-def cmd_checkout(args) -> int:
-    db = SessionLocal()
-    try:
-        task = _load(db, args.id)
-        try:
-            cart_service.report_checkout(db, _user_id(db, task), task, args.total)
-        except cart_service.GateError as e:
-            _push(db, task, "Order stopped", str(e))
-            _out({"ok": False, "reason": str(e), "next": "stop; do not open checkout"})
-            return 2
-        _push(
-            db,
-            task,
-            "Ready at checkout",
-            f"${args.total:.2f} re-checked. Press Place Order on the Mac, then confirm in the app.",
-        )
-        _out(
-            {
-                "ok": True,
-                "status": task.status,
-                "next": "open checkout, stop on the final review page, never press Place Order",
-            }
-        )
         return 0
     finally:
         db.close()
@@ -245,10 +209,6 @@ def main() -> int:
     c = sub.add_parser("cart")
     c.add_argument("id", type=int)
     c.set_defaults(fn=cmd_cart)
-    k = sub.add_parser("checkout")
-    k.add_argument("id", type=int)
-    k.add_argument("--total", type=float, required=True)
-    k.set_defaults(fn=cmd_checkout)
     f = sub.add_parser("fail")
     f.add_argument("id", type=int)
     f.add_argument("reason")

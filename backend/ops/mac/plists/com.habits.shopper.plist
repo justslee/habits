@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Habits shopper supervisor: when carts are queued, starts a Claude Code shopper session
+     (tmux, Remote Control on) that fills them and closes itself. Installed by install.sh. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.habits.shopper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SRV__/shopper.sh</string>
+    <string>supervise</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__HOME__</string>
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/habits/shopper.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/habits/shopper.log</string>
+</dict>
+</plist>

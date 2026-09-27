@@ -19,6 +19,7 @@ import os
 import secrets
 from dataclasses import dataclass
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.food import (
@@ -69,9 +70,14 @@ def _event(task: CartTask, event: str, detail: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 
+# In agent mode Habits never places orders; this is the answer to any attempt.
+STORE_APP_CHECKOUT = "Check out in the store's app, then tap “I placed the order”."
+
+
 def executor_mode() -> str:
     """dry_run (default: simulate carts from bag prices) | playwright (scripted browser
-    adapters) | agent (a Claude Code shopper session drives the browser; see shopper.py)."""
+    adapters) | agent (a Claude Code shopper fills the cart; the owner checks out in the
+    store's app; see scripts/shopper.py)."""
     return os.getenv("FOOD_EXECUTOR", "dry_run")
 
 
@@ -120,11 +126,12 @@ def run_task(db: Session, task: CartTask, adapter) -> CartTask:
     if task.status not in ("queued", "failed", "rejected"):
         return task
     if getattr(adapter, "deferred", False):
-        # The shopper session builds it out of band and reports through report_cart.
-        if task.status != "queued":
-            task.status = "queued"
-            _event(task, "queued", "re-queued for the shopper")
-            db.commit()
+        # The shopper fills it out of band and reports through report_cart. Only carts the
+        # owner asked for are filled: a cycle's other bags get tasks too.
+        task.status = "queued"
+        task.requested_at = _now()
+        _event(task, "requested", "queued for the shopper")
+        db.commit()
         return task
     task.status = "building"
     task.attempts = (task.attempts or 0) + 1
@@ -188,6 +195,8 @@ def _check_caps(
 def approve_task(
     db: Session, user_id: int, task: CartTask, *, biometric: bool
 ) -> OrderApproval:
+    if executor_mode() == "agent":
+        raise GateError(STORE_APP_CHECKOUT)
     if task.status != "needs_review":
         raise GateError(f"Cart is {task.status}, not awaiting review.")
     if task.cart_total is None:
@@ -247,21 +256,13 @@ def place_task(
     db: Session, user_id: int, task: CartTask, token: str, adapter
 ) -> CartTask:
     """Place the order (or, supervised, park on Place Order and hand over to the human)."""
+    if getattr(adapter, "deferred", False):
+        raise GateError(STORE_APP_CHECKOUT)
     if task.status not in ("approved", "placing"):
         raise GateError(f"Cart is {task.status}; approve it first.")
     settings = ensure_food_settings(db, user_id)
     merchant = ensure_merchants(db, user_id).get(task.store)
     approval = _consume_approval(db, task, token)
-
-    if getattr(adapter, "deferred", False):
-        # The shopper re-reads the total in the browser and reports it through
-        # report_checkout, which runs the same drift and cap checks below. The approval is
-        # spent now so it can't be replayed while the shopper works.
-        approval.used_at = _now()
-        task.status = "placing"
-        _event(task, "placing", "handed to the shopper to re-read the cart total")
-        db.commit()
-        return task
 
     task.status = "placing"
     _event(task, "placing", "re-reading the cart total")
@@ -315,14 +316,26 @@ def _verify_live_total(
 
 
 def confirm_human_placed(
-    db: Session, user_id: int, task: CartTask, merchant_order_id: str | None
+    db: Session,
+    user_id: int,
+    task: CartTask,
+    merchant_order_id: str | None,
+    total: float | None = None,
 ) -> CartTask:
-    if task.status != "awaiting_human":
+    """The owner placed the order themselves: pressed Place Order on the Mac (supervised
+    browser modes) or checked out in the store's app (agent mode). `total` is what the store
+    actually charged; the cart total is only the pre-checkout estimate."""
+    ready = (
+        ("awaiting_human", "needs_review")
+        if executor_mode() == "agent"
+        else ("awaiting_human",)
+    )
+    if task.status not in ready:
         raise GateError(f"Cart is {task.status}, not awaiting your confirmation.")
     merchant = ensure_merchants(db, user_id).get(task.store)
     placed = PlacedResult(
         merchant_order_id=merchant_order_id or f"{task.store.upper()}-{task.id}",
-        total=float(task.cart_total or 0),
+        total=float(total if total and total > 0 else (task.cart_total or 0)),
     )
     _record_order(db, task, placed, placed_by="human", merchant=merchant)
     return task
@@ -331,23 +344,26 @@ def confirm_human_placed(
 # ---------------------------------------------------------------------------
 # Shopper (FOOD_EXECUTOR=agent)
 #
-# A Claude Code session on the Mac drives the browser and talks to these through
-# scripts/shopper.py. The shopper builds carts and re-reads totals; it never approves,
-# and in this mode every order is parked for the human to press Place Order.
+# A Claude Code session on the Mac fills the cart in the owner's store account and talks
+# to these through scripts/shopper.py. Nothing here buys: the owner reviews the cart in the
+# app, checks out in the store's own app, and confirms with confirm_human_placed.
 # ---------------------------------------------------------------------------
 
-SHOPPER_WORK = ("queued", "building", "placing")
+
+def shopper_work(db: Session):
+    """Carts that need the browser: requested and queued, or left mid-build."""
+    return db.query(CartTask).filter(
+        or_(
+            and_(CartTask.status == "queued", CartTask.requested_at.is_not(None)),
+            CartTask.status == "building",
+        )
+    )
 
 
 def next_shopper_task(db: Session) -> CartTask | None:
     """The oldest cart that needs the browser. A task left in `building` by a shopper that
     died mid-run comes back, so the next session resumes it."""
-    task = (
-        db.query(CartTask)
-        .filter(CartTask.status.in_(SHOPPER_WORK))
-        .order_by(CartTask.id)
-        .first()
-    )
+    task = shopper_work(db).order_by(CartTask.id).first()
     if task and task.status == "queued":
         task.status = "building"
         task.attempts = (task.attempts or 0) + 1
@@ -362,6 +378,7 @@ def report_cart(
     lines: list[dict],
     total: float,
     screenshot_path: str | None,
+    cart_url: str | None,
 ) -> CartTask:
     if task.status != "building":
         raise GateError(f"Cart is {task.status}, not being built.")
@@ -372,9 +389,12 @@ def report_cart(
             raise GateError("Every line needs a name and a line_total.")
     if total <= 0:
         raise GateError("The cart total must be read from the cart page.")
+    if cart_url and not cart_url.startswith("https://"):
+        raise GateError("cart_url must be the store's https page.")
     task.cart_lines = lines
     task.cart_total = round(float(total), 2)
     task.screenshot_path = screenshot_path
+    task.cart_url = cart_url
     task.status = "needs_review"
     task.error = None
     _event(task, "needs_review", f"{len(lines)} lines · total {task.cart_total:.2f}")
@@ -383,60 +403,11 @@ def report_cart(
 
 
 def report_failure(db: Session, task: CartTask, error: str) -> CartTask:
-    if task.status == "building":
-        task.status = "failed"
-    elif task.status == "placing":
-        # The approval is already spent; a fresh one is needed after a look at the cart.
-        task.status = "needs_review"
-    else:
+    if task.status != "building":
         raise GateError(f"Cart is {task.status}; nothing is in flight.")
+    task.status = "failed"
     task.error = error[:500]
     _event(task, "shopper_failed", task.error)
-    db.commit()
-    return task
-
-
-def report_checkout(
-    db: Session, user_id: int, task: CartTask, live_total: float
-) -> CartTask:
-    """The shopper re-read the cart total. Same drift and cap checks as place_task; on a
-    pass the task parks for the human, on a refusal it goes back to review."""
-    if task.status != "placing":
-        raise GateError(f"Cart is {task.status}, not waiting on a checkout check.")
-    settings = ensure_food_settings(db, user_id)
-    merchant = ensure_merchants(db, user_id).get(task.store)
-    approval = (
-        db.query(OrderApproval)
-        .filter(
-            OrderApproval.cart_task_id == task.id,
-            OrderApproval.used_at.is_not(None),
-            OrderApproval.revoked.is_(False),
-        )
-        .order_by(OrderApproval.id.desc())
-        .first()
-    )
-    try:
-        if approval is None:
-            raise GateError("No approval is behind this checkout.")
-        stale_after = datetime.timedelta(minutes=settings.approval_ttl_minutes)
-        if _now() - approval.used_at > stale_after:
-            approval.revoked = True
-            raise GateError(
-                "The approval went stale before the shopper reached the cart. Approve again."
-            )
-        _verify_live_total(db, settings, merchant, task, approval, round(live_total, 2))
-    except GateError as e:
-        if task.status == "placing":
-            task.status = "needs_review"
-            _event(task, "gate_refused", str(e))
-            db.commit()
-        raise
-    task.status = "awaiting_human"
-    _event(
-        task,
-        "awaiting_human",
-        f"total {live_total:.2f} re-checked · parked on checkout — press Place Order on the Mac, then confirm in the app",
-    )
     db.commit()
     return task
 
