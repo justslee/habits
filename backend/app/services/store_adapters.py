@@ -90,14 +90,18 @@ class DryRunAdapter:
 # Per-store navigation config. Tune on the first supervised run; everything here is a
 # best-effort starting point, not a promise about the stores' current markup.
 STORE_CONFIG: dict[str, dict] = {
+    # H Mart Manhattan's own delivery site (Shopify). A Shopify cart lives in the browser
+    # that filled it, so the owner gets a cart permalink that rebuilds it on the phone.
     "hmart": {
-        "home": "https://www.hmart.com/",
-        "search": "input[name='q'], input[type='search']",
-        "first_result_add": "button:has-text('Add to Cart'), button:has-text('Add')",
-        "cart": "https://www.hmart.com/checkout/cart/",
-        "total": "[data-th='Order Total'], .grand.totals .price, .cart-summary .grand .price",
-        "checkout": "button:has-text('Proceed to Checkout'), a:has-text('Checkout')",
-        "place": "button:has-text('Place Order')",
+        "home": "https://hmartdelivery.com/",
+        "search": "input[name='q']",
+        "first_result_add": "button[name='add'], form[action*='/cart/add'] button[type='submit']",
+        "cart": "https://hmartdelivery.com/cart",
+        "cart_json": "https://hmartdelivery.com/cart.js",
+        "permalink": "https://hmartdelivery.com/cart/{items}",
+        "total": ".totals__total-value, .cart__total, [data-cart-subtotal]",
+        "checkout": "button[name='checkout']",
+        "place": "button:has-text('Pay now')",
     },
     "wf": {
         "home": "https://www.amazon.com/alm/storefront?almBrandId=VUZHIFdob2xlIEZvb2Rz",
@@ -255,6 +259,50 @@ class ShopperAdapter:
 
     name = "agent"
     deferred = True
+
+
+def shopify_cart(
+    store: str, cart: dict, skipped: list[str] | None = None
+) -> tuple[list[dict], float, str]:
+    """Lines, total and cart permalink from a Shopify store's /cart.js (prices in cents).
+    The permalink (/cart/VARIANT:QTY,...) opens the same cart on any device."""
+    permalink = STORE_CONFIG.get(store, {}).get("permalink")
+    if not permalink:
+        raise ValueError(
+            f"{store} isn't a Shopify store; report lines and total instead."
+        )
+    items = cart.get("items") or []
+    if not items:
+        raise ValueError("The cart is empty.")
+    lines, parts = [], []
+    for item in items:
+        try:
+            variant, qty = int(item["variant_id"]), int(item["quantity"])
+            cents = int(item.get("final_line_price", item.get("line_price")))
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError(
+                "Each item needs variant_id, quantity and final_line_price from cart.js."
+            ) from e
+        if variant <= 0 or qty <= 0 or cents < 0:
+            raise ValueError(f"Bad cart item: variant {variant} × {qty}.")
+        lines.append(
+            {
+                "name": item.get("product_title") or item.get("title") or str(variant),
+                "product": item.get("title"),
+                "qty": qty,
+                "unit_price": round(cents / qty / 100, 2),
+                "line_total": round(cents / 100, 2),
+                "variant_id": variant,
+            }
+        )
+        parts.append(f"{variant}:{qty}")
+    for name in skipped or []:
+        lines.append({"name": f"(skipped) {name}", "qty": 0, "line_total": 0})
+    try:
+        total = round(int(cart["total_price"]) / 100, 2)
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError("cart.js total_price is missing.") from e
+    return lines, total, permalink.format(items=",".join(parts))
 
 
 def adapter_for(store: str, mode: str | None = None):

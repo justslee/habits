@@ -42,9 +42,9 @@ DEFAULT_MERCHANTS = [
         location="38 W 32nd St, New York, NY (Koreatown)",
         channel="site",
         quality_tier="high",
-        site_url="https://www.hmart.com",
-        minimum=49.0,
-        delivery_fee=5.99,
+        site_url="https://hmartdelivery.com",  # the Manhattan store's own delivery
+        minimum=25.0,
+        delivery_fee=5.0,
     ),
     dict(
         store="wf",
