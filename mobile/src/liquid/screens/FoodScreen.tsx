@@ -118,6 +118,46 @@ export default function FoodScreen({ navigation }: any) {
 
 // --- Home -------------------------------------------------------------------
 
+/** The phone's own date as YYYY-MM-DD, so "tonight" follows the day you're living in. */
+const todayIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const addDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const weekday = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+
+/** "Sep 28–29", or "Sep 30 – Oct 1" across a month. */
+const dayRange = (days: string[]) => {
+  if (!days.length) return '';
+  const first = prettyDate(days[0]);
+  if (days.length === 1) return first;
+  const last = prettyDate(days[days.length - 1]);
+  return first.split(' ')[0] === last.split(' ')[0] ? `${first}–${last.split(' ')[1]}` : `${first} – ${last}`;
+};
+
+const servingsOf = (plan: any) => (plan?.meals ?? []).reduce((n: number, m: any) => n + (m.servings ?? 0), 0);
+
+/** Portions per day covered: about one means a plan of dinners, two means lunch and dinner. */
+const isDinnerPlan = (plan: any) => (plan?.covered_days ?? 0) > 0 && servingsOf(plan) / plan.covered_days < 1.5;
+
+/** Tonight's meal from the plan, or the next one coming, with how to say when. */
+function nextFromPlan(plan: any): { meal: any; when: string; cook: boolean } | null {
+  const today = todayIso();
+  for (const meal of plan?.meals ?? []) {
+    if (meal.status === 'cooked' && !(meal.days_covered ?? []).includes(today)) continue;
+    const day = (meal.days_covered ?? []).find((d: string) => d >= today);
+    if (!day) continue;
+    const when = day === today ? 'Tonight' : day === addDays(today, 1) ? 'Tomorrow' : weekday(day);
+    return { meal, when, cook: meal.cook_date === day && meal.status !== 'cooked' };
+  }
+  return null;
+}
+
 function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) {
   const { c } = useTheme();
   const ready = !!plan?.meals?.length;
@@ -125,6 +165,10 @@ function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) 
   const needsMeals = !!cycle && !ready && (plan?.kept ?? 0) === 0;
   const covered = plan?.covered_days ?? 0;
   const eating = cycle?.eating_days ?? 0;
+  const dinners = ready && isDinnerPlan(plan);
+  const next = ready ? nextFromPlan(plan) : null;
+  const stocked = cycle?.status === 'stocked';
+  const arriving = stocked && cycle?.shop_date && cycle.shop_date >= todayIso() ? cycle.shop_date : null;
 
   return (
     <>
@@ -133,14 +177,18 @@ function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) 
 
       <View style={[s.cover, { backgroundColor: c.artBg }]}>
         <Eyebrow style={{ color: c.artFg }}>
-          {ready ? 'Tonight · from your plan' : 'Your kitchen'}
+          {ready ? (next ? `${next.when} · from your plan` : 'From your plan') : 'Your kitchen'}
         </Eyebrow>
         <Subtitle style={{ color: c.artFg, maxWidth: 220, marginTop: 9 }}>
           {ready ? 'A little heat.\nA lot of comfort.' : 'A plan, and\nno more thinking.'}
         </Subtitle>
         <View style={s.bowl}><Bowl /></View>
         <Small style={{ color: c.artFg, marginTop: 12 }}>
-          {ready ? `${plan.meals[0].recipe.title} · reheat in a pan` : 'Start a cycle to fill the fridge'}
+          {ready
+            ? next
+              ? `${next.meal.recipe.title} · ${next.cook ? 'cook it fresh' : 'reheat in a pan'}`
+              : 'Every batch is eaten. Time for the next plan.'
+            : 'Start a cycle to fill the fridge'}
         </Small>
       </View>
 
@@ -153,11 +201,17 @@ function Home({ cycle, deck, plan, spend, recipes, go, startCycle, busy }: any) 
           {ready ? 'Your kitchen is covered.' : needsMeals ? 'Pick a few meals.' : cycle ? `${eating} days to feed you.` : 'Two weeks, sorted.'}
         </Subtitle>
         <Body style={{ marginTop: 8 }}>
-          {cycle
-            ? `${eating * 2} lunches and dinners. A few familiar recipes, made in batches.`
-            : 'Pick a handful of recipes once, then cook twice and eat all fortnight.'}
+          {dinners
+            ? `${servingsOf(plan)} dinners from ${plan.meals.length} recipes, cooked in batches.`
+            : cycle
+              ? `${eating * 2} lunches and dinners. A few familiar recipes, made in batches.`
+              : 'Pick a handful of recipes once, then cook twice and eat all fortnight.'}
         </Body>
-        {cycle ? (
+        {stocked ? (
+          <CalendarNote>
+            Groceries bought{arriving ? ` · arriving ${weekday(arriving)} ${prettyDate(arriving)}` : ''}
+          </CalendarNote>
+        ) : cycle ? (
           <CalendarNote>
             {cycle.travel_days.length} days away · {cycle.eat_out_days} days eating out
           </CalendarNote>
@@ -455,36 +509,42 @@ function PlanView({ cycle, plan, go, load }: any) {
     );
   }
 
-  const servings = plan.meals.reduce((n: number, m: any) => n + (m.servings ?? 0), 0);
+  const servings = servingsOf(plan);
+  const dinners = isDinnerPlan(plan);
+  const stocked = cycle.status === 'stocked';
+  const length = Math.max(1, Math.round((Date.parse(cycle.end_date) - Date.parse(cycle.start_date)) / 86_400_000) + 1);
+  const coveredDays = new Set<string>(plan.meals.flatMap((m: any) => m.days_covered ?? []));
 
   return (
     <>
-      <FlowTop step="03 · Your two-week plan" onBack={() => go('home')} />
+      <FlowTop step="03 · Your plan" onBack={() => go('home')} />
       <Badge icon="checkmark">Enough food. You can stop choosing.</Badge>
       <Title style={{ marginTop: 19 }}>A few favourites.{'\n'}<Em>More free time.</Em></Title>
       <Body style={{ marginTop: 12 }}>
-        {plan.meals.length} recipes · {servings} servings · {plan.covered_days} days of lunch and dinner.
+        {dinners
+          ? `${plan.meals.length} recipes · ${servings} dinners · ${prettyDate(cycle.start_date)} – ${prettyDate(cycle.end_date)}`
+          : `${plan.meals.length} recipes · ${servings} servings · ${plan.covered_days} days of lunch and dinner.`}
       </Body>
       <Small style={{ marginTop: 8 }}>
-        No cooking while you're away. The {cycle.travel_days.length} travel day
-        {cycle.travel_days.length === 1 ? '' : 's'} and {cycle.eat_out_days} night
-        {cycle.eat_out_days === 1 ? '' : 's'} out are left out of the plan, and a batch never spans
-        a trip, so nothing is left to spoil.
+        {cycle.notes ? cycle.notes : (
+          `No cooking while you're away. The ${cycle.travel_days.length} travel day${cycle.travel_days.length === 1 ? '' : 's'} `
+          + `and ${cycle.eat_out_days} night${cycle.eat_out_days === 1 ? '' : 's'} out are left out of the plan, `
+          + 'and a batch never spans a trip, so nothing is left to spoil.'
+        )}
       </Small>
 
       <View style={s.miniDays}>
-        {Array.from({ length: 14 }, (_, i) => {
-          const date = new Date(`${cycle.start_date}T12:00:00Z`);
-          date.setUTCDate(date.getUTCDate() + i);
-          const iso = date.toISOString().slice(0, 10);
+        {Array.from({ length }, (_, i) => {
+          const iso = addDays(cycle.start_date, i);
           const away = cycle.travel_days.includes(iso);
+          const eaten = coveredDays.has(iso);
           return (
             <View
               key={iso}
               style={{
                 flex: 1, height: 24, borderRadius: 6,
-                backgroundColor: away ? c.panel2 : c.soft,
-                opacity: away ? 0.6 : 1,
+                backgroundColor: away ? c.panel2 : eaten ? c.soft : c.panel2,
+                opacity: away ? 0.6 : eaten ? 1 : 0.35,
               }}
             />
           );
@@ -501,9 +561,7 @@ function PlanView({ cycle, plan, go, load }: any) {
             <Animated.Text style={[s.planIndex, { color: c.muted }]}>{String(i + 1).padStart(2, '0')}</Animated.Text>
             <View style={{ flex: 1 }}>
               <Body style={{ color: c.fg }}>{meal.recipe.title}</Body>
-              <Small style={{ marginTop: 4 }}>
-                {meal.servings} portions · {meal.status === 'cooked' ? 'cooked' : i === 1 ? 'freeze the base' : 'pan reheat'}
-              </Small>
+              <Small style={{ marginTop: 4 }}>{mealLine(meal, dinners)}</Small>
             </View>
             <InlineButton
               label="Details"
@@ -522,10 +580,26 @@ function PlanView({ cycle, plan, go, load }: any) {
         ))}
       </View>
 
-      <Small>Batch in two sessions. Freeze later-week portions.</Small>
-      <Button full label="Find my groceries" iconAfter="arrow-forward" style={{ marginTop: 22 }} onPress={() => go('bags')} />
+      {stocked ? (
+        <Notice icon="bag-check-outline">Groceries bought. Nothing to order for this plan.</Notice>
+      ) : (
+        <>
+          <Small>Batch in two sessions. Freeze later-week portions.</Small>
+          <Button full label="Find my groceries" iconAfter="arrow-forward" style={{ marginTop: 22 }} onPress={() => go('bags')} />
+        </>
+      )}
     </>
   );
+}
+
+/** When a batch is eaten and how much of it: "Sep 28–29 · 2 dinners", spare portions to freeze. */
+function mealLine(meal: any, dinners: boolean): string {
+  const unit = dinners ? (meal.servings === 1 ? 'dinner' : 'dinners') : 'portions';
+  if (meal.status === 'cooked') return `${meal.servings} ${unit} · cooked`;
+  const days: string[] = meal.days_covered ?? [];
+  if (!days.length) return `${meal.servings} ${unit} · pan reheat`;
+  const spare = dinners ? meal.servings - days.length : 0;
+  return `${dayRange(days)} · ${meal.servings} ${unit}${spare > 0 ? ` · ${spare} to freeze` : ''}`;
 }
 
 /**

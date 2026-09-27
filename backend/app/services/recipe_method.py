@@ -64,6 +64,10 @@ async def fetch_method(db: Session, recipe: Recipe, *, refresh: bool = False) ->
     """Fill `recipe.steps` from the source. Returns the recipe unchanged if it already has one."""
     if recipe.steps and not refresh:
         return recipe
+    if not recipe.source_url or recipe.source_site == "own":
+        # Your own recipe (typed in, or imported from your plan) has no page to read. Searching
+        # the web by its title would swap your method for a stranger's.
+        return recipe
 
     from app.services.llm import REASONING, structured_output
 
@@ -83,9 +87,15 @@ async def fetch_method(db: Session, recipe: Recipe, *, refresh: bool = False) ->
         reasoning_effort="low",
     )
 
-    steps = [s.strip() for s in (parsed.get("steps") or []) if isinstance(s, str) and s.strip()]
+    steps = [
+        s.strip()
+        for s in (parsed.get("steps") or [])
+        if isinstance(s, str) and s.strip()
+    ]
     if not steps:
-        logger.warning("no method found for recipe %s (%s)", recipe.slug, recipe.source_url)
+        logger.warning(
+            "no method found for recipe %s (%s)", recipe.slug, recipe.source_url
+        )
         return recipe
 
     recipe.steps = {

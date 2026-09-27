@@ -184,6 +184,7 @@ class CycleOut(BaseModel):
     eat_out_days: int
     eating_days: int
     deck_size: int
+    notes: str | None = None  # an imported plan's own guidance (order, freezing, source)
 
 
 def _cycle_out(c: MealCycle) -> CycleOut:
@@ -197,6 +198,7 @@ def _cycle_out(c: MealCycle) -> CycleOut:
         eat_out_days=c.eat_out_days,
         eating_days=fp.eating_days(c),
         deck_size=len(c.deck or []),
+        notes=c.notes,
     )
 
 

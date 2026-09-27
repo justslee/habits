@@ -706,6 +706,8 @@ export interface FoodCycle {
   eat_out_days: number;
   eating_days: number;
   deck_size: number;
+  /** An imported plan's own guidance: its order, what to freeze, where it came from. */
+  notes?: string | null;
 }
 
 export interface FoodDeck {

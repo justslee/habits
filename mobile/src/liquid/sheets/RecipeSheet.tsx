@@ -164,7 +164,7 @@ export function RecipeSheet({ recipe: initial }: { recipe: FoodRecipe }) {
         </Pressable>
       ) : null}
       <Small style={{ marginTop: 10 }}>{provenance}</Small>
-      {method?.steps?.length ? (
+      {method?.steps?.length && !ownRecipe ? (
         <Button full kind="quiet" label={busy ? 'Re-reading…' : 'Re-read the method'} disabled={busy} onPress={() => load(true)} />
       ) : recipe.source_url ? (
         <Button full kind="quiet" label={busy ? 'Reading…' : 'Try again'} disabled={busy} onPress={() => load(true)} />
