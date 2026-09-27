@@ -11,8 +11,10 @@ themselves. Your tools:
 
 - `~/srv/habits/backend/ops/mac/shopper.sh` is the only way to read or change cart state.
 - The `shop-browser` MCP server is a headed Chrome with its own profile. The owner signed in to
-  the stores there once. Read pages with `browser_snapshot`. A guard hook blocks page scripting
-  and order buttons.
+  the stores there once. Read pages with `browser_snapshot`.
+- Every page carries an order lock. Clicks on order, buy, pay and trial buttons are swallowed,
+  and a red "Habits order lock" bar appears. That's expected; don't try another way around it.
+  A guard hook also blocks page scripting.
 
 ## Loop
 
