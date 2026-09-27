@@ -6,6 +6,8 @@ Runs on the Mac against the live database (use ops/mac/shopper.sh, which loads t
     shopper.sh next                  claim the next cart; prints the job as JSON
     shopper.sh cart ID < cart.json   report a filled cart:
                                      {"lines": [...], "total": 0.0, "screenshot": "/abs.png", "cart_url": "https://..."}
+                                     or, for a Shopify store (job has cart_json):
+                                     {"shopify_cart": <cart.js>, "skipped": ["..."], "screenshot": "/abs.png"}
     shopper.sh fail ID "reason"      give up on this cart
     shopper.sh status                carts in flight
 
@@ -65,6 +67,8 @@ def _job(db, task: CartTask) -> dict:
         "store_name": merchant.name if merchant else task.store,
         "store_home": cfg.get("home") or (merchant.site_url if merchant else None),
         "store_cart": cfg.get("cart"),
+        # Shopify stores: the cart lives only in this browser; report cart.js instead
+        "cart_json": cfg.get("cart_json"),
         "store_location": merchant.location if merchant else None,
         "screenshot_dir": str(store_adapters.SCREENSHOT_DIR),
         "attempt": task.attempts,
@@ -131,14 +135,20 @@ def cmd_cart(args) -> int:
     db = SessionLocal()
     try:
         task = _load(db, args.id)
+        lines = payload.get("lines") or []
+        total = float(payload.get("total") or 0)
+        cart_url = payload.get("cart_url")
+        if payload.get("shopify_cart") is not None:
+            try:
+                lines, total, cart_url = store_adapters.shopify_cart(
+                    task.store, payload["shopify_cart"], payload.get("skipped")
+                )
+            except ValueError as e:
+                _out({"ok": False, "reason": str(e)})
+                return 2
         try:
             cart_service.report_cart(
-                db,
-                task,
-                payload.get("lines") or [],
-                float(payload.get("total") or 0),
-                payload.get("screenshot"),
-                payload.get("cart_url"),
+                db, task, lines, total, payload.get("screenshot"), cart_url
             )
         except cart_service.GateError as e:
             _out({"ok": False, "reason": str(e)})

@@ -113,7 +113,7 @@ case "${1:-}" in
     ;;
   login)
     case "${2:-}" in
-      hmart) url="https://www.hmart.com/customer/account/login/" ;;
+      hmart) url="https://hmartdelivery.com/account/login" ;;
       wf) url="https://www.amazon.com/alm/storefront?almBrandId=VUZHIFdob2xlIEZvb2Rz" ;;
       weg) url="https://www.doordash.com/store/wegmans" ;;
       *) url="https://www.doordash.com/" ;;

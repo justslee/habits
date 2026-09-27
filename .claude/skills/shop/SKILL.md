@@ -37,7 +37,8 @@ The job has `items` (name, packs, pack_label, product_query, unit_price), `bag_e
 1. Open `store_home`. If you land on a sign-in page and Chrome has filled the saved email and
    password, press Sign in. If it asks for a code, or nothing is filled, run
    `backend/ops/mac/shopper.sh fail <id> "Signed out of <store>. Sign in once on the Mac: shopper.sh login <store>"`
-   and move on to the next job.
+   and move on to the next job. A store whose job has `cart_json` (Shopify, like H Mart) needs no
+   sign-in at all: its cart works without an account, so don't sign in there.
 2. Empty the store cart first. Removing items is always safe, and leftovers from an old attempt
    must not reach the owner's order.
 3. For each item, search `product_query` (or `name`) and pick the best match. Prefer the closest
@@ -54,6 +55,14 @@ The job has `items` (name, packs, pack_label, product_query, unit_price), `bag_e
    filled, for DoorDash the `/store/...` page. Add
    `{"name": "(skipped) <item>", "qty": 0, "line_total": 0}` for anything you couldn't find,
    so the owner sees the gap.
+
+   **If the job has `cart_json`** (a Shopify store), the cart lives only in this browser, so
+   Habits sends the owner a link that rebuilds it on their phone. After the screenshot, open
+   `cart_json` and report what it shows instead of lines and total:
+   `{"shopify_cart": {"items": [{"variant_id": 43867569389793, "quantity": 2, "title": "...", "product_title": "...", "final_line_price": 658}], "total_price": 5402}, "skipped": ["<bag item you couldn't find>"], "screenshot": "/abs/path.png"}`.
+   Copy `variant_id`, `quantity`, `title`, `product_title` and `final_line_price` for every
+   item, and `total_price`, exactly as the page shows them. Prices there are in cents; leave
+   them as they are. Habits works out the lines, the total and the link.
 7. If the store fights you (captcha, out of delivery area, repeated errors), use
    `shopper.sh fail <id> "<one plain sentence>"`. Don't retry more than twice.
 

@@ -799,7 +799,7 @@ function Review({ cycle, bags, carts, store, go, load }: any) {
 
       {storeApp ? (
         <Notice icon="storefront-outline">
-          The shopper fills this cart in your {storeName} account. You check out with {storeName} yourself; Habits never places the order.
+          The shopper fills this cart for you at {storeName}. You check out there yourself; Habits never places the order.
         </Notice>
       ) : (
         <Notice icon="shield-checkmark-outline">
@@ -851,7 +851,7 @@ function storeAppName(cart?: CartTask): string {
   const url = cart?.cart_url ?? '';
   if (url.includes('doordash.com')) return 'DoorDash';
   if (url.includes('amazon.com')) return 'Amazon';
-  if (url.includes('hmart.com')) return 'H Mart';
+  if (url.includes('hmartdelivery.com') || url.includes('hmart.com')) return 'H Mart';
   return cart?.name ?? 'the store';
 }
 

@@ -412,3 +412,93 @@ async def test_agent_mode_owner_confirms_a_store_app_order(db_session, monkeypat
         # the placed cart stays in the cycle's list, so the receipt can show it
         listed = (await client.get(f"/api/v1/food/cycles/{cycle['id']}/carts")).json()
         assert any(c["id"] == cart["id"] and c["status"] == "placed" for c in listed)
+
+
+# --- Shopify stores (H Mart Manhattan): the owner gets a link that rebuilds the cart -----
+
+CART_JS = {
+    "items": [
+        {
+            "variant_id": 43867569389793,
+            "quantity": 2,
+            "title": "CJ Gochujang 1.1lb",
+            "product_title": "CJ Gochujang",
+            "final_line_price": 1298,
+        },
+        {
+            "variant_id": 43865231196385,
+            "quantity": 1,
+            "title": "Beef Short Rib 2lb",
+            "product_title": "Beef Short Rib",
+            "final_line_price": 2798,
+        },
+    ],
+    "total_price": 4096,
+}
+
+
+def test_shopify_cart_turns_cart_js_into_lines_total_and_a_permalink():
+    lines, total, url = store_adapters.shopify_cart(
+        "hmart", CART_JS, ["perilla leaves"]
+    )
+    assert total == 40.96
+    assert url == "https://hmartdelivery.com/cart/43867569389793:2,43865231196385:1"
+    assert lines[0] == {
+        "name": "CJ Gochujang",
+        "product": "CJ Gochujang 1.1lb",
+        "qty": 2,
+        "unit_price": 6.49,
+        "line_total": 12.98,
+        "variant_id": 43867569389793,
+    }
+    assert lines[-1] == {"name": "(skipped) perilla leaves", "qty": 0, "line_total": 0}
+
+
+def test_shopify_cart_refuses_what_it_cannot_link():
+    with pytest.raises(ValueError, match="isn't a Shopify store"):
+        store_adapters.shopify_cart("wf", CART_JS)
+    with pytest.raises(ValueError, match="empty"):
+        store_adapters.shopify_cart("hmart", {"items": [], "total_price": 0})
+    with pytest.raises(ValueError, match="variant_id"):
+        store_adapters.shopify_cart(
+            "hmart",
+            {"items": [{"quantity": 1, "final_line_price": 100}], "total_price": 100},
+        )
+    with pytest.raises(ValueError, match="Bad cart item"):
+        store_adapters.shopify_cart(
+            "hmart",
+            {
+                "items": [{"variant_id": 5, "quantity": 0, "final_line_price": 0}],
+                "total_price": 0,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_hmart_cart_hands_the_owner_the_permalink(db_session, monkeypatch):
+    async with _client() as client:
+        cycle, _ = await _shopper_cycle(client, monkeypatch)
+        carts = (await client.get(f"/api/v1/food/cycles/{cycle['id']}/carts")).json()
+        hmart = next((c for c in carts if c["store"] == "hmart"), None)
+        if hmart is None:
+            pytest.skip("this seed plan puts nothing at H Mart")
+        _request(db_session, hmart["id"])
+        task = cart_service.next_shopper_task(db_session)
+        assert task.id == hmart["id"]
+        lines, total, url = store_adapters.shopify_cart("hmart", CART_JS)
+        cart_service.report_cart(db_session, task, lines, total, None, url)
+        out = (await client.get(f"/api/v1/food/cycles/{cycle['id']}/carts")).json()
+        mine = next(c for c in out if c["id"] == hmart["id"])
+        assert mine["cart_url"].startswith(
+            "https://hmartdelivery.com/cart/43867569389793:2"
+        )
+        assert mine["cart_total"] == 40.96
+
+
+@pytest.mark.asyncio
+async def test_hmart_defaults_to_the_manhattan_delivery_site(db_session):
+    async with _client() as client:
+        merchants = (await client.get("/api/v1/food/merchants")).json()
+        hmart = next(m for m in merchants if m["store"] == "hmart")
+        assert hmart["site_url"] == "https://hmartdelivery.com"
+        assert hmart["minimum"] == 25.0 and hmart["delivery_fee"] == 5.0
