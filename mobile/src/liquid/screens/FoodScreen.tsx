@@ -20,7 +20,7 @@ import {
   Bag, BagsResponse, CartTask, FoodCycle, FoodDeck, FoodPlan, FoodRecipe, PantryEntry, SpendSummary,
   approveBags, approveCart, buildBags, buildPlan, cartScreenshotSource, confirmPlaced, createCycle,
   getBags, getCarts, getCurrentCycle, getDeck, getFoodRecipes, getPantry, getPlan, getSpend, placeCart,
-  putPantry, removeCycleMeal,
+  putPantry, removeCycleMeal, reorderPlan,
   runCart, swapCycleMeal, swipeCard,
 } from '../../api/client';
 import { useTheme } from '../theme';
@@ -445,11 +445,30 @@ function Stat({ value, label }: { value: string; label: string }) {
 
 // --- Plan -------------------------------------------------------------------
 
-function PlanView({ cycle, plan, go, load }: any) {
+function PlanView({ cycle, plan, go, load, setPlan }: any) {
   const { c } = useTheme();
   const sheet = useSheet();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [ordering, setOrdering] = useState(false);
+  const [moving, setMoving] = useState(false);
+
+  // Swap a batch with its neighbour. The server lays the dates out again, so what you see
+  // after each tap is the real plan.
+  const move = useCallback(async (i: number, dir: -1 | 1) => {
+    const meals = plan?.meals ?? [];
+    const j = i + dir;
+    if (moving || j < 0 || j >= meals.length || isStarted(meals[i]) || isStarted(meals[j])) return;
+    const ids = meals.map((m: any) => m.id);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    setMoving(true);
+    feel.selection();
+    try {
+      setPlan(await reorderPlan(cycle.id, ids));
+    } catch (err: any) {
+      toast.show(String(err?.message ?? err).replace(/^API \d+:\s*/, '').replace(/^\{"detail":"|"\}$/g, '').slice(0, 140));
+    } finally { setMoving(false); }
+  }, [plan, moving, cycle, setPlan, toast]);
 
   const make = useCallback(async () => {
     if (!cycle) return;
@@ -555,29 +574,73 @@ function PlanView({ cycle, plan, go, load }: any) {
         <Small>{prettyDate(cycle.end_date)}</Small>
       </View>
 
-      <View style={{ marginVertical: 20 }}>
-        {plan.meals.map((meal: any, i: number) => (
-          <View key={meal.id} style={[s.planMeal, { borderBottomColor: c.line }]}>
-            <Animated.Text style={[s.planIndex, { color: c.muted }]}>{String(i + 1).padStart(2, '0')}</Animated.Text>
-            <View style={{ flex: 1 }}>
-              <Body style={{ color: c.fg }}>{meal.recipe.title}</Body>
-              <Small style={{ marginTop: 4 }}>{mealLine(meal, dinners)}</Small>
+      <View style={[s.rowBetween, { marginTop: 20 }]}>
+        <Small style={{ flex: 1 }}>
+          {ordering ? 'Move batches up or down. Dates follow, and a batch never runs across a trip.' : 'In the order you’ll eat them'}
+        </Small>
+        {plan.meals.length > 1 ? (
+          <InlineButton
+            label={ordering ? 'Done' : 'Change order'}
+            icon={ordering ? 'checkmark' : 'swap-vertical-outline'}
+            onPress={() => { feel.selection(); setOrdering(o => !o); }}
+          />
+        ) : null}
+      </View>
+      <View style={{ marginBottom: 20, marginTop: 4 }}>
+        {plan.meals.map((meal: any, i: number) => {
+          const started = isStarted(meal);
+          const canUp = i > 0 && !started && !isStarted(plan.meals[i - 1]);
+          const canDown = i < plan.meals.length - 1 && !started;
+          return (
+            <View key={meal.id} style={[s.planMeal, { borderBottomColor: c.line }]}>
+              <Animated.Text style={[s.planIndex, { color: c.muted }]}>{String(i + 1).padStart(2, '0')}</Animated.Text>
+              <View style={{ flex: 1 }}>
+                <Body style={{ color: c.fg }}>{meal.recipe.title}</Body>
+                <Small style={{ marginTop: 4 }}>{mealLine(meal, dinners)}</Small>
+              </View>
+              {ordering ? (
+                started ? (
+                  <Ionicons name="lock-closed-outline" size={16} color={c.muted} accessibilityLabel="Already started" />
+                ) : (
+                  <>
+                    <IconButton
+                      icon="chevron-up"
+                      size={38}
+                      accessibilityLabel={`Eat ${meal.recipe.title} earlier`}
+                      background={canUp ? c.panel2 : 'transparent'}
+                      color={canUp ? c.fg : c.line}
+                      onPress={canUp && !moving ? () => move(i, -1) : undefined}
+                    />
+                    <IconButton
+                      icon="chevron-down"
+                      size={38}
+                      accessibilityLabel={`Eat ${meal.recipe.title} later`}
+                      background={canDown ? c.panel2 : 'transparent'}
+                      color={canDown ? c.fg : c.line}
+                      onPress={canDown && !moving ? () => move(i, 1) : undefined}
+                    />
+                  </>
+                )
+              ) : (
+                <>
+                  <InlineButton
+                    label="Details"
+                    onPress={() => sheet.open(meal.recipe.title, () => <RecipeSheet recipe={meal.recipe} />)}
+                  />
+                  <IconButton
+                    icon="ellipsis-horizontal"
+                    accessibilityLabel={`Change ${meal.recipe.title}`}
+                    background={c.panel2}
+                    haptic="soft"
+                    onPress={() => sheet.open(meal.recipe.title, () => (
+                      <MealSheet cycle={cycle} meal={meal} plan={plan} onDone={load} />
+                    ))}
+                  />
+                </>
+              )}
             </View>
-            <InlineButton
-              label="Details"
-              onPress={() => sheet.open(meal.recipe.title, () => <RecipeSheet recipe={meal.recipe} />)}
-            />
-            <IconButton
-              icon="ellipsis-horizontal"
-              accessibilityLabel={`Change ${meal.recipe.title}`}
-              background={c.panel2}
-              haptic="soft"
-              onPress={() => sheet.open(meal.recipe.title, () => (
-                <MealSheet cycle={cycle} meal={meal} plan={plan} onDone={load} />
-              ))}
-            />
-          </View>
-        ))}
+          );
+        })}
       </View>
 
       {stocked ? (
@@ -591,6 +654,10 @@ function PlanView({ cycle, plan, go, load }: any) {
     </>
   );
 }
+
+/** Cooked, or its first dinner has passed: the past stays where it is. */
+const isStarted = (meal: any) =>
+  meal.status === 'cooked' || ((meal.days_covered ?? [])[0] ?? '9999-12-31') < todayIso();
 
 /** When a batch is eaten and how much of it: "Sep 28–29 · 2 dinners", spare portions to freeze. */
 function mealLine(meal: any, dinners: boolean): string {

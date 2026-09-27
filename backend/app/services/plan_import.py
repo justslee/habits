@@ -27,7 +27,7 @@ from app.models.food import (
     RecipeIngredient,
     ShoppingBag,
 )
-from app.services import calendar_sync
+from app.services import calendar_sync, plan_layout
 
 
 class IngredientSpec(BaseModel):
@@ -124,22 +124,7 @@ def _dinner_dates(
     db: Session, user_id: int, start: datetime.date, meals: list[MealSpec]
 ) -> list[list[datetime.date]]:
     """Consecutive non-travel dinners per batch, a batch never spanning a trip."""
-    horizon = start + datetime.timedelta(days=90)
-    travel = set(calendar_sync.travel_days_between(db, user_id, start, horizon))
-    day = start
-    out: list[list[datetime.date]] = []
-    for meal in meals:
-        while day in travel:
-            day += datetime.timedelta(days=1)
-        span = [day]
-        while len(span) < meal.dinners:
-            nxt = span[-1] + datetime.timedelta(days=1)
-            if nxt in travel:
-                break  # the rest of the batch would wait out a trip: cut here
-            span.append(nxt)
-        out.append(span)
-        day = span[-1] + datetime.timedelta(days=1)
-    return out
+    return plan_layout.consecutive_spans(db, user_id, start, [m.dinners for m in meals])
 
 
 def import_plan(

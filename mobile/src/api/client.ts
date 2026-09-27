@@ -780,6 +780,10 @@ export function swipeCard(cycleId: number, input: { recipe_id: number; decision:
 export function buildPlan(cycleId: number): Promise<FoodPlan> {
   return request(`/api/v1/food/cycles/${cycleId}/plan`, { method: 'POST' });
 }
+/** Eat the batches in this order: dates follow; cooked or started ones stay put. */
+export function reorderPlan(cycleId: number, mealIds: number[]): Promise<FoodPlan> {
+  return request(`/api/v1/food/cycles/${cycleId}/reorder`, { method: 'POST', body: JSON.stringify({ meal_ids: mealIds }) });
+}
 export function getPlan(cycleId: number): Promise<FoodPlan> {
   return request(`/api/v1/food/cycles/${cycleId}/plan`);
 }
