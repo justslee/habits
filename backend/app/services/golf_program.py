@@ -9,6 +9,11 @@ The program as data plus the rules that turn it into a day's prescription:
   * a week planner that lays sessions onto days around travel, keeping lower-body
     sessions 48 h apart and never adding catch-up work
   * double progression within the phase's rep range, driven by what was logged
+  * a half-marathon block when a race is on the calendar (§12): ten build weeks of three runs
+    plus two lifting sessions, a taper, race week and a recovery week; golf resumes after it
+  * adapting to what you log (§13): the long run builds from the runs you logged, a run that
+    felt harder than planned is repeated, the first week back after time off is easier, and
+    Session 2's golf rotation steps aside while the running is taking it out of you
 
 No medicine-ball throws or tosses anywhere. 70-minute hard cap per session.
 """
@@ -18,7 +23,7 @@ from __future__ import annotations
 import datetime
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 PROGRAM_START = datetime.date(2026, 9, 12)
 FIRST_EVENT_DEFAULT = datetime.date(
@@ -575,11 +580,40 @@ class Phase:
     run_note: str
     notes: str = ""
     strength_focus: str = ""
+    race: bool = (
+        False  # the half-marathon block: runs are their own days, S2 drops its run
+    )
 
 
-def phases(first_event: datetime.date) -> list[Phase]:
+@dataclass(frozen=True)
+class Race:
+    """A race the plan builds toward (a golf_events row of kind "race")."""
+
+    date: datetime.date
+    name: str = "Half marathon"
+    miles: float = 13.1
+    notes: str | None = None  # where, and the goal ("finish strong, by effort")
+
+
+def race_window(race: Race) -> dict[str, datetime.date]:
+    """The block around a race: ten build weeks, a taper week, race week, a recovery week."""
+    rw = week_start(race.date)
+    return {
+        "build": rw - datetime.timedelta(weeks=10),
+        "taper": rw - datetime.timedelta(weeks=1),
+        "week": rw,
+        "recover": race.date + datetime.timedelta(days=1),
+        "end": rw + datetime.timedelta(days=13),  # the Sunday after race week
+    }
+
+
+def _md(d: datetime.date) -> str:
+    return f"{d:%b} {d.day}"
+
+
+def phases(first_event: datetime.date, race: Race | None = None) -> list[Phase]:
     pre_start = first_event - datetime.timedelta(weeks=5)
-    return [
+    standard = [
         Phase(
             "baseline",
             "Establish technique and baseline",
@@ -672,15 +706,118 @@ def phases(first_event: datetime.date) -> list[Phase]:
             "Two short strength sessions weekly (2 × 3–5 main, 1–2 accessory sets). One short power session; fourth session is easy cardio and mobility.",
         ),
     ]
+    if race is None:
+        return standard
+    baseline, build, strength, _consolidate, golf_power, pre_event, in_season = standard
+    w = race_window(race)
+    back = w["end"] + DAY  # the Monday after the recovery week
+    rebuild = back + datetime.timedelta(weeks=1)
+    power = rebuild + datetime.timedelta(weeks=3)
+    cut = sorted(w["week"] - datetime.timedelta(weeks=k) for k in RACE_CUTBACKS)
+    longs = [wk["L"].miles for _, wk in sorted(RACE_BUILD.items(), reverse=True)]
+    peak_wtr = max(RACE_BUILD, key=lambda k: (RACE_BUILD[k]["L"].miles, -k))
+    peak = (
+        w["week"]
+        - datetime.timedelta(weeks=peak_wtr)
+        + datetime.timedelta(days=_day_of("L"))
+    )
+    last_long = RACE_TEMPLATE[-11]
+    out = [
+        replace(baseline, end=min(baseline.end, w["build"] - DAY)),
+        replace(build, end=w["build"] - DAY),
+        Phase(
+            "race_build",
+            f"{race.name} build",
+            w["build"],
+            w["taper"] - DAY,
+            3,
+            None,
+            2,
+            2,
+            "7",
+            "Three runs a week, by effort rather than pace: easy (Tue), quality (Wed: steady, tempo, hills or "
+            f"race effort) and long (Sat), the long run building from {longs[0]:g} to {max(longs):g} miles "
+            f"(the longest on {_md(peak)}). Cutback weeks {_md(cut[0])} and {_md(cut[1])}. "
+            "It adapts to what you log: the long run is never more than a mile past your longest run of the "
+            "last three weeks, and a run that felt harder than planned is repeated. "
+            "The Session 5 switch keeps or drops the easy run.",
+            "Two lifting days hold your golf strength while the running builds: Session 1 (Mon, lower body and "
+            "core, plus calf raises) and Session 2 (Thu, rotational power, upper body and 10 minutes of golf "
+            "rotation, no run block). Main lift 3 sets, accessories 2, power 2, finishing with 2–3 reps left "
+            "(RPE 7). The golf rotation steps aside in a week a run felt hard. Heavy legs? Cut lifting sets, "
+            "never the long run.",
+            race=True,
+        ),
+        Phase(
+            "race_taper",
+            "Taper and race",
+            w["taper"],
+            race.date,
+            2,
+            None,
+            1,
+            2,
+            "6–7",
+            "Running drops by about a third, then by half; short race-effort pieces keep the legs sharp. "
+            f"The last longer run ({last_long.miles:g} mi) is 11 days out. Travelling far? Run easy once you "
+            "land, outside in daylight, until the jet lag settles.",
+            "One short Session 1 as the taper starts: 2 sets, familiar loads. No heavy lower-body work in the "
+            "last 10 days; the mobility routine every day.",
+            race=True,
+        ),
+        Phase(
+            "race_recover",
+            "Recover",
+            w["recover"],
+            w["end"],
+            2,
+            "6–8",
+            1,
+            1,
+            "6",
+            "Walk the day after. An easy 20 minutes from day 3 only if your legs feel normal; the first real "
+            "run back a week after the race.",
+            "No lifting this week: walks, the mobility routine and sleep. Golf is fine once walking feels normal.",
+            race=True,
+        ),
+        Phase(
+            "return",
+            "Back to the full programme",
+            back,
+            rebuild - DAY,
+            3,
+            None,
+            2,
+            2,
+            "7",
+            "Session 2 restarts at 4 × 1 min hard inside its 18 minutes; Session 5 is a 30-minute easy run.",
+            "All five sessions again: one week at 3 main-lift sets and RPE 7, with the loads you used in "
+            "December, before the full doses.",
+        ),
+        replace(
+            strength,
+            name="Rebuild strength",
+            start=rebuild,
+            end=power - DAY,
+            run_note="Work back to the full 6-interval run. Optional easy run 30–40 min keeps the "
+            "half-marathon engine running.",
+        ),
+        replace(golf_power, start=power),
+        pre_event,
+        in_season,
+    ]
+    return [p for p in out if p.start <= p.end]
 
 
 def phase_for(
-    d: datetime.date, first_event: datetime.date = FIRST_EVENT_DEFAULT
+    d: datetime.date,
+    first_event: datetime.date = FIRST_EVENT_DEFAULT,
+    race: Race | None = None,
 ) -> Phase:
-    for p in phases(first_event):
+    ps = phases(first_event, race)
+    for p in ps:
         if p.start <= d <= p.end:
             return p
-    ps = phases(first_event)
     return ps[0] if d < ps[0].start else ps[-1]
 
 
@@ -693,9 +830,60 @@ def week_start(d: datetime.date) -> datetime.date:
     return d - datetime.timedelta(days=d.weekday())
 
 
-def is_lighter_week(d: datetime.date, extra: list[datetime.date] | None = None) -> bool:
+def lighter_weeks(race: Race | None = None) -> list[datetime.date]:
+    """The lighter-week calendar. A race replaces the ones inside its block with its own cutback
+    weeks, and its recovery week counts as one."""
+    if race is None:
+        return list(LIGHTER_WEEKS)
+    w = race_window(race)
+    kept = {d for d in LIGHTER_WEEKS if not (w["build"] <= d <= w["end"])}
+    cut = {w["week"] - datetime.timedelta(weeks=k) for k in RACE_CUTBACKS}
+    return sorted(kept | cut | {w["week"] + datetime.timedelta(weeks=1)})
+
+
+def is_lighter_week(
+    d: datetime.date,
+    extra: list[datetime.date] | None = None,
+    race: Race | None = None,
+) -> bool:
     ws = week_start(d)
-    return ws in LIGHTER_WEEKS or ws in {week_start(x) for x in (extra or [])}
+    return ws in lighter_weeks(race) or ws in {week_start(x) for x in (extra or [])}
+
+
+def race_week_kind(d: datetime.date, race: Race | None) -> str | None:
+    """taper | race | recovery for the three weeks around a race that follow a day-by-day template."""
+    if race is None:
+        return None
+    w = race_window(race)
+    ws = week_start(d)
+    if ws == w["taper"]:
+        return "taper"
+    if ws == w["week"]:
+        return "race"
+    if ws == w["week"] + datetime.timedelta(weeks=1):
+        return "recovery"
+    return None
+
+
+def in_race_build(d: datetime.date, race: Race | None) -> bool:
+    if race is None:
+        return False
+    w = race_window(race)
+    return w["build"] <= week_start(d) < w["taper"]
+
+
+def week_kind(
+    d: datetime.date,
+    *,
+    race: Race | None = None,
+    tournaments: list[datetime.date] | None = None,
+    extra_lighter: list[datetime.date] | None = None,
+) -> str:
+    return (
+        race_week_kind(d, race)
+        or ("lighter" if is_lighter_week(d, extra_lighter, race) else None)
+        or ("tournament" if tournament_in_week(d, tournaments or []) else "normal")
+    )
 
 
 def rotation_week(d: datetime.date) -> str:
@@ -746,6 +934,643 @@ TOURNAMENT_TEMPLATE = {  # offset from the event day → prescription
     0: ("T-event", "Tournament", []),
     1: ("T-event", "Tournament or golf; no catch-up gym work", []),
 }
+
+
+# ---------------------------------------------------------------------------
+# Half-marathon block: the runs (docs/TRAINING-GOLF.md §12). By effort, not pace.
+# ---------------------------------------------------------------------------
+
+DAY = datetime.timedelta(days=1)
+EASY_PACE = 630  # sec/mile until easy runs are logged; it only sets a long run's expected minutes
+RACE_WEEK = {0: "S1", 1: "E", 2: "Q", 3: "S2", 5: "L"}  # Mon Tue Wed Thu Sat
+RACE_PRIORITY = ["L", "Q", "S1", "E", "S2"]  # what survives a week with lost days
+RUN_IDS = ("E", "Q", "L")
+HARD_RUNS = {"Q", "L"}  # kept 48 h apart, like the lower-body sessions
+RACE_CUTBACKS = (7, 3)  # weeks before race week that cut back (lighter weeks)
+SWAPPABLE = ["S1", "S2", "S3", "S4", "S5", *RUN_IDS]
+RUN_NAMES = {"E": "the easy run", "Q": "the quality run", "L": "the long run"}
+CALF_RAISE = ex(
+    "Single-leg calf raise",
+    2,
+    "12–15",
+    "accessory",
+    per_side=True,
+    notes="Slow, with a pause at the top: calves and Achilles carry the running",
+)
+# Session 2's add-on in the build weeks, from the paused Sessions 3 and 4: rotation is what the
+# golf season needs most, and it costs the legs almost nothing. It steps aside in a week your
+# running is taking it out of you (golf_rotation_off).
+GOLF_ROTATION = {
+    "name": "Golf rotation",
+    "minutes": 10,
+    "exercises": [
+        {
+            "rotation": {
+                "A": ex(
+                    "Landmine rotational press",
+                    2,
+                    "4",
+                    "power",
+                    per_side=True,
+                    rest="60 s",
+                ),
+                "B": ex(
+                    "Split-stance cable rotational punch",
+                    2,
+                    "4",
+                    "power",
+                    per_side=True,
+                    rest="60 s",
+                ),
+            }
+        },
+        ex(
+            "Cable chop",
+            2,
+            "8",
+            "core",
+            per_side=True,
+            pair="G",
+            notes="Controlled rotation; don't chase speed",
+        ),
+        ex(
+            "Side plank",
+            2,
+            "30–45 sec",
+            "core",
+            per_side=True,
+            pair="G",
+            notes="End when position deteriorates",
+        ),
+    ],
+}
+WARM = (
+    "Racing somewhere warmer than home? Run this one on a treadmill or a layer heavier than "
+    "usual to start adapting."
+)
+
+
+RACE_TITLES = {"S2": "Rotational power and upper body"}  # S2 without its run block
+
+
+def _day_of(sid: str) -> int:
+    return next(k for k, v in RACE_WEEK.items() if v == sid)
+
+
+def session_title(sid: str, race_phase: bool = False) -> str:
+    return (RACE_TITLES.get(sid) if race_phase else None) or SESSIONS[sid]["title"]
+
+
+def session_name(sid: str | None) -> str:
+    return RUN_NAMES.get(sid or "", sid or "rest")
+
+
+@dataclass(frozen=True)
+class RunSpec:
+    kind: str  # E easy | Q quality | L long | RACE
+    title: str
+    minutes: int | None = None  # time-based runs
+    miles: float | None = None  # distance-based runs
+    intensity: str = "easy"  # easy | moderate | hard: what the run logger understands
+    structure: str = ""
+    blocks: tuple = ()  # ((block, minutes, ((what, sets, reps, notes), ...)), ...)
+    notes: tuple[str, ...] = ()
+
+
+EFFORT = {  # key → (row label, phrase inside a structure line)
+    "steady": ("Steady · RPE 5–6", "steady (RPE 5–6: short sentences only)"),
+    "tempo": (
+        "Comfortably hard · RPE 6–7",
+        "comfortably hard (RPE 6–7: a few words at a time)",
+    ),
+    "race": (
+        "Half-marathon effort · RPE 6",
+        "at half-marathon effort (RPE 6: strong but sustainable)",
+    ),
+}
+
+
+def _with_note(s: str, note: str | None) -> str:
+    return f"{s} {note}" if note else s
+
+
+def _easy_rows(minutes: int) -> tuple:
+    return (("Easy running", 1, f"{minutes} min", "Conversational"),)
+
+
+def _easy(minutes: int, *, strides: int = 0, note: str | None = None) -> RunSpec:
+    s = f"{minutes} min easy and conversational (RPE 3–4)" + (
+        f", then {strides} × 20 s strides: quick and relaxed, walking back between."
+        if strides
+        else ". Slow down or walk if you can't talk in full sentences."
+    )
+    return RunSpec("E", "Easy run", minutes=minutes, structure=_with_note(s, note))
+
+
+def _long(miles: float, *, fuel: bool = False, note: str | None = None) -> RunSpec:
+    s = f"{miles:g} miles easy (RPE 3–5): time on your feet, not pace. Walk breaks are fine."
+    if fuel:
+        s += " Practise race fuel: a gel, chews or sports drink about every 40 min, plus water."
+    return RunSpec("L", "Long run", miles=miles, structure=_with_note(s, note))
+
+
+def _steady(
+    easy: int, steady: int, *, cool: int = 0, title: str = "Steady run"
+) -> RunSpec:
+    label, phrase = EFFORT["steady"]
+    s = f"{easy} min easy · {steady} min {phrase}" + (
+        f" · {cool} min easy" if cool else ""
+    )
+    blocks = [
+        ("Easy", easy, _easy_rows(easy)),
+        (
+            "Steady",
+            steady,
+            ((label, 1, f"{steady} min", "Hold it even; don't race it"),),
+        ),
+    ]
+    if cool:
+        blocks.append(("Cool-down", cool, _easy_rows(cool)))
+    return RunSpec(
+        "Q",
+        title,
+        minutes=easy + steady + cool,
+        intensity="moderate",
+        structure=s,
+        blocks=tuple(blocks),
+    )
+
+
+def _reps(
+    title: str,
+    sets: int,
+    rep: int,
+    effort: str,
+    jog: int,
+    *,
+    warm: int = 10,
+    cool: int = 10,
+) -> RunSpec:
+    label, phrase = EFFORT[effort]
+    work = sets * rep + (sets - 1) * jog
+    s = f"{warm} min easy · {sets} × {rep} min {phrase}, {jog} min easy jog between · {cool} min easy"
+    blocks = (
+        ("Warm-up", warm, _easy_rows(warm)),
+        (title, work, ((label, sets, f"{rep} min", f"{jog} min easy jog between"),)),
+        ("Cool-down", cool, _easy_rows(cool)),
+    )
+    return RunSpec(
+        "Q",
+        title,
+        minutes=warm + work + cool,
+        intensity="moderate",
+        structure=s,
+        blocks=blocks,
+    )
+
+
+def _hills(sets: int, *, warm: int = 10, cool: int = 10) -> RunSpec:
+    work = math.ceil(sets * 2.5)
+    s = (
+        f"{warm} min easy to a hill · {sets} × 60 s strong uphill (RPE 7–8), walk or jog back "
+        f"down · {cool} min easy. No hill nearby? A treadmill at 5–6 % incline works."
+    )
+    blocks = (
+        ("Warm-up", warm, _easy_rows(warm)),
+        (
+            "Hills",
+            work,
+            (
+                (
+                    "Strong uphill · RPE 7–8",
+                    sets,
+                    "60 sec",
+                    "Tall, quick feet; walk or jog back down",
+                ),
+            ),
+        ),
+        ("Cool-down", cool, _easy_rows(cool)),
+    )
+    return RunSpec(
+        "Q",
+        "Hill repeats",
+        minutes=warm + work + cool,
+        intensity="hard",
+        structure=s,
+        blocks=blocks,
+    )
+
+
+def _fartlek(minutes: int, sets: int) -> RunSpec:
+    s = (
+        f"{minutes} min easy; after the first 10, run {sets} × 1 min a little quicker "
+        "(RPE 6–7) with easy running between."
+    )
+    blocks = (
+        ("Warm-up", 10, _easy_rows(10)),
+        (
+            "Fartlek",
+            minutes - 10,
+            (
+                (
+                    "A little quicker · RPE 6–7",
+                    sets,
+                    "1 min",
+                    "Easy running between, as long as you need",
+                ),
+            ),
+        ),
+    )
+    return RunSpec(
+        "Q",
+        "Fartlek",
+        minutes=minutes,
+        intensity="moderate",
+        structure=s,
+        blocks=blocks,
+    )
+
+
+# Weeks before race week → that week's three runs. The long run starts where the owner was in
+# October 2026 (one or two runs a week) and peaks at 11 miles two weeks out; weeks 7 and 3 cut back.
+RACE_BUILD: dict[int, dict[str, RunSpec]] = {
+    10: {"E": _easy(30), "Q": _steady(20, 10, title="Steady finish"), "L": _long(5)},
+    9: {"E": _easy(30), "Q": _reps("Tempo run", 3, 5, "tempo", 2), "L": _long(6)},
+    8: {"E": _easy(35, strides=4), "Q": _hills(6), "L": _long(7)},
+    7: {
+        "E": _easy(30),
+        "Q": _fartlek(30, 6),
+        "L": _long(5, note="Cutback week: lighter on purpose."),
+    },
+    6: {
+        "E": _easy(35, strides=6),
+        "Q": _reps("Tempo run", 3, 8, "tempo", 2),
+        "L": _long(8, fuel=True),
+    },
+    5: {
+        "E": _easy(40, strides=6),
+        "Q": _hills(8),
+        "L": _long(
+            9, fuel=True, note="Run the last mile steady (RPE 5–6) if it feels good."
+        ),
+    },
+    4: {
+        "E": _easy(40, strides=6, note=WARM),
+        "Q": _reps("Tempo run", 2, 12, "tempo", 3),
+        "L": _long(10, fuel=True),
+    },
+    3: {
+        "E": _easy(30, note=WARM),
+        "Q": _steady(10, 15, cool=5),
+        "L": _long(7, note="Cutback week before the longest run."),
+    },
+    2: {
+        "E": _easy(40, strides=6, note=WARM),
+        "Q": _reps("Race-effort run", 3, 10, "race", 2, cool=5),
+        "L": _long(
+            11,
+            fuel=True,
+            note="The longest run of the block. Feeling good? Run miles 9–10 at race effort, "
+            "then an easy last mile.",
+        ),
+    },
+}
+
+# Days from race day → the day, for the taper week, race week and recovery week. Days not listed
+# rest (before the race) or carry a walk and the mobility routine (after it).
+RACE_TEMPLATE: dict[int, RunSpec | str] = {
+    -13: "S1",
+    -12: _reps("Race-effort run", 2, 8, "race", 2),
+    -11: _long(6, note="The last longer run before race week."),
+    -8: _easy(
+        25,
+        note="Just landed after a long flight? Run outside in daylight: it resets the body clock faster.",
+    ),
+    -7: _easy(35),
+    -5: _reps("Race-effort run", 3, 4, "race", 2, cool=5),
+    -4: _easy(30),
+    -3: _easy(25, strides=4),
+    -1: RunSpec(
+        "E",
+        "Shakeout",
+        minutes=15,
+        structure="15 min very easy, then 3 × 20 s strides. Lay out your kit, eat a familiar "
+        "dinner, feet up.",
+    ),
+    0: "RACE",
+    3: _easy(20, note="Only if your legs feel normal; a walk counts just as much."),
+    7: _easy(25, note="The first run back: short and easy."),
+}
+RECOVERY_DAYS = (1, 2, 4, 5, 6)  # after the race: a walk and the mobility routine
+
+
+def race_day_spec(
+    race: Race, easy_pace: int = EASY_PACE, history: History | None = None
+) -> RunSpec:
+    """Race day by effort: start easy, settle into race effort, finish with what's left. If the
+    longest run you logged in the last six weeks fell short of 9 miles, walk breaks come in."""
+    s = (
+        "Start slower than feels right: miles 1–3 easy (RPE 5). Settle into race effort (RPE 6) "
+        "through mile 10, then use whatever is left. Sip at every aid station, and take a gel or "
+        "chews about every 40 min, as practised. Warm and humid? Start easier still and pour "
+        "water over your head."
+    )
+    longest = (
+        max(
+            (r.miles for r in history.runs_between(race.date - 42 * DAY, race.date)),
+            default=None,
+        )
+        if history
+        else None
+    )
+    if longest is not None and longest < 9:
+        s = (
+            f"Your longest run in the last six weeks was {longest:g} miles, so walk a minute at "
+            f"every mile marker from mile {max(1, math.floor(longest) - 3)}: walking early is how "
+            "you finish strong. " + s
+        )
+    minutes = round(race.miles * (easy_pace - 30) / 60)
+    blocks = (
+        (
+            "Warm-up",
+            8,
+            (
+                (
+                    "Easy jog",
+                    1,
+                    "5 min",
+                    "Then leg swings 10/side and 2 relaxed strides",
+                ),
+            ),
+        ),
+        (
+            "The race",
+            minutes,
+            (
+                (
+                    "Miles 1–3 · easy, RPE 5",
+                    1,
+                    "3 mi",
+                    "Let people go; you'll see them again",
+                ),
+                (
+                    "Miles 4–10 · race effort, RPE 6",
+                    1,
+                    "7 mi",
+                    "Strong but sustainable: a few words at a time",
+                ),
+                (
+                    f"Miles 11–{race.miles:g} · what's left",
+                    1,
+                    f"{race.miles - 10:g} mi",
+                    "Finish strong",
+                ),
+            ),
+        ),
+    )
+    return RunSpec(
+        "RACE",
+        race.name,
+        minutes=minutes,
+        miles=race.miles,
+        intensity="hard",
+        structure=s,
+        blocks=blocks,
+        notes=(
+            "Nothing new on race day: shoes, kit, breakfast and fuel you have already run in.",
+            "Afterwards: walk 10 minutes, drink, and eat within the hour.",
+        ),
+    )
+
+
+def run_label(spec: RunSpec) -> str:
+    return (
+        f"{spec.title} · {spec.miles:g} mi"
+        if spec.miles
+        else f"{spec.title} · {spec.minutes} min"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Adapting to what you log (docs/TRAINING-GOLF.md §13). Without a history the plan runs as
+# written. With one, the long run builds from the runs you logged, a run that felt harder than
+# planned is repeated, the first week back after time off is easier, and Session 2's golf
+# rotation steps aside while the running is taking it out of you.
+# ---------------------------------------------------------------------------
+
+GAP_DAYS = 10  # this many days with nothing logged, and the week after it eases back in
+LOOKBACK = datetime.timedelta(
+    days=21
+)  # "your longest recent run" looks back three weeks
+LONG_STEP = 1.0  # the long run is at most a mile past your longest recent run...
+CATCH_UP_STEP = (
+    1.5  # ...or 1.5 when it's 2+ miles behind the plan and that run felt easy
+)
+FIRST_LONG = 4.0  # the long run when no run has been logged for three weeks
+TOO_HARD = {"easy": 8, "moderate": 8, "hard": 9}  # a logged RPE harder than planned
+
+
+@dataclass(frozen=True)
+class LoggedRun:
+    date: datetime.date
+    miles: float
+    rpe: int | None = None
+    intensity: str = "easy"  # easy | moderate | hard, as the run logger records it
+
+
+@dataclass(frozen=True)
+class History:
+    """What you've logged: runs, and the days you lifted (a session finished or with sets in it)."""
+
+    runs: tuple[LoggedRun, ...] = ()
+    lifted: tuple[datetime.date, ...] = ()
+
+    def trained_before(self, d: datetime.date) -> list[datetime.date]:
+        return sorted(
+            {x for x in self.lifted if x < d}
+            | {r.date for r in self.runs if r.date < d}
+        )
+
+    def runs_between(self, start: datetime.date, end: datetime.date) -> list[LoggedRun]:
+        return sorted(
+            (r for r in self.runs if start <= r.date < end), key=lambda r: r.date
+        )
+
+
+def _too_hard(run: LoggedRun) -> bool:
+    return (run.rpe or 0) >= TOO_HARD.get(run.intensity, 8)
+
+
+def _half_down(miles: float) -> float:
+    return math.floor(miles * 2) / 2
+
+
+def _build_week(race: Race, d: datetime.date) -> int:
+    """Weeks from d's week to race week."""
+    return (race_window(race)["week"] - week_start(d)).days // 7
+
+
+def days_off_before(d: datetime.date, history: History | None) -> int | None:
+    """How many days you were off, when d is in your first week back after GAP_DAYS or more
+    with nothing logged; otherwise None. Nothing logged at all is a fresh start, not a comeback."""
+    if history is None:
+        return None
+    seq = [*history.trained_before(d), d]
+    for prev, nxt in zip(reversed(seq[:-1]), reversed(seq[1:])):
+        if (d - nxt).days >= 7:
+            break
+        if (nxt - prev).days - 1 >= GAP_DAYS:
+            return (nxt - prev).days - 1
+    return None
+
+
+def long_run_miles(
+    race: Race, d: datetime.date, history: History | None
+) -> tuple[float, str | None]:
+    """A build week's long run in miles, and why when it isn't the plan's. The plan's distance is
+    the ceiling; your longest run of the last three weeks sets how close you get to it."""
+    ws, wtr = week_start(d), _build_week(race, d)
+    plan = RACE_BUILD[wtr]["L"].miles
+    if history is None or not (history.runs or history.lifted):
+        return plan, None
+    recent = history.runs_between(ws - LOOKBACK, ws)
+    if not recent:
+        miles, why = FIRST_LONG, "no runs logged in three weeks"
+    else:
+        longest = max(recent, key=lambda r: r.miles)
+        last = max(
+            history.runs_between(ws - 7 * DAY, ws), key=lambda r: r.miles, default=None
+        )
+        if last and last.miles < 0.75 * longest.miles:
+            last = None  # last week had no long run in it
+        if wtr in RACE_CUTBACKS:
+            miles, why = (
+                0.75 * longest.miles,
+                f"a cutback from your {longest.miles:g} mi",
+            )
+        elif last and _too_hard(last):
+            miles, why = (
+                last.miles,
+                f"a repeat: the last long run felt hard, RPE {last.rpe}",
+            )
+        elif days_off_before(d, history) is not None:
+            miles, why = longest.miles, "first week back, so no step up"
+        else:
+            behind = plan - longest.miles >= 2 and (longest.rpe or 10) <= 5
+            step = CATCH_UP_STEP if behind else LONG_STEP
+            miles, why = (
+                longest.miles + step,
+                f"{step:g} mi past your longest recent run",
+            )
+    miles = max(3.0, min(plan, _half_down(miles)))
+    return miles, None if miles == plan else f"{why} (plan: {plan:g} mi)"
+
+
+def quality_run(
+    race: Race, d: datetime.date, history: History | None
+) -> tuple[RunSpec, str | None]:
+    """A build week's quality run, and why when it isn't the plan's: easy running in your first
+    week back, last week's session again when the last one felt harder than planned."""
+    ws, wtr = week_start(d), _build_week(race, d)
+    spec = RACE_BUILD[wtr]["Q"]
+    if history is None:
+        return spec, None
+    off = days_off_before(d, history)
+    if off is not None:
+        return (
+            _easy(min(30, spec.minutes or 30), strides=4),
+            f"first week back after {off} days off: easy, no hard running",
+        )
+    hard = [r for r in history.runs_between(ws - 10 * DAY, ws) if r.intensity != "easy"]
+    if (
+        hard
+        and _too_hard(hard[-1])
+        and wtr not in RACE_CUTBACKS
+        and wtr + 1 in RACE_BUILD
+    ):
+        return (
+            RACE_BUILD[wtr + 1]["Q"],
+            f"a repeat: the last quality run felt hard, RPE {hard[-1].rpe}",
+        )
+    return spec, None
+
+
+def build_run(
+    race: Race, d: datetime.date, sid: str | None, history: History | None = None
+) -> tuple[RunSpec | None, str | None]:
+    """A build-week run adapted to your log, and why when it isn't the plan's."""
+    spec = RACE_BUILD.get(_build_week(race, d), {}).get(sid or "")
+    if spec is None:
+        return None, None
+    if sid == "Q":
+        return quality_run(race, d, history)
+    if sid == "L":
+        miles, why = long_run_miles(race, d, history)
+        if miles != spec.miles:
+            spec = replace(
+                spec,
+                miles=miles,
+                structure=spec.structure.replace(
+                    f"{spec.miles:g} miles", f"{miles:g} miles", 1
+                ),
+            )
+        return spec, why
+    return spec, None
+
+
+def golf_rotation_off(d: datetime.date, history: History | None) -> str | None:
+    """Why Session 2 leaves out its golf rotation on d, or None when it's in: your first week
+    back, or a run in the last seven days that felt harder than planned."""
+    if history is None:
+        return None
+    if days_off_before(d, history) is not None:
+        return "first week back"
+    hard = [r for r in history.runs_between(d - 7 * DAY, d) if _too_hard(r)]
+    return f"{hard[-1].date:%a}'s run felt hard, RPE {hard[-1].rpe}" if hard else None
+
+
+def ease_in(e: dict, *, sets: bool = True) -> dict:
+    """An exercise in your first week back: 2 sets at most, RPE 6–7 and about 10 % lighter. A
+    lighter week has already trimmed the sets, so then only the effort and the load change."""
+    e = dict(e)
+    if sets:
+        e["sets"] = min(e["sets"], 2)
+    e["rpe"] = "6–7"
+    if e.get("load"):
+        step = 2.5 if e["load"] < 40 else 5.0
+        e["load"] = max(step, round(e["load"] * 0.9 / step) * step)
+        e["load_note"] = "about 10 % lighter for your first week back"
+    return e
+
+
+def _planned(
+    d: datetime.date,
+    detail: dict,
+    race: Race | None,
+    easy_pace: int = EASY_PACE,
+    history: History | None = None,
+) -> tuple[RunSpec | None, str | None]:
+    if race is None:
+        return None, None
+    if detail.get("run") == "RACE":
+        return race_day_spec(race, easy_pace, history), None
+    off = detail.get("offset")
+    if off is not None:
+        spec = RACE_TEMPLATE.get(off)
+        return (spec if isinstance(spec, RunSpec) else None), None
+    return build_run(race, d, detail.get("run"), history)
+
+
+def planned_spec(
+    d: datetime.date,
+    detail: dict,
+    race: Race | None,
+    easy_pace: int = EASY_PACE,
+    history: History | None = None,
+) -> RunSpec | None:
+    """The run a planned day carries: the build table by week (adapted to your log), the
+    template by day from the race."""
+    return _planned(d, detail, race, easy_pace, history)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -802,6 +1627,110 @@ def _big_run(pin: dict) -> bool:
     )
 
 
+def _moved_onto(d: datetime.date, pin: dict, race: Race) -> DayPlan:
+    """A session you swapped or moved onto a day of the race template."""
+    sid = pin["session"]
+    if sid in SESSIONS:
+        return DayPlan(
+            d,
+            sid,
+            session_title(sid, True),
+            note="your change",
+            adjusted=pin["kind"],
+            detail=pin,
+        )
+    src = pin.get("from_date")
+    off = (datetime.date.fromisoformat(src) - race.date).days if src else None
+    if off is None or not isinstance(RACE_TEMPLATE.get(off), RunSpec):
+        # swapped in without a source day: this week's run of that kind
+        off = next(
+            (
+                o
+                for o, t in sorted(RACE_TEMPLATE.items())
+                if isinstance(t, RunSpec)
+                and t.kind == sid
+                and week_start(race.date + datetime.timedelta(days=o)) == week_start(d)
+            ),
+            None,
+        )
+    spec = RACE_TEMPLATE.get(off) if off is not None else None
+    if not isinstance(spec, RunSpec):
+        return DayPlan(d, None, "Rest or golf")
+    return DayPlan(
+        d,
+        "RUN",
+        run_label(spec),
+        note="your change",
+        adjusted=pin["kind"],
+        detail={**pin, "planned": True, "run": sid, "offset": off},
+    )
+
+
+def _race_week(
+    ws: datetime.date,
+    race: Race,
+    *,
+    travel_days: set[datetime.date],
+    pins: dict[datetime.date, dict],
+) -> list[DayPlan]:
+    """Taper week, race week and recovery week: a day-by-day template around race day. Travel
+    days carry mobility (race day stays); your changes take their day, nothing is relocated."""
+    out = []
+    for d in (ws + datetime.timedelta(days=i) for i in range(7)):
+        off = (d - race.date).days
+        pin = pins.get(d)
+        travel = d in travel_days
+        pp = _pin_plan(d, pin, travel) if pin else None
+        if pp:
+            out.append(pp)
+            continue
+        if (
+            pin
+            and pin.get("kind") in ("swap", "move")
+            and pin.get("session") in SWAPPABLE
+            and not travel
+        ):
+            out.append(_moved_onto(d, pin, race))
+            continue
+        tpl = RACE_TEMPLATE.get(off)
+        if travel and off != 0:
+            dp = DayPlan(d, "MOB", "Travel · 8-min mobility", travel=True)
+        elif tpl == "RACE":
+            dp = DayPlan(
+                d,
+                "RUN",
+                f"Race day · {race.name}",
+                travel=travel,
+                detail={"planned": True, "run": "RACE"},
+            )
+        elif tpl == "S1":
+            dp = DayPlan(
+                d,
+                "S1",
+                SESSIONS["S1"]["title"],
+                note="short and familiar: the last lifting before the race",
+            )
+        elif isinstance(tpl, RunSpec):
+            dp = DayPlan(
+                d,
+                "RUN",
+                run_label(tpl),
+                detail={"planned": True, "run": tpl.kind, "offset": off},
+            )
+        elif off in RECOVERY_DAYS:
+            dp = DayPlan(d, "MOB", "Recovery · walk and mobility")
+        else:
+            dp = DayPlan(d, None, "Rest · mobility" if off < 0 else "Rest or golf")
+        if pin and pin.get("kind") == "shorten" and dp.session not in (None, "MOB"):
+            dp.adjusted = "shorten"
+            dp.detail = {**(dp.detail or {}), **pin}
+            dp.note = (
+                dp.note + " · " if dp.note else ""
+            ) + f"capped at {pin.get('minutes')} min"
+        out.append(dp)
+    return out
+
+
 def plan_week(
     ws: datetime.date,
     *,
@@ -811,6 +1740,8 @@ def plan_week(
     golf_days: set[datetime.date] | None = None,
     pins: dict[datetime.date, dict] | None = None,
     not_before: datetime.date | None = None,
+    race: Race | None = None,
+    history: History | None = None,
 ) -> list[DayPlan]:
     """Lay the week out around travel, tournaments and your own changes (pins).
 
@@ -819,6 +1750,13 @@ def plan_week(
       (lower-body sessions stay 48 h apart; nothing is stacked; nothing moves into the past).
       swap/move put the named session on that day. shorten keeps the session and caps its minutes.
       A run of 3+ miles (or 30+ min) covers the week's running, so Session 5 is dropped that week.
+
+    With a race: its ten build weeks use the race layout (S1 Mon, easy run Tue, quality run Wed,
+    S2 Thu, long run Sat; the quality and long runs stay 48 h apart and the easy run is the
+    optional one), and taper week, race week and recovery week follow the race template.
+
+    With a history (what you've logged), the build runs adapt to it and a day's note says why;
+    so does a session in your first week back and a Session 2 without its golf rotation.
     """
     pins = {
         d: p
@@ -835,14 +1773,21 @@ def plan_week(
             DayPlan(d, None, "Before the programme starts", travel=d in travel_days)
             for d in days
         ]
-    if ws <= PROGRAM_START <= ws + datetime.timedelta(days=6) and PROGRAM_START.weekday() != 0:
+    if (
+        ws <= PROGRAM_START <= ws + datetime.timedelta(days=6)
+        and PROGRAM_START.weekday() != 0
+    ):
         out = []
         for d in days:
             pp = _pin_plan(d, pins[d], d in travel_days) if d in pins else None
             if pp:
                 out.append(pp)
             elif d < PROGRAM_START:
-                out.append(DayPlan(d, None, "Before the programme starts", travel=d in travel_days))
+                out.append(
+                    DayPlan(
+                        d, None, "Before the programme starts", travel=d in travel_days
+                    )
+                )
             elif d in travel_days:
                 # Away days carry mobility only, the same as in any other week.
                 out.append(DayPlan(d, "MOB", "Travel · 8-min mobility", travel=True))
@@ -851,6 +1796,9 @@ def plan_week(
             else:
                 out.append(DayPlan(d, None, "Rest or golf"))
         return out
+
+    if race_week_kind(ws, race):
+        return _race_week(ws, race, travel_days=travel_days, pins=pins)
 
     t = tournament_in_week(ws, tournaments)
     if t is not None:
@@ -870,15 +1818,18 @@ def plan_week(
                 out.append(DayPlan(d, None, "Rest or golf", travel=d in travel_days))
         return out
 
+    building = in_race_build(ws, race)
+    layout = RACE_WEEK if building else DEFAULT_WEEK
+    priority = RACE_PRIORITY if building else PRIORITY
+    optional = "E" if building else "S5"
+    valid = set(SESSIONS) | (set(RUN_IDS) if building else set())
     wanted = [
-        DEFAULT_WEEK[i]
-        for i in sorted(DEFAULT_WEEK)
-        if five_sessions or DEFAULT_WEEK[i] != "S5"
+        layout[i] for i in sorted(layout) if five_sessions or layout[i] != optional
     ]
-    s5_dropped_for_run = False
-    if any(_big_run(p) for p in pins.values()) and "S5" in wanted:
-        wanted.remove("S5")
-        s5_dropped_for_run = True
+    optional_dropped_for_run = False
+    if any(_big_run(p) for p in pins.values()) and optional in wanted:
+        wanted.remove(optional)
+        optional_dropped_for_run = True
 
     # sessions you pinned explicitly (swap / move) take their day first
     assigned: dict[datetime.date, str] = {}
@@ -886,7 +1837,7 @@ def plan_week(
         sid = pin.get("session")
         if (
             pin.get("kind") in ("swap", "move")
-            and sid in SESSIONS
+            and sid in valid
             and d not in travel_days
         ):
             assigned[d] = sid
@@ -897,25 +1848,29 @@ def plan_week(
     }
     free = [d for d in days if d not in blocked]
     # keep the default day when it is free; otherwise move to the nearest free day still unused
-    for wd, sid in DEFAULT_WEEK.items():
+    for wd, sid in layout.items():
         if sid not in wanted or sid in assigned.values():
             continue
         d = ws + datetime.timedelta(days=wd)
         if d in free and d not in assigned:
             assigned[d] = sid
     relocatable = [d for d in free if not_before is None or d >= not_before]
-    for sid in [s for s in PRIORITY if s in wanted and s not in assigned.values()]:
+    for sid in [s for s in priority if s in wanted and s not in assigned.values()]:
         default_d = ws + datetime.timedelta(
-            days=next(k for k, v in DEFAULT_WEEK.items() if v == sid)
+            days=next(k for k, v in layout.items() if v == sid)
         )
         candidates = sorted(
             (d for d in relocatable if d not in assigned),
             key=lambda d: (abs((d - default_d).days), d),
         )
         for d in candidates:
-            # lower-body sessions want 48 h from each other
+            # lower-body sessions want 48 h from each other, and so do the two hard runs
             if sid in LOWER_BODY and any(
                 v in LOWER_BODY and abs((d - dd).days) < 2 for dd, v in assigned.items()
+            ):
+                continue
+            if sid in HARD_RUNS and any(
+                v in HARD_RUNS and abs((d - dd).days) < 2 for dd, v in assigned.items()
             ):
                 continue
             assigned[d] = sid
@@ -931,7 +1886,7 @@ def plan_week(
         elif d in assigned:
             sid = assigned[d]
             pin = pins.get(d)
-            moved = DEFAULT_WEEK.get(d.weekday()) != sid
+            moved = layout.get(d.weekday()) != sid
             note = None
             if pin and pin.get("kind") in ("swap", "move"):
                 note = "your change"
@@ -939,16 +1894,41 @@ def plan_week(
                 note = (
                     "moved around travel" if travel_days else "moved around your change"
                 )
-            dp = DayPlan(d, sid, SESSIONS[sid]["title"], note=note)
+            if sid in RUN_IDS:
+                spec, why = build_run(race, d, sid, history)
+                dp = DayPlan(
+                    d,
+                    "RUN",
+                    run_label(spec),
+                    note=" · ".join(x for x in (note, why) if x) or None,
+                    detail={"planned": True, "run": sid},
+                )
+            else:
+                dp = DayPlan(d, sid, session_title(sid, building), note=note)
+                off = days_off_before(d, history)
+                golf = (
+                    golf_rotation_off(d, history)
+                    if building and sid == "S2" and off is None
+                    else None
+                )
+                why = (
+                    "first week back: 2 sets each, RPE 6–7"
+                    if off is not None and sid != "S5"  # S5 is easy work already
+                    else f"golf rotation off: {golf}"
+                    if golf
+                    else None
+                )
+                if why:
+                    dp.note = (dp.note + " · " if dp.note else "") + why
             if pin and pin.get("kind") == "shorten":
                 dp.adjusted = "shorten"
-                dp.detail = pin
+                dp.detail = {**(dp.detail or {}), **pin}
                 dp.note = (
                     dp.note + " · " if dp.note else ""
                 ) + f"capped at {pin.get('minutes')} min"
             elif pin and pin.get("kind") in ("swap", "move"):
                 dp.adjusted = pin["kind"]
-                dp.detail = pin
+                dp.detail = {**(dp.detail or {}), **pin}
             out.append(dp)
         else:
             out.append(
@@ -972,26 +1952,31 @@ def plan_week(
                 "legs may be heavy after yesterday's run — hold loads, RPE 7"
                 if dp.session in LOWER_BODY
                 else "run block easy 15 min today, no intervals (you ran yesterday)"
-                if dp.session == "S2"
+                if dp.session == "S2" and not building
                 else None
             )
             if extra:
                 dp.note = (dp.note + " · " if dp.note else "") + extra
     notes = []
-    if s5_dropped_for_run:
-        notes.append("Session 5 dropped this week — your run covers it")
+    if optional_dropped_for_run:
+        notes.append(
+            ("The easy run" if building else "Session 5")
+            + " dropped this week — your run covers it"
+        )
     if dropped:
         notes.append(
             "Not enough free days this week — dropped "
-            + ", ".join(dropped)
+            + ", ".join(RUN_NAMES.get(s, s) for s in dropped)
             + " (no catch-up work)"
         )
     if notes:
         note = " · ".join(notes)
-        for dp in out:
-            if dp.session and dp.session.startswith("S"):
-                dp.note = (dp.note + " · " if dp.note else "") + note
-                break
+        target = next(
+            (dp for dp in out if dp.session and dp.session.startswith("S")),
+            next((dp for dp in out if dp.session and dp.session != "MOB"), None),
+        )
+        if target:
+            target.note = (target.note + " · " if target.note else "") + note
     return out
 
 
@@ -1001,10 +1986,11 @@ def run_prescription(
     *,
     first_event: datetime.date = FIRST_EVENT_DEFAULT,
     lighter: bool | None = None,
+    race: Race | None = None,
 ) -> dict:
     """An outdoor run you chose instead of the gym, in the same shape as a session prescription."""
-    phase = phase_for(d, first_event)
-    lighter = is_lighter_week(d) if lighter is None else lighter
+    phase = phase_for(d, first_event, race)
+    lighter = is_lighter_week(d, race=race) if lighter is None else lighter
     miles = pin.get("miles")
     minutes = pin.get("minutes") or (round(miles * 9.5) if miles else 40)
     intensity = pin.get("intensity") or "easy"
@@ -1017,7 +2003,9 @@ def run_prescription(
     title = f"Outdoor run · {miles:g} mi" if miles else f"Outdoor run · {minutes} min"
     rules = [
         "This replaces today's gym session; the session moves to the nearest free day (nothing is stacked).",
-        "It counts as this week's running — Session 5 is dropped and tomorrow's intervals become easy running.",
+        "It counts as this week's easy run, which is dropped. Keep the long run as planned."
+        if in_race_build(d, race)
+        else "It counts as this week's running — Session 5 is dropped and tomorrow's intervals become easy running.",
         "Finish with the 8-minute mobility routine. If legs are heavy tomorrow, hold loads and keep RPE 7.",
     ]
     if lighter:
@@ -1048,6 +2036,114 @@ def run_prescription(
         "rules": rules,
         "estimated_duration_minutes": minutes + 8,
     }
+
+
+def planned_run(
+    d: datetime.date,
+    detail: dict,
+    *,
+    race: Race,
+    first_event: datetime.date = FIRST_EVENT_DEFAULT,
+    lighter: bool | None = None,
+    easy_pace: int = EASY_PACE,
+    history: History | None = None,
+) -> dict | None:
+    """A run from the half-marathon block, in the same shape as a session prescription."""
+    spec, why = _planned(d, detail, race, easy_pace, history)
+    if spec is None:
+        return None
+    phase = phase_for(d, first_event, race)
+    lighter = is_lighter_week(d, race=race) if lighter is None else lighter
+    minutes = spec.minutes or round((spec.miles or 0) * easy_pace / 60)
+    window = (
+        [max(10, round(minutes * 0.9)), round(minutes * 1.1)]
+        if spec.miles
+        else [minutes, minutes + 5]
+    )
+    rules = {
+        "E": [
+            "Easy means easy: if you can't talk in full sentences, slow down or walk."
+        ],
+        "Q": [
+            "By effort, not pace. Stop the hard pieces early if your form falls apart or anything hurts sharply."
+        ],
+        "L": [
+            "Easy and conversational the whole way. Walk breaks are fine; the distance is the point."
+        ],
+        "RACE": [],
+    }[spec.kind] + list(spec.notes)
+    if spec.kind != "RACE":
+        rules.append("Finish with the 8-minute mobility routine.")
+    if why:
+        rules.insert(0, f"Adapted to your log: {why}.")
+    race_day = spec.kind == "RACE"
+    return {
+        "session": "RUN",
+        "run_kind": spec.kind,
+        "title": f"Race day · {spec.title}" if race_day else run_label(spec),
+        "phase": phase.key,
+        "phase_name": phase.name,
+        "phase_notes": phase.notes,
+        "week_kind": race_week_kind(d, race) or ("lighter" if lighter else "normal"),
+        "rotation": rotation_week(d),
+        "target_minutes": window,
+        "budget": f"{spec.miles:g} miles"
+        if race_day
+        else f"Run {minutes} min · mobility 8 min",
+        "warmup": []
+        if spec.blocks
+        else ["Walk 3 min", "Leg swings 10/side", "Start slower than you think"],
+        "blocks": [
+            {
+                "name": name,
+                "minutes": mins,
+                "exercises": [
+                    ex(what, sets, reps, "run", notes=notes)
+                    for what, sets, reps, notes in rows
+                ],
+            }
+            for name, mins, rows in spec.blocks
+        ],
+        "run": {
+            "minutes": minutes,
+            "miles": spec.miles,
+            "intensity": spec.intensity,
+            "structure": spec.structure,
+            "kind": spec.kind,
+        },
+        "mobility": DAILY_MOBILITY,
+        "rules": rules,
+        "estimated_duration_minutes": minutes + (0 if race_day else 8),
+        "adapted": why,
+    }
+
+
+def shorten_run(p: dict, cap: int) -> dict:
+    """Cap a planned run at `cap` minutes: an easy or long run just gets shorter; a quality run
+    keeps its warm-up and fits what it can of the main set. Nothing is made up later."""
+    import copy
+
+    p = copy.deepcopy(p)
+    run = p["run"]
+    if (run.get("minutes") or 0) <= cap:
+        return p
+    if run.get("kind") == "Q":
+        run["structure"] = (
+            f"Capped at {cap} min: 10 min easy, as much of the main set as fits, then a few "
+            "easy minutes. " + run["structure"]
+        )
+    else:
+        run["structure"] = f"Capped at {cap} min, easy and conversational."
+        p["blocks"] = []
+    run["minutes"] = cap
+    run["miles"] = None
+    p["target_minutes"] = [max(10, cap - 5), cap]
+    p["estimated_duration_minutes"] = cap + 8
+    p["rules"] = [f"Capped at {cap} min — no need to make it up."] + list(
+        p.get("rules", [])
+    )
+    p["shortened_to"] = cap
+    return p
 
 
 def shorten(p: dict, cap: int) -> dict:
@@ -1191,12 +2287,17 @@ def prescribe(
     five_sessions: bool = True,
     profiles: dict[str, dict] | None = None,
     tournament_day: datetime.date | None = None,
+    race: Race | None = None,
+    history: History | None = None,
 ) -> dict:
-    """The day's session as data: warm-up, blocks with dosed exercises and suggested loads, run, mobility."""
+    """The day's session as data: warm-up, blocks with dosed exercises and suggested loads, run, mobility.
+    With a history, your first week back after time off is eased in and Session 2's golf rotation
+    steps aside in a week a run felt hard."""
     profiles = profiles or {}
-    phase = phase_for(d, first_event)
-    lighter = is_lighter_week(d) if lighter is None else lighter
+    phase = phase_for(d, first_event, race)
+    lighter = is_lighter_week(d, race=race) if lighter is None else lighter
     rot = rotation_week(d)
+    off = days_off_before(d, history)
 
     if session_id in TOURNAMENT_TEMPLATE_BY_KEY:
         tpl = TOURNAMENT_TEMPLATE_BY_KEY[session_id]
@@ -1244,7 +2345,7 @@ def prescribe(
         }
 
     spec = SESSIONS[session_id]
-    week_kind = "lighter" if lighter else "normal"
+    week_kind = race_week_kind(d, race) or ("lighter" if lighter else "normal")
     blocks = []
     variant = (
         spec.get("four_session_variant")
@@ -1259,15 +2360,40 @@ def prescribe(
             items = list(variant["strength"])
         if variant and b["name"] == "Carries":
             continue
+        if phase.race and session_id == "S1" and b["name"] == "Core":
+            items = items + [
+                CALF_RAISE
+            ]  # the running load lands on calves and Achilles
         dosed = [_with_load(_dose(i, phase, lighter=lighter), profiles) for i in items]
+        if off is not None:
+            dosed = [ease_in(e, sets=not lighter) for e in dosed]
         blocks.append({"name": b["name"], "minutes": b["minutes"], "exercises": dosed})
+    golf_off = None
+    if session_id == "S2" and in_race_build(d, race):
+        golf_off = golf_rotation_off(d, history)
+        if golf_off is None:
+            blocks.append(
+                {
+                    "name": GOLF_ROTATION["name"],
+                    "minutes": GOLF_ROTATION["minutes"],
+                    "exercises": [
+                        _with_load(
+                            _dose(_pick_rotation(i, rot), phase, lighter=lighter),
+                            profiles,
+                        )
+                        for i in GOLF_ROTATION["exercises"]
+                    ],
+                }
+            )
     run = variant["run"] if variant else spec.get("run")
+    if run and phase.race and session_id == "S2":
+        run = None  # the race block's runs are days of their own
     if run:
         run = dict(run)
         if session_id == "S2":
             if phase.key == "baseline":
                 run.update(minutes=16, structure="15–18 min easy run/walk", intervals=0)
-            elif phase.key == "build":
+            elif phase.key in ("build", "return"):
                 run.update(
                     structure="3 min easy · 4 × (1 min hard + 1 min easy) · easy running to 18 min",
                     intervals=4,
@@ -1283,12 +2409,18 @@ def prescribe(
                     structure="18 min easy — keep running easy in a lighter week",
                     intervals=0,
                 )
+            elif off is not None and run.get("intervals"):
+                run.update(
+                    structure="18 min easy — your first week back, so no intervals yet",
+                    intervals=0,
+                )
         if session_id == "S5":
             run["minutes"] = {
                 "baseline": 25,
                 "build": 32,
                 "strength": 35,
                 "consolidate": 40,
+                "return": 30,
                 "golf_power": 32,
                 "pre_event": 25,
                 "in_season": 25,
@@ -1304,26 +2436,61 @@ def prescribe(
             0,
             "Lighter week: sets cut by a third to a half, RPE 6–7, power sets halved, running easy. Resume from your previous load.",
         )
+    if phase.race:
+        rules.insert(
+            0,
+            "Running comes first until the race: if your legs are heavy, cut lifting sets, never the long run.",
+        )
+    if off is not None:
+        rules.insert(
+            0,
+            f"First week back after {off} days off: "
+            + (
+                "RPE 6–7 and about 10 % lighter (the lighter week already trims the sets)."
+                if lighter
+                else "2 sets of everything, RPE 6–7 and about 10 % lighter."
+            )
+            + " Full doses resume next week. Some soreness is normal; pain isn't.",
+        )
+    if golf_off:
+        rules.append(
+            f"Golf rotation left out today ({golf_off}); it comes back once the runs feel right."
+        )
+    target = list(variant["target_minutes"] if variant else spec["target_minutes"])
+    budget = variant["budget"] if variant else spec["budget"]
+    if phase.race and session_id == "S2":
+        target, budget = (
+            (
+                [55, 65],
+                "7 warm-up · 15 power · 25 upper body · 10 golf rotation · 5 transitions",
+            )
+            if any(b["name"] == GOLF_ROTATION["name"] for b in blocks)
+            else ([45, 55], "7 warm-up · 15 power · 25 upper body · 5 transitions")
+        )
+    if phase.race and session_id == "S1":
+        target, budget = (
+            [55, 65],
+            "8 warm-up · 5 jumps · 15 main lift · 17 accessories · 12 core and calves · 5 transitions",
+        )
+    if off is not None and not lighter and session_id != "S5":
+        target = [max(30, target[0] - 10), max(40, target[1] - 10)]  # fewer sets
     return {
         "session": session_id,
-        "title": spec["title"],
+        "title": session_title(session_id, phase.race),
         "phase": phase.key,
         "phase_name": phase.name,
         "phase_notes": phase.notes,
         "week_kind": week_kind,
         "rotation": rot,
-        "target_minutes": list(
-            variant["target_minutes"] if variant else spec["target_minutes"]
-        ),
-        "budget": variant["budget"] if variant else spec["budget"],
+        "target_minutes": target,
+        "budget": budget,
         "warmup": spec["warmup"],
         "blocks": blocks,
         "run": run,
         "mobility": DAILY_MOBILITY + (spec.get("mobility_extra") or []),
         "rules": rules,
-        "estimated_duration_minutes": (
-            variant["target_minutes"] if variant else spec["target_minutes"]
-        )[1],
+        "estimated_duration_minutes": target[1],
+        "days_off": off,
     }
 
 

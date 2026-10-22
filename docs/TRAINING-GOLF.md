@@ -2,7 +2,9 @@
 ## September 2026 → Spring 2027 Tournament Season
 
 > The program the Train tab runs. The engine is `backend/app/services/golf_program.py`; this
-> document is the source it encodes. Owner-supplied 2026-09-10.
+> document is the source it encodes. Owner-supplied 2026-09-10. A half marathon in New Zealand
+> (Jan 10, 2027) reshapes Oct 26 → Jan 17: see §12. The golf season goal is unchanged. The
+> plan adapts to what you log rather than running as a fixed table: see §13.
 
 **Schedule:** 4 core sessions + 1 optional session each week.
 **Hard limit:** 70 minutes per session, including warm-up, rest and transitions.
@@ -105,3 +107,85 @@ How the planner reacts (`golf_program.plan_week` with `pins`):
 - A run day's prescription is the run itself (structure by intensity) plus the daily mobility; log it from the run screen and the day shows ✓.
 
 Endpoints: `POST /api/v1/train/adjust` (structured or `text` the coach interprets), `GET /api/v1/train/adjustments`, `DELETE /api/v1/train/adjustments/{id}`. The coach's `adjust_training` tool (text chat and OpenAI Realtime voice) calls the same code.
+
+## 12. Half-marathon block (a race on the calendar)
+
+Added 2026-10-21 for the owner's half marathon in New Zealand on Jan 10, 2027. The goal is to finish strong, by effort, with no time target, starting from one or two runs a week. A `race` event (`POST /api/v1/train/events` with `kind: "race"`) turns the block on; delete it and the plan above returns unchanged. Everything is anchored to race week, so moving the race date moves the block with it.
+
+| Weeks | Phase | Lifting | Running |
+|---|---|---|---|
+| Oct 26 – Dec 27 | Half marathon build | S1 (Mon) and S2 (Thu, no run block): main lift 3 sets, accessories 2, power 2, RPE 7. S1 adds single-leg calf raises 2 × 12–15/leg. S2 adds 10 min of golf rotation (below) | Easy (Tue), quality (Wed), long (Sat) |
+| Dec 28 – Jan 10 | Taper and race | One short S1 on Dec 28: 2 sets, familiar loads | The day-by-day template below |
+| Jan 11 – 17 | Recover | None | Walks and mobility; 20 easy minutes on day 3 if your legs feel normal |
+| Jan 18 – 24 | Back to the full programme | All five sessions: 3 main sets, RPE 7, December loads | S2 at 4 intervals; S5 30 min |
+| Jan 25 – Feb 14 | Rebuild strength | Reference doses (§3–§6) | Toward 6 intervals; S5 30–40 min |
+| Feb 15 → | Golf power, pre-event, in season | As §8 | As §8 |
+
+**Build weeks.** Efforts: easy RPE 3–4 (full sentences), steady 5–6, tempo 6–7 ("comfortably hard"), race effort 6, hills 7–8.
+
+| Week of | Easy (Tue) | Quality (Wed) | Long (Sat) |
+|---|---|---|---|
+| Oct 26 | 30 min | Steady finish: 20 easy + 10 steady | 5 mi |
+| Nov 2 | 30 min | Tempo 3 × 5 min, 2 min jog | 6 mi |
+| Nov 9 | 35 min + 4 strides | Hills 6 × 60 s | 7 mi |
+| Nov 16 · cutback | 30 min | Fartlek: 30 min with 6 × 1 min quicker | 5 mi |
+| Nov 23 | 35 min + 6 strides | Tempo 3 × 8 min, 2 min jog | 8 mi, practise race fuel |
+| Nov 30 | 40 min + 6 strides | Hills 8 × 60 s | 9 mi, last mile steady if it feels good |
+| Dec 7 | 40 min + 6 strides | Tempo 2 × 12 min, 3 min jog | 10 mi |
+| Dec 14 · cutback | 30 min | Steady: 10 easy + 15 steady + 5 easy | 7 mi |
+| Dec 21 | 40 min + 6 strides | Race effort 3 × 10 min, 2 min jog | 11 mi, the longest; miles 9–10 at race effort if good |
+
+From Dec 7 the easy runs suggest a treadmill or an extra layer, to start adapting to the New Zealand summer.
+
+**Taper, race and recovery** (days from race day):
+- −13: Session 1, short.
+- −12: race effort 2 × 8 min.
+- −11: long run 6 mi.
+- −10 and −9: the flight (Dec 31 – Jan 1), mobility only.
+- −8: easy 25 min on landing, outside in daylight.
+- −7: easy 35 min.
+- −6: rest.
+- −5: race effort 3 × 4 min.
+- −4: easy 30 min.
+- −3: easy 25 min + 4 strides.
+- −2: rest.
+- −1: shakeout 15 min + 3 strides.
+- **0: race.**
+- +1 and +2: walk and mobility.
+- +3: easy 20 min if your legs feel normal.
+- +4 to +6: walk and mobility (travel home).
+- +7: easy 25 min.
+
+**Race day.** Miles 1–3 easy (RPE 5), race effort (RPE 6) to mile 10, then whatever is left. Sip at every aid station and take a gel or chews about every 40 minutes, as practised on the long runs. Nothing new on race day. If it's warm and humid, start easier and pour water over your head.
+
+**How the planner applies it:**
+- Build weeks use the race layout: S1 Mon, easy Tue, quality Wed, S2 Thu, long Sat.
+- Lost days move sessions to the nearest free day, as before. The quality and long runs stay 48 h apart, like the lower-body sessions. What can't fit is dropped, in this order of priority: long, quality, S1, easy, S2.
+- The Session 5 switch keeps or drops the easy run, and an outdoor run you add covers it.
+- Runs can be moved, swapped (E, Q, L) and shortened like sessions.
+- Taper, race and recovery weeks follow the template. Travel days carry mobility, and your changes take their day without moving anything else.
+- Inside the block, the lighter weeks become the two cutback weeks (Nov 16, Dec 14) and the recovery week.
+- A long run's expected minutes come from the median pace of the last six weeks' easy runs (10:30/mile until two are logged).
+
+**Golf rotation in Session 2.** Sessions 3 and 4 pause during the build, and they hold most of the rotation work the golf season needs. Session 2 takes 10 minutes of it back: landmine rotational press (week A) or split-stance cable rotational punch (week B) 2 × 4/side, then cable chop 2 × 8/side paired with side plank 2 × 30–45 s/side. It costs the legs almost nothing, so the running isn't affected, and it brings the week's rotation work from 2 sets back to 6 (4 of rotational power, 2 of cable chops), plus the side planks. Session 2 runs 55–65 minutes with it. It steps aside in a week a run felt hard (§13).
+
+Running comes first until the race: if your legs are heavy, cut lifting sets, never the long run.
+
+## 13. How the plan adapts to what you log
+
+Added 2026-10-21. The tables above are the plan's ceiling, not a fixed schedule: each week is laid out from what you've logged. That means your runs (the Train tab's run sheet, with how it felt) and the days you lifted (a session you finished, or one with sets logged in it). With nothing logged at all the plan runs as written. A day's note says what adapted and why, on the Today card and in the week; the coach sees the same notes. If you trained but didn't log it, log it: the plan only knows what you tell it.
+
+| What you log | What changes |
+|---|---|
+| Your longest run of the last three weeks | The week's long run is at most 1 mile past it, never past the plan. It's 1.5 miles when it's 2+ miles behind the plan and that run felt easy (RPE 5 or less). With no run logged in three weeks it starts at 4 miles. |
+| A long run that felt hard (RPE 8+) | Next week's long run repeats that distance instead of stepping up. |
+| A cutback week | Three-quarters of your longest recent run, capped at the plan. |
+| A quality run harder than planned (RPE 8+; 9+ for hills, which are meant to be hard) | Next week repeats that session instead of the next one. Cutback weeks keep their easier session. |
+| 10+ days with nothing logged | The first week back: 2 sets of everything, RPE 6–7, loads about 10 % lighter, sessions about 10 minutes shorter. The quality run becomes easy running with strides, Session 2's intervals wait a week, and the long run doesn't step up. In a lighter week the sets are already trimmed, so only effort and load change. |
+| A run in the last 7 days that felt harder than planned, or your first week back | Session 2 leaves out its golf rotation and drops to 45–55 minutes. It comes back the next week the runs feel right. |
+| A lift you logged but never finished, or whose sets climbed in weight | Its suggested load starts from the middle of what you last logged (the lower median of those working sets), until double progression (§8) takes over. |
+| Your longest run in the six weeks before the race, if under 9 miles | Race day adds a 1-minute walk at every mile marker from 3 miles short of that distance. |
+
+Lifting loads already followed your log through double progression (§8), and long runs' expected minutes follow your easy pace (§12). The phases stay anchored to the race and the first golf event: those dates don't move, but what fills each week does.
+
+Engine: `golf_program.History` (built from the database by `train._history`), `days_off_before`, `long_run_miles`, `quality_run`, `golf_rotation_off`, `ease_in`. `plan_week`, `planned_run` and `prescribe` take the history; tests in `backend/tests/test_plan_adapts.py`.

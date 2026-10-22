@@ -24,7 +24,9 @@ from app.db.database import get_db
 from app.models.workout import WorkoutSession
 from app.routers.train import (
     ADJUST_KINDS,
+    _history,
     _prescription_for,
+    _race,
     _user,
     _week,
     apply_adjustment,
@@ -73,8 +75,37 @@ def build_context(db: Session) -> str:
         "PROGRAM: Golf Performance Workout Plan, Sept 2026 → spring 2027. Four core sessions + one optional per week. "
         "Hard cap 70 minutes per session including warm-up, rest and transitions. Priorities: strength and muscle, rotational power, "
         "resilient back and core, mobile hips and shoulders, running that supports golf. NO medicine-ball throws or tosses, ever.",
-        f"TODAY {today.isoformat()} ({today.strftime('%A')}):",
     ]
+    race = _race(db, user)
+    if race:
+        w = gp.race_window(race)
+        longs = [wk["L"].miles for _, wk in sorted(gp.RACE_BUILD.items(), reverse=True)]
+        lines.append(
+            f"RACE: {race.name} on {race.date.isoformat()} ({race.date.strftime('%A')})"
+            + (f" — {race.notes}" if race.notes else "")
+            + f". From {w['build'].isoformat()} the week is three runs by effort (easy Tue, quality Wed, long Sat; "
+            f"the long run builds from {longs[0]:g} to {max(longs):g} miles) plus Session 1 (Mon) and Session 2 "
+            f"(Thu, no run block, with 10 min of golf rotation) at maintenance doses. Taper from {w['taper'].isoformat()}, "
+            "race week, a recovery week, then all five golf sessions resume. Running comes first until the race: "
+            "cut lifting before cutting the long run."
+        )
+        lines.append(
+            "THE RUNS ADAPT TO THE LOG: the plan's long run is a ceiling; each week's is at most 1 mile past the "
+            "longest run logged in the last three weeks (1.5 when 2+ miles behind and that run felt easy; 4 miles "
+            "when none is logged). A long run logged at RPE 8+ is repeated, and so is a quality run that felt "
+            "harder than planned. Session 2's golf rotation steps aside in a week a run felt hard. If the athlete "
+            "ran without logging it, ask them to log it."
+        )
+    lines.append(
+        "FIRST WEEK BACK: after 10+ days with nothing logged, the next week is 2 sets of everything, RPE 6–7 "
+        "and about 10 % lighter, with easy running only. Day notes in THIS WEEK say what adapted and why."
+    )
+    off = gp.days_off_before(today, _history(db, user))
+    if off is not None:
+        lines.append(
+            f"{off} days with nothing logged before this comeback, so the first-week-back rule is on."
+        )
+    lines.append(f"TODAY {today.isoformat()} ({today.strftime('%A')}):")
     if p:
         lines.append(
             f"  Session {p['session']} — {p['title']}. Phase: {p['phase_name']}. Week kind: {p['week_kind']}. Rotation {p['rotation']}. Target {p['target_minutes'][0]}–{p['target_minutes'][1]} min. Budget: {p['budget']}."
@@ -96,8 +127,9 @@ def build_context(db: Session) -> str:
         "THIS WEEK: "
         + ", ".join(
             f"{d.date.strftime('%a')} {d.session or 'rest'}"
-            + (f" [{d.label}]" if d.adjusted else "")
+            + (f" [{d.label}]" if d.adjusted or d.session == "RUN" else "")
             + (" (travel)" if d.travel else "")
+            + (f" ({d.note})" if d.note else "")
             for d in week
         )
     )
@@ -116,7 +148,7 @@ def build_context(db: Session) -> str:
 
 
 COACH_STYLE = (
-    "You are the owner's strength and golf-performance coach, talking live during or around a training session. "
+    "You are the owner's strength, running and golf-performance coach, talking live during or around a training session. "
     "Be brief and direct — one or two sentences unless asked for more. Coach the plan as written: doses, rest, RPE, the 70-minute cap, "
     "power before strength, control before load. Give the next set's load from the double-progression rule when asked. "
     "If something hurts sharply or increasingly, stop that exercise. Never suggest medicine-ball throws or tosses. "
@@ -147,8 +179,8 @@ ADJUST_TOOL = {
             "intensity": {"type": "string", "enum": ["easy", "moderate", "hard"]},
             "session": {
                 "type": "string",
-                "enum": ["S1", "S2", "S3", "S4", "S5"],
-                "description": "for swap",
+                "enum": gp.SWAPPABLE,
+                "description": "for swap: S1–S5, or a race-plan run (E easy, Q quality, L long)",
             },
             "target_date": {"type": "string", "description": "for move: YYYY-MM-DD"},
         },
@@ -336,7 +368,7 @@ CHAT_SCHEMA = {
                 },
                 "session": {
                     "type": ["string", "null"],
-                    "enum": ["S1", "S2", "S3", "S4", "S5", None],
+                    "enum": [*gp.SWAPPABLE, None],
                 },
                 "target_date": {"type": ["string", "null"]},
             },

@@ -1,5 +1,9 @@
 """Train — the golf performance program (docs/TRAINING-GOLF.md).
 
+A race event (kind "race") adds the half-marathon block (§12): the weeks before it carry three
+planned runs, the taper, race and recovery weeks follow a template, and golf resumes after.
+The plan adapts to what you log (§13): runs, and the days you lifted, feed gp.History.
+
 GET   /api/v1/train/program            phases, current phase, lighter weeks, events, settings
 GET   /api/v1/train/week?start=        the week laid out around travel and tournaments
 GET   /api/v1/train/today              today's prescription (+ the session row if started)
@@ -28,6 +32,7 @@ from app.models.food import CalendarEvent
 from app.models.run import RunSession
 from app.models.user import User
 from app.models.workout import (
+    ExerciseLog,
     ExerciseProfile,
     GolfEvent,
     TrainingAdjustment,
@@ -85,6 +90,89 @@ def _tournament_days(db: Session, user: User) -> list[datetime.date]:
     ]
 
 
+def _race(db: Session, user: User) -> gp.Race | None:
+    """The race the plan builds toward: the first one this season not yet recovered from, else
+    the last one, so the phases after it stay where they were."""
+    rows = (
+        db.query(GolfEvent)
+        .filter(
+            GolfEvent.user_id == user.id,
+            GolfEvent.kind == "race",
+            GolfEvent.event_date >= gp.PROGRAM_START,
+        )
+        .order_by(GolfEvent.event_date)
+        .all()
+    )
+    if not rows:
+        return None
+    today = datetime.date.today()
+    pick = next(
+        (r for r in rows if gp.race_window(gp.Race(r.event_date))["end"] >= today),
+        rows[-1],
+    )
+    return gp.Race(pick.event_date, pick.name, notes=pick.notes)
+
+
+def _easy_pace(db: Session, user: User) -> int:
+    """Median pace of the last six weeks' easy runs (sec/mile); the plan's default until two are logged."""
+    since = datetime.date.today() - datetime.timedelta(days=42)
+    paces = sorted(
+        r.avg_pace_seconds
+        for r in db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.run_date >= since,
+            RunSession.deleted_at.is_(None),
+            RunSession.avg_pace_seconds.isnot(None),
+        )
+        .all()
+        if "easy" in (r.run_type or "") or (r.rpe or 10) <= 5
+    )
+    return paces[len(paces) // 2] if len(paces) >= 2 else gp.EASY_PACE
+
+
+def _intensity(run_type: str | None) -> str:
+    """The run logger writes "<intensity> run"; older rows say tempo, interval, long, race…"""
+    t = (run_type or "").lower()
+    if any(k in t for k in ("hard", "interval", "race", "hill")):
+        return "hard"
+    if any(k in t for k in ("moderate", "tempo", "steady", "fartlek", "progression")):
+        return "moderate"
+    return "easy"
+
+
+def _history(db: Session, user: User) -> gp.History:
+    """What you've logged, for the plan to adapt to: your runs, and the days you lifted (a
+    session you finished, or one with sets logged in it even if it was never closed)."""
+    runs = tuple(
+        gp.LoggedRun(r.run_date, r.distance_miles, r.rpe, _intensity(r.run_type))
+        for r in db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.deleted_at.is_(None),
+            RunSession.status != "discarded",
+        )
+        .order_by(RunSession.run_date)
+        .all()
+    )
+    finished = db.query(WorkoutSession.session_date).filter(
+        WorkoutSession.user_id == user.id,
+        WorkoutSession.deleted_at.is_(None),
+        WorkoutSession.status == "completed",
+    )
+    with_sets = (
+        db.query(WorkoutSession.session_date)
+        .join(ExerciseLog, ExerciseLog.session_id == WorkoutSession.id)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            ExerciseLog.deleted_at.is_(None),
+        )
+    )
+    lifted = {d for (d,) in finished.all()} | {d for (d,) in with_sets.all()}
+    return gp.History(runs=runs, lifted=tuple(sorted(lifted)))
+
+
 def _golf_days(db: Session, user: User, ws: datetime.date) -> set[datetime.date]:
     """Rounds and practice from golf_events plus calendar events that look like golf."""
     days = {
@@ -92,7 +180,7 @@ def _golf_days(db: Session, user: User, ws: datetime.date) -> set[datetime.date]
         for e in db.query(GolfEvent)
         .filter(
             GolfEvent.user_id == user.id,
-            GolfEvent.kind != "tournament",
+            GolfEvent.kind.notin_(("tournament", "race")),
             GolfEvent.event_date >= ws,
             GolfEvent.event_date <= ws + datetime.timedelta(days=6),
         )
@@ -124,6 +212,36 @@ def _profiles(db: Session, user: User) -> dict[str, dict]:
             if p.progression_status == "progressing"
             else p.progression_status,
         }
+    # A lift with no load decided yet (its session was logged but never finished, or its sets
+    # climbed in weight so double progression had nothing to go on) starts from the middle of
+    # what you last logged for it: warm-up and top sets both count, so take the lower median.
+    rows = (
+        db.query(
+            ExerciseLog.exercise_name, ExerciseLog.weight, WorkoutSession.session_date
+        )
+        .join(WorkoutSession, ExerciseLog.session_id == WorkoutSession.id)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            ExerciseLog.deleted_at.is_(None),
+            ExerciseLog.is_warmup.is_(False),
+            ExerciseLog.weight > 0,
+            ExerciseLog.reps > 0,
+        )
+        .order_by(WorkoutSession.session_date.desc())
+        .all()
+    )
+    last: dict[str, tuple[datetime.date, list[float]]] = {}
+    for name, weight, day in rows:
+        day0, weights = last.setdefault(name.lower(), (day, []))
+        if day == day0:
+            weights.append(weight)
+    for key, (day, weights) in last.items():
+        if out.get(key, {}).get("weight") is None:
+            out[key] = {
+                "weight": sorted(weights)[(len(weights) - 1) // 2],
+                "note": f"about what you used on {day:%b} {day.day}",
+            }
     return out
 
 
@@ -163,11 +281,15 @@ def _pins(db: Session, user: User, ws: datetime.date) -> dict[datetime.date, dic
         base = {"kind": a.kind, "id": a.id, **params}
         if a.kind == "move":
             target = datetime.date.fromisoformat(params["target_date"])
-            pins[target] = {**base, "session": params.get("session")}
+            pins[target] = {
+                **base,
+                "session": params.get("session"),
+                "from_date": a.date.isoformat(),
+            }
             pins[a.date] = {
                 "kind": "rest",
                 "id": a.id,
-                "label": f"Free (moved {params.get('session')} to {target.strftime('%a')})",
+                "label": f"Free (moved {gp.session_name(params.get('session'))} to {target.strftime('%a')})",
             }
         else:
             pins[a.date] = base
@@ -175,7 +297,12 @@ def _pins(db: Session, user: User, ws: datetime.date) -> dict[datetime.date, dic
 
 
 def _week(
-    db: Session, user: User, ws: datetime.date, *, ignore_pins: bool = False
+    db: Session,
+    user: User,
+    ws: datetime.date,
+    *,
+    ignore_pins: bool = False,
+    history: gp.History | None = None,
 ) -> list[gp.DayPlan]:
     s = _settings(db, user)
     travel = set(
@@ -191,6 +318,8 @@ def _week(
         golf_days=_golf_days(db, user, ws),
         pins=None if ignore_pins else _pins(db, user, ws),
         not_before=datetime.date.today(),
+        race=_race(db, user),
+        history=history if history is not None else _history(db, user),
     )
 
 
@@ -247,12 +376,21 @@ def program(db: Session = Depends(get_db)):
     user = _user(db)
     s = _settings(db, user)
     fe = _first_event(db, user, s)
+    race = _race(db, user)
     today = datetime.date.today()
-    ph = gp.phase_for(today, fe)
-    lighter = gp.is_lighter_week(today, _extra_lighter(s))
+    ph = gp.phase_for(today, fe, race)
+    lighter_weeks = sorted(set(gp.lighter_weeks(race)) | set(_extra_lighter(s)))
     return {
         "start": gp.PROGRAM_START.isoformat(),
         "first_event": fe.isoformat(),
+        "race": {
+            "name": race.name,
+            "date": race.date.isoformat(),
+            "miles": race.miles,
+            "build_start": gp.race_window(race)["build"].isoformat(),
+        }
+        if race
+        else None,
         "five_sessions": s.five_sessions,
         "phase": {
             "key": ph.key,
@@ -269,27 +407,21 @@ def program(db: Session = Depends(get_db)):
                 "name": p.name,
                 "start": p.start.isoformat(),
                 "end": p.end.isoformat(),
+                "notes": p.notes,
+                "run_note": p.run_note,
             }
-            for p in gp.phases(fe)
+            for p in gp.phases(fe, race)
         ],
-        "week_kind": "lighter"
-        if lighter
-        else (
-            "tournament"
-            if gp.tournament_in_week(today, _tournament_days(db, user))
-            else "normal"
+        "week_kind": gp.week_kind(
+            today,
+            race=race,
+            tournaments=_tournament_days(db, user),
+            extra_lighter=_extra_lighter(s),
         ),
         "rotation": gp.rotation_week(today),
-        "lighter_weeks": [
-            d.isoformat()
-            for d in sorted(set(gp.LIGHTER_WEEKS) | set(_extra_lighter(s)))
-        ],
+        "lighter_weeks": [d.isoformat() for d in lighter_weeks],
         "next_lighter_week": next(
-            (
-                d.isoformat()
-                for d in sorted(set(gp.LIGHTER_WEEKS) | set(_extra_lighter(s)))
-                if d >= gp.week_start(today)
-            ),
+            (d.isoformat() for d in lighter_weeks if d >= gp.week_start(today)),
             None,
         ),
         "sessions": {
@@ -323,32 +455,49 @@ def week(start: datetime.date | None = None, db: Session = Depends(get_db)):
     )
     by_date = {r.session_date: r for r in rows}
     s = _settings(db, user)
+    race = _race(db, user)
     return {
         "week_start": ws.isoformat(),
         "adjustments": [_adjustment_out(a) for a in _active_adjustments(db, user, ws)],
-        "week_kind": "lighter"
-        if gp.is_lighter_week(ws, _extra_lighter(s))
-        else (
-            "tournament"
-            if gp.tournament_in_week(ws, _tournament_days(db, user))
-            else "normal"
+        "week_kind": gp.week_kind(
+            ws,
+            race=race,
+            tournaments=_tournament_days(db, user),
+            extra_lighter=_extra_lighter(s),
         ),
         "rotation": gp.rotation_week(ws),
-        "phase": gp.phase_for(ws, _first_event(db, user, s)).name,
+        "phase": gp.phase_for(ws, _first_event(db, user, s), race).name,
         "days": [_day_out(dp, by_date, _runs_by_date(db, user, ws)) for dp in days],
     }
 
 
 def _prescription_for(db: Session, user: User, d: datetime.date) -> dict | None:
     s = _settings(db, user)
-    week = _week(db, user, gp.week_start(d))
+    history = _history(db, user)
+    week = _week(db, user, gp.week_start(d), history=history)
     dp = next((x for x in week if x.date == d), None)
     if dp is None or dp.session is None:
         return None
     fe = _first_event(db, user, s)
-    lighter = gp.is_lighter_week(d, _extra_lighter(s))
-    if dp.session == "RUN":
-        p = gp.run_prescription(d, dp.detail or {}, first_event=fe, lighter=lighter)
+    race = _race(db, user)
+    lighter = gp.is_lighter_week(d, _extra_lighter(s), race)
+    detail = dp.detail or {}
+    if dp.session == "RUN" and detail.get("planned"):
+        p = gp.planned_run(
+            d,
+            detail,
+            race=race,
+            first_event=fe,
+            lighter=lighter,
+            easy_pace=_easy_pace(db, user),
+            history=history,
+        )
+        if p is None:
+            return None
+        if dp.adjusted == "shorten" and detail.get("minutes"):
+            p = gp.shorten_run(p, int(detail["minutes"]))
+    elif dp.session == "RUN":
+        p = gp.run_prescription(d, detail, first_event=fe, lighter=lighter, race=race)
     else:
         p = gp.prescribe(
             d,
@@ -357,9 +506,16 @@ def _prescription_for(db: Session, user: User, d: datetime.date) -> dict | None:
             lighter=lighter,
             five_sessions=s.five_sessions,
             profiles=_profiles(db, user),
+            race=race,
+            history=history,
         )
         prev = next((x for x in week if x.date == d - datetime.timedelta(days=1)), None)
-        if prev and prev.session == "RUN" and gp._big_run(prev.detail or {}):
+        if (
+            prev
+            and prev.session == "RUN"
+            and gp._big_run(prev.detail or {})
+            and p.get("run")
+        ):
             p = gp.after_run(p)
         if dp.adjusted == "shorten" and (dp.detail or {}).get("minutes"):
             p = gp.shorten(p, int(dp.detail["minutes"]))
@@ -438,7 +594,7 @@ def start_today(db: Session = Depends(get_db)):
     if p["session"] == "RUN":
         raise HTTPException(
             status_code=422,
-            detail="Today is your outdoor run — log it from the run screen when you're back.",
+            detail="Today is a run — log it from the run screen when you're back.",
         )
     plan = {**p, "exercises": _flatten_for_logger(p)}
     row = WorkoutSession(
@@ -522,7 +678,12 @@ def weekly_log(start: datetime.date | None = None, db: Session = Depends(get_db)
         f"Next tournament / important round: {nxt.name + ' · ' + nxt.event_date.isoformat() if nxt else '—'}",
         "",
     ]
+    race = _race(db, user)
+    racing = gp.in_race_build(ws, race) or gp.race_week_kind(ws, race) is not None
+    planned = {x["session"] for x in wk["days"]}
     for sid in ("S1", "S2", "S3", "S4", "S5"):
+        if racing and sid not in planned:
+            continue  # the race block only lifts twice a week
         day = next((x for x in wk["days"] if x["session"] == sid), None)
         row = rows.get(datetime.date.fromisoformat(day["date"])) if day else None
         done = "x" if row and row.status == "completed" else " "
@@ -539,6 +700,14 @@ def weekly_log(start: datetime.date | None = None, db: Session = Depends(get_db)
         lines.append(
             f"[{done}] {'Optional 5' if sid == 'S5' else 'Session ' + sid[1]}   {day['weekday'] if day else '—'}   Minutes: {mins:<8} {mains.strip()}"
         )
+    run_days = [x for x in wk["days"] if x["session"] == "RUN"]
+    if run_days:
+        logged = _runs_by_date(db, user, ws)
+        lines += ["", "Runs:"]
+        for x in run_days:
+            r = logged.get(datetime.date.fromisoformat(x["date"]))
+            got = f"   {r.distance_miles:g} mi in {r.duration_formatted}" if r else ""
+            lines.append(f"[{'x' if r else ' '}] {x['weekday']}   {x['label']}{got}")
     lines += [
         "",
         "Mobility days completed:",
@@ -561,7 +730,9 @@ class EventIn(BaseModel):
     event_date: datetime.date
     end_date: datetime.date | None = None
     name: str = Field(min_length=1, max_length=120)
-    kind: str = Field(default="tournament", pattern="^(tournament|round|practice)$")
+    kind: str = Field(
+        default="tournament", pattern="^(tournament|round|practice|race)$"
+    )
     notes: str | None = None
 
 
@@ -655,8 +826,9 @@ ADJUST_SCHEMA = {
             "type": "string",
             "enum": list(ADJUST_KINDS) + ["none"],
             "description": "run = an outdoor run instead of the gym; rest = take the day off; golf = playing golf instead; "
-            "swap = do a different program session today (S1..S5); move = move today's session to another date; "
-            "shorten = keep the session but cap the minutes; none = no change requested",
+            "swap = do a different program session today (S1..S5, or the race plan's runs: E easy, Q quality, L long); "
+            "move = move that day's session or planned run to another date this week; "
+            "shorten = keep the session or run but cap the minutes; none = no change requested",
         },
         "date": {
             "type": "string",
@@ -673,7 +845,7 @@ ADJUST_SCHEMA = {
         },
         "session": {
             "type": ["string", "null"],
-            "enum": ["S1", "S2", "S3", "S4", "S5", None],
+            "enum": [*gp.SWAPPABLE, None],
         },
         "target_date": {
             "type": ["string", "null"],
@@ -748,8 +920,10 @@ def apply_adjustment(
     if kind not in ADJUST_KINDS:
         raise HTTPException(status_code=422, detail=f"Unknown adjustment kind {kind!r}")
     params = {k: v for k, v in params.items() if v is not None}
-    if kind == "swap" and params.get("session") not in gp.SESSIONS:
-        raise HTTPException(status_code=422, detail="swap needs a session S1–S5")
+    if kind == "swap" and params.get("session") not in gp.SWAPPABLE:
+        raise HTTPException(
+            status_code=422, detail="swap needs a session S1–S5 or a run E, Q or L"
+        )
     if kind == "shorten" and not params.get("minutes"):
         raise HTTPException(status_code=422, detail="shorten needs minutes")
     ws = gp.week_start(d)
@@ -758,9 +932,12 @@ def apply_adjustment(
         if not params.get("target_date"):
             raise HTTPException(status_code=422, detail="move needs target_date")
         src = next((x for x in before if x.date == d), None)
-        if not src or src.session not in gp.SESSIONS:
+        planned = (
+            (src.detail or {}).get("run") if src and src.session == "RUN" else None
+        )
+        if not src or (src.session not in gp.SESSIONS and planned not in gp.RUN_IDS):
             raise HTTPException(status_code=422, detail="Nothing on that day to move")
-        params["session"] = src.session
+        params["session"] = planned or src.session
         target = datetime.date.fromisoformat(str(params["target_date"]))
         if gp.week_start(target) != ws:
             raise HTTPException(status_code=422, detail="Move within the same week")
