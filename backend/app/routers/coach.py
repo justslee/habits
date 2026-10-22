@@ -24,6 +24,7 @@ from app.db.database import get_db
 from app.models.workout import WorkoutSession
 from app.routers.train import (
     ADJUST_KINDS,
+    _history,
     _prescription_for,
     _race,
     _user,
@@ -84,9 +85,25 @@ def build_context(db: Session) -> str:
             + (f" — {race.notes}" if race.notes else "")
             + f". From {w['build'].isoformat()} the week is three runs by effort (easy Tue, quality Wed, long Sat; "
             f"the long run builds from {longs[0]:g} to {max(longs):g} miles) plus Session 1 (Mon) and Session 2 "
-            f"(Thu, no run block) at maintenance doses. Taper from {w['taper'].isoformat()}, race week, a recovery "
-            "week, then all five golf sessions resume. Running comes first until the race: cut lifting before "
-            "cutting the long run."
+            f"(Thu, no run block, with 10 min of golf rotation) at maintenance doses. Taper from {w['taper'].isoformat()}, "
+            "race week, a recovery week, then all five golf sessions resume. Running comes first until the race: "
+            "cut lifting before cutting the long run."
+        )
+        lines.append(
+            "THE RUNS ADAPT TO THE LOG: the plan's long run is a ceiling; each week's is at most 1 mile past the "
+            "longest run logged in the last three weeks (1.5 when 2+ miles behind and that run felt easy; 4 miles "
+            "when none is logged). A long run logged at RPE 8+ is repeated, and so is a quality run that felt "
+            "harder than planned. Session 2's golf rotation steps aside in a week a run felt hard. If the athlete "
+            "ran without logging it, ask them to log it."
+        )
+    lines.append(
+        "FIRST WEEK BACK: after 10+ days with nothing logged, the next week is 2 sets of everything, RPE 6–7 "
+        "and about 10 % lighter, with easy running only. Day notes in THIS WEEK say what adapted and why."
+    )
+    off = gp.days_off_before(today, _history(db, user))
+    if off is not None:
+        lines.append(
+            f"{off} days with nothing logged before this comeback, so the first-week-back rule is on."
         )
     lines.append(f"TODAY {today.isoformat()} ({today.strftime('%A')}):")
     if p:
@@ -112,6 +129,7 @@ def build_context(db: Session) -> str:
             f"{d.date.strftime('%a')} {d.session or 'rest'}"
             + (f" [{d.label}]" if d.adjusted or d.session == "RUN" else "")
             + (" (travel)" if d.travel else "")
+            + (f" ({d.note})" if d.note else "")
             for d in week
         )
     )

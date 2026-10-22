@@ -232,8 +232,15 @@ def test_strength_doses_hold_golf_strength_while_running_builds():
     assert s1["rules"][0].startswith("Running comes first")
     assert s1["target_minutes"] == [55, 65], "fewer sets, a shorter session"
     s2 = gp.prescribe(D(2026, 11, 12), "S2", race=RACE)
-    assert s2["run"] is None and s2["target_minutes"] == [45, 55]
+    assert s2["run"] is None and s2["target_minutes"] == [55, 65]
     assert s2["title"] == "Rotational power and upper body"
+    golf = next(b for b in s2["blocks"] if b["name"] == "Golf rotation")
+    assert [e["name"] for e in golf["exercises"]] == [
+        "Split-stance cable rotational punch",  # week B; Session 4's other half
+        "Cable chop",
+        "Side plank",
+    ], "the paused Sessions 3 and 4 lend Session 2 their rotation work"
+    assert all(e["sets"] == 2 for e in golf["exercises"])
     taper = gp.prescribe(D(2026, 12, 28), "S1", race=RACE)
     t_names = {e["name"]: e for b in taper["blocks"] for e in b["exercises"]}
     assert (
@@ -291,11 +298,12 @@ async def test_train_api_with_a_race(db_session):
     for i in (
         2,
         4,
-    ):  # two logged easy runs at 9:30/mile set the long run's expected minutes
+    ):  # two logged easy runs at 9:30/mile set the long run's expected minutes, and the
+        # week before the build they make 5 miles the next step for the long run (§13)
         db_session.add(
             RunSession(
                 user_id=1,
-                run_date=today - datetime.timedelta(days=i),
+                run_date=build - datetime.timedelta(days=i),
                 distance_miles=4,
                 duration_seconds=4 * 570,
                 avg_pace_seconds=570,

@@ -2,6 +2,7 @@
 
 A race event (kind "race") adds the half-marathon block (§12): the weeks before it carry three
 planned runs, the taper, race and recovery weeks follow a template, and golf resumes after.
+The plan adapts to what you log (§13): runs, and the days you lifted, feed gp.History.
 
 GET   /api/v1/train/program            phases, current phase, lighter weeks, events, settings
 GET   /api/v1/train/week?start=        the week laid out around travel and tournaments
@@ -31,6 +32,7 @@ from app.models.food import CalendarEvent
 from app.models.run import RunSession
 from app.models.user import User
 from app.models.workout import (
+    ExerciseLog,
     ExerciseProfile,
     GolfEvent,
     TrainingAdjustment,
@@ -129,6 +131,48 @@ def _easy_pace(db: Session, user: User) -> int:
     return paces[len(paces) // 2] if len(paces) >= 2 else gp.EASY_PACE
 
 
+def _intensity(run_type: str | None) -> str:
+    """The run logger writes "<intensity> run"; older rows say tempo, interval, long, race…"""
+    t = (run_type or "").lower()
+    if any(k in t for k in ("hard", "interval", "race", "hill")):
+        return "hard"
+    if any(k in t for k in ("moderate", "tempo", "steady", "fartlek", "progression")):
+        return "moderate"
+    return "easy"
+
+
+def _history(db: Session, user: User) -> gp.History:
+    """What you've logged, for the plan to adapt to: your runs, and the days you lifted (a
+    session you finished, or one with sets logged in it even if it was never closed)."""
+    runs = tuple(
+        gp.LoggedRun(r.run_date, r.distance_miles, r.rpe, _intensity(r.run_type))
+        for r in db.query(RunSession)
+        .filter(
+            RunSession.user_id == user.id,
+            RunSession.deleted_at.is_(None),
+            RunSession.status != "discarded",
+        )
+        .order_by(RunSession.run_date)
+        .all()
+    )
+    finished = db.query(WorkoutSession.session_date).filter(
+        WorkoutSession.user_id == user.id,
+        WorkoutSession.deleted_at.is_(None),
+        WorkoutSession.status == "completed",
+    )
+    with_sets = (
+        db.query(WorkoutSession.session_date)
+        .join(ExerciseLog, ExerciseLog.session_id == WorkoutSession.id)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            ExerciseLog.deleted_at.is_(None),
+        )
+    )
+    lifted = {d for (d,) in finished.all()} | {d for (d,) in with_sets.all()}
+    return gp.History(runs=runs, lifted=tuple(sorted(lifted)))
+
+
 def _golf_days(db: Session, user: User, ws: datetime.date) -> set[datetime.date]:
     """Rounds and practice from golf_events plus calendar events that look like golf."""
     days = {
@@ -168,6 +212,36 @@ def _profiles(db: Session, user: User) -> dict[str, dict]:
             if p.progression_status == "progressing"
             else p.progression_status,
         }
+    # A lift with no load decided yet (its session was logged but never finished, or its sets
+    # climbed in weight so double progression had nothing to go on) starts from the middle of
+    # what you last logged for it: warm-up and top sets both count, so take the lower median.
+    rows = (
+        db.query(
+            ExerciseLog.exercise_name, ExerciseLog.weight, WorkoutSession.session_date
+        )
+        .join(WorkoutSession, ExerciseLog.session_id == WorkoutSession.id)
+        .filter(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.deleted_at.is_(None),
+            ExerciseLog.deleted_at.is_(None),
+            ExerciseLog.is_warmup.is_(False),
+            ExerciseLog.weight > 0,
+            ExerciseLog.reps > 0,
+        )
+        .order_by(WorkoutSession.session_date.desc())
+        .all()
+    )
+    last: dict[str, tuple[datetime.date, list[float]]] = {}
+    for name, weight, day in rows:
+        day0, weights = last.setdefault(name.lower(), (day, []))
+        if day == day0:
+            weights.append(weight)
+    for key, (day, weights) in last.items():
+        if out.get(key, {}).get("weight") is None:
+            out[key] = {
+                "weight": sorted(weights)[(len(weights) - 1) // 2],
+                "note": f"about what you used on {day:%b} {day.day}",
+            }
     return out
 
 
@@ -223,7 +297,12 @@ def _pins(db: Session, user: User, ws: datetime.date) -> dict[datetime.date, dic
 
 
 def _week(
-    db: Session, user: User, ws: datetime.date, *, ignore_pins: bool = False
+    db: Session,
+    user: User,
+    ws: datetime.date,
+    *,
+    ignore_pins: bool = False,
+    history: gp.History | None = None,
 ) -> list[gp.DayPlan]:
     s = _settings(db, user)
     travel = set(
@@ -240,6 +319,7 @@ def _week(
         pins=None if ignore_pins else _pins(db, user, ws),
         not_before=datetime.date.today(),
         race=_race(db, user),
+        history=history if history is not None else _history(db, user),
     )
 
 
@@ -393,7 +473,8 @@ def week(start: datetime.date | None = None, db: Session = Depends(get_db)):
 
 def _prescription_for(db: Session, user: User, d: datetime.date) -> dict | None:
     s = _settings(db, user)
-    week = _week(db, user, gp.week_start(d))
+    history = _history(db, user)
+    week = _week(db, user, gp.week_start(d), history=history)
     dp = next((x for x in week if x.date == d), None)
     if dp is None or dp.session is None:
         return None
@@ -409,6 +490,7 @@ def _prescription_for(db: Session, user: User, d: datetime.date) -> dict | None:
             first_event=fe,
             lighter=lighter,
             easy_pace=_easy_pace(db, user),
+            history=history,
         )
         if p is None:
             return None
@@ -425,6 +507,7 @@ def _prescription_for(db: Session, user: User, d: datetime.date) -> dict | None:
             five_sessions=s.five_sessions,
             profiles=_profiles(db, user),
             race=race,
+            history=history,
         )
         prev = next((x for x in week if x.date == d - datetime.timedelta(days=1)), None)
         if (
